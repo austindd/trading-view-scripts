@@ -312,8 +312,8 @@ checkBrokenLevels() =>
 // INITIALIZATION PHASE
 if not initialized and bar_index > 0
     if isBearishBreakdown()
-        // Find qualifying bullish candle walking back from current bar
-        int qualifyingBar = findQualifyingBullishCandle(bar_index)
+        // Find qualifying bullish candle walking back up to 200 bars from current bar
+        int qualifyingBar = findQualifyingBullishCandle(math.max(0, bar_index - 200))
 
         if not na(qualifyingBar)
             // Find highest point between qualifying candle and current bar
@@ -335,12 +335,13 @@ if initialized
     checkBrokenLevels()
 
     // UPWARD BOS: Close above current valid high → Creates new valid low
-    if not na(currentValidHigh) and close > currentValidHigh
-        // Find qualifying bearish candle walking back from current bar
+    // Only check this if we have a valid high and we're looking for a low
+    if not na(currentValidHigh) and close > currentValidHigh and lookingForLow
+        // Find qualifying bearish candle walking back from the previous valid high
         int qualifyingBar = findQualifyingBearishCandle(currentValidHighBar)
 
         if not na(qualifyingBar)
-            // Find lowest point between qualifying candle and BOS bar
+            // Find lowest point between qualifying candle and BOS bar (current bar)
             [newLow, newLowBar] = findLowestBetween(qualifyingBar, bar_index)
 
             if not na(newLow) and not na(newLowBar)
@@ -353,12 +354,13 @@ if initialized
                 mostRecentLowIndex := array.size(lowLevels) - 1
 
     // DOWNWARD BOS: Close below current valid low → Creates new valid high
-    else if not na(currentValidLow) and close < currentValidLow
-        // Find qualifying bullish candle walking back from current bar
+    // Only check this if we have a valid low and we're looking for a high
+    else if not na(currentValidLow) and close < currentValidLow and lookingForHigh
+        // Find qualifying bullish candle walking back from the previous valid low
         int qualifyingBar = findQualifyingBullishCandle(currentValidLowBar)
 
         if not na(qualifyingBar)
-            // Find highest point between qualifying candle and BOS bar
+            // Find highest point between qualifying candle and BOS bar (current bar)
             [newHigh, newHighBar] = findHighestBetween(qualifyingBar, bar_index)
 
             if not na(newHigh) and not na(newHighBar)
