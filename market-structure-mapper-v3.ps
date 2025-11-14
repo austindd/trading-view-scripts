@@ -75,6 +75,12 @@ var bool htfLookingForHigh = false
 var int htfMostRecentHighIndex = -1
 var int htfMostRecentLowIndex = -1
 
+// Labels for current levels (positioned to the right of chart)
+var label currentHighLabel = na
+var label currentLowLabel = na
+var label htfCurrentHighLabel = na
+var label htfCurrentLowLabel = na
+
 // Helper function: Check if current candle is bearish and closes below previous candle's low
 isBearishBreakdown() =>
     close < open and close < low[1]
@@ -395,9 +401,10 @@ addValidHighHTF(float price, int barIdx) =>
     array.push(htfHighSweeped, false)
 
     // Create horizontal line extending to the right (solid for most recent)
+    // HTF lines are thicker (lineWidth + 1) for better visibility
     newLine = line.new(barIdx, price, barIdx + 1, price,
                        color=htfHighColor,
-                       width=lineWidth,
+                       width=math.min(lineWidth + 1, 5),
                        extend=extend.right,
                        style=line.style_solid)
     array.push(htfHighLines, newLine)
@@ -427,9 +434,10 @@ addValidLowHTF(float price, int barIdx) =>
     array.push(htfLowSweeped, false)
 
     // Create horizontal line extending to the right (solid for most recent)
+    // HTF lines are thicker (lineWidth + 1) for better visibility
     newLine = line.new(barIdx, price, barIdx + 1, price,
                        color=htfLowColor,
-                       width=lineWidth,
+                       width=math.min(lineWidth + 1, 5),
                        extend=extend.right,
                        style=line.style_solid)
     array.push(htfLowLines, newLine)
@@ -478,7 +486,7 @@ checkBrokenLevelsHTF(float htfHigh, float htfLow, float htfClose) =>
                     line.set_extend(brokenLine, extend.none)
                     line.set_style(brokenLine, line.style_dotted)
                     line.set_color(brokenLine, htfBosColor)
-                    line.set_width(brokenLine, lineWidth)
+                    line.set_width(brokenLine, math.min(lineWidth + 1, 5))
 
                     // Show BOS label if enabled
                     if showBosLabels
@@ -530,7 +538,7 @@ checkBrokenLevelsHTF(float htfHigh, float htfLow, float htfClose) =>
                     line.set_extend(brokenLine, extend.none)
                     line.set_style(brokenLine, line.style_dotted)
                     line.set_color(brokenLine, htfBosColor)
-                    line.set_width(brokenLine, lineWidth)
+                    line.set_width(brokenLine, math.min(lineWidth + 1, 5))
 
                     // Show BOS label if enabled
                     if showBosLabels
@@ -737,3 +745,53 @@ plot(currentValidLow, "Current Valid Low", color=color.new(lowColor, 80), linewi
 // Plot HTF valid levels for reference (optional - you can comment these out)
 plot(htfEnabled ? htfCurrentValidHigh : na, "HTF Valid High", color=color.new(htfHighColor, 80), linewidth=1, style=plot.style_stepline)
 plot(htfEnabled ? htfCurrentValidLow : na, "HTF Valid Low", color=color.new(htfLowColor, 80), linewidth=1, style=plot.style_stepline)
+
+// Update labels for current levels (positioned to the right of chart)
+if initialized and not na(currentValidHigh)
+    // Delete old label
+    if not na(currentHighLabel)
+        label.delete(currentHighLabel)
+    // Create new label positioned to the right with spacing
+    currentHighLabel := label.new(bar_index + 10, currentValidHigh,
+                                   text=timeframe.period + " High",
+                                   style=label.style_label_left,
+                                   color=highColor,
+                                   textcolor=color.white,
+                                   size=size.small)
+
+if initialized and not na(currentValidLow)
+    // Delete old label
+    if not na(currentLowLabel)
+        label.delete(currentLowLabel)
+    // Create new label positioned to the right with spacing
+    currentLowLabel := label.new(bar_index + 10, currentValidLow,
+                                  text=timeframe.period + " Low",
+                                  style=label.style_label_left,
+                                  color=lowColor,
+                                  textcolor=color.white,
+                                  size=size.small)
+
+// Update HTF labels (with more spacing to avoid overlap)
+if htfEnabled and htfInitialized and not na(htfCurrentValidHigh)
+    // Delete old label
+    if not na(htfCurrentHighLabel)
+        label.delete(htfCurrentHighLabel)
+    // Create new label positioned further to the right
+    htfCurrentHighLabel := label.new(bar_index + 20, htfCurrentValidHigh,
+                                      text=htfTimeframe + " High",
+                                      style=label.style_label_left,
+                                      color=htfHighColor,
+                                      textcolor=color.white,
+                                      size=size.small)
+
+if htfEnabled and htfInitialized and not na(htfCurrentValidLow)
+    // Delete old label
+    if not na(htfCurrentLowLabel)
+        label.delete(htfCurrentLowLabel)
+    // Create new label positioned further to the right
+    htfCurrentLowLabel := label.new(bar_index + 20, htfCurrentValidLow,
+                                     text=htfTimeframe + " Low",
+                                     style=label.style_label_left,
+                                     color=htfLowColor,
+                                     textcolor=color.white,
+                                     size=size.small)
