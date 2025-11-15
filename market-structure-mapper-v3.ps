@@ -46,6 +46,8 @@ var bool lookingForLow = false
 var bool lookingForHigh = false
 var bool currentHighIsWeak = false  // True if formed via BOS, false if formed via breakdown
 var bool currentLowIsWeak = false   // True if formed via BOS, false if formed via breakout
+var bool currentHighIsBroken = false  // True if high was broken and not yet replaced
+var bool currentLowIsBroken = false   // True if low was broken and not yet replaced
 
 // Track indices of most recent high/low for solid line display and BOS detection
 var int mostRecentHighIndex = -1
@@ -74,6 +76,8 @@ var bool htfLookingForLow = false
 var bool htfLookingForHigh = false
 var bool htfCurrentHighIsWeak = false  // True if formed via BOS, false if formed via breakdown
 var bool htfCurrentLowIsWeak = false   // True if formed via BOS, false if formed via breakout
+var bool htfCurrentHighIsBroken = false  // True if high was broken and not yet replaced
+var bool htfCurrentLowIsBroken = false   // True if low was broken and not yet replaced
 
 // Track the range extremes as HTF structure develops (instead of searching backwards)
 var float htfSwingLow = na       // Tracks lowest low since last valid high
@@ -651,6 +655,7 @@ if initialized
     // Check for Break of Structure on current valid levels
     if not na(currentValidHigh) and not na(currentValidLow) and close > currentValidHigh and lookingForLow
         bosBullish := true
+        currentHighIsBroken := true  // Mark the high as broken
 
         [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
 
@@ -660,12 +665,14 @@ if initialized
             lookingForHigh := true
             lookingForLow := false
             currentLowIsWeak := true  // Low formed via BOS is weak
+            currentLowIsBroken := false  // New low is not broken
 
             addValidLow(newLow, newLowBar)
             mostRecentLowIndex := array.size(lowLevels) - 1
 
     if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and close < currentValidLow and lookingForHigh
         bosBearish := true
+        currentLowIsBroken := true  // Mark the low as broken
 
         [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
 
@@ -675,6 +682,7 @@ if initialized
             lookingForLow := true
             lookingForHigh := false
             currentHighIsWeak := true  // High formed via BOS is weak
+            currentHighIsBroken := false  // New high is not broken
 
             addValidHigh(newHigh, newHighBar)
             mostRecentHighIndex := array.size(highLevels) - 1
@@ -690,6 +698,7 @@ if initialized
                 lookingForHigh := true
                 lookingForLow := false
                 currentLowIsWeak := false  // Low formed via breakout is strong
+                currentLowIsBroken := false  // New low is not broken
 
                 addValidLow(newLow, newLowBar)
                 mostRecentLowIndex := array.size(lowLevels) - 1
@@ -705,6 +714,7 @@ if initialized
                 lookingForLow := true
                 lookingForHigh := false
                 currentHighIsWeak := false  // High formed via breakdown is strong
+                currentHighIsBroken := false  // New high is not broken
 
                 addValidHigh(newHigh, newHighBar)
                 mostRecentHighIndex := array.size(highLevels) - 1
@@ -748,6 +758,7 @@ if htfEnabled and htfInitialized and htfNewCandle
     // Check for Break of Structure on current valid levels
     if not na(htfCurrentValidHigh) and not na(htfCurrentValidLow) and htfClose > htfCurrentValidHigh and htfLookingForLow
         htfBosBullish := true
+        htfCurrentHighIsBroken := true  // Mark the HTF high as broken
 
         // Use the tracked swing low instead of searching
         if not na(htfSwingLow) and not na(htfSwingLowBar)
@@ -756,6 +767,7 @@ if htfEnabled and htfInitialized and htfNewCandle
             htfLookingForHigh := true
             htfLookingForLow := false
             htfCurrentLowIsWeak := true  // HTF Low formed via BOS is weak
+            htfCurrentLowIsBroken := false  // New low is not broken
 
             addValidLowHTF(htfSwingLow, htfSwingLowBar)
             htfMostRecentLowIndex := array.size(htfLowLevels) - 1
@@ -766,6 +778,7 @@ if htfEnabled and htfInitialized and htfNewCandle
 
     if not htfBosBullish and not na(htfCurrentValidLow) and not na(htfCurrentValidHigh) and htfClose < htfCurrentValidLow and htfLookingForHigh
         htfBosBearish := true
+        htfCurrentLowIsBroken := true  // Mark the HTF low as broken
 
         // Use the tracked swing high instead of searching
         if not na(htfSwingHigh) and not na(htfSwingHighBar)
@@ -774,6 +787,7 @@ if htfEnabled and htfInitialized and htfNewCandle
             htfLookingForLow := true
             htfLookingForHigh := false
             htfCurrentHighIsWeak := true  // HTF High formed via BOS is weak
+            htfCurrentHighIsBroken := false  // New high is not broken
 
             addValidHighHTF(htfSwingHigh, htfSwingHighBar)
             htfMostRecentHighIndex := array.size(htfHighLevels) - 1
@@ -792,6 +806,7 @@ if htfEnabled and htfInitialized and htfNewCandle
                 htfLookingForHigh := true
                 htfLookingForLow := false
                 htfCurrentLowIsWeak := false  // HTF Low formed via breakout is strong
+                htfCurrentLowIsBroken := false  // New low is not broken
 
                 addValidLowHTF(htfSwingLow, htfSwingLowBar)
                 htfMostRecentLowIndex := array.size(htfLowLevels) - 1
@@ -810,6 +825,7 @@ if htfEnabled and htfInitialized and htfNewCandle
                 htfLookingForLow := true
                 htfLookingForHigh := false
                 htfCurrentHighIsWeak := false  // HTF High formed via breakdown is strong
+                htfCurrentHighIsBroken := false  // New high is not broken
 
                 addValidHighHTF(htfSwingHigh, htfSwingHighBar)
                 htfMostRecentHighIndex := array.size(htfHighLevels) - 1
@@ -864,12 +880,19 @@ if initialized and not na(currentValidHigh)
     // Delete old label
     if not na(currentHighLabel)
         label.delete(currentHighLabel)
-    // Create new label positioned to the right with spacing
-    string labelText = currentHighIsWeak ? timeframe.period + " Weak High" : timeframe.period + " High"
+    // Determine label text based on state
+    string labelText = na
+    color labelColor = highColor
+    if currentHighIsBroken
+        labelText := timeframe.period + " Broken High"
+        labelColor := color.new(color.red, 0)  // Red for broken
+    else
+        labelText := currentHighIsWeak ? timeframe.period + " Weak High" : timeframe.period + " High"
+
     currentHighLabel := label.new(bar_index + 10, currentValidHigh,
                                    text=labelText,
                                    style=label.style_label_left,
-                                   color=highColor,
+                                   color=labelColor,
                                    textcolor=color.white,
                                    size=size.small)
 
@@ -877,12 +900,19 @@ if initialized and not na(currentValidLow)
     // Delete old label
     if not na(currentLowLabel)
         label.delete(currentLowLabel)
-    // Create new label positioned to the right with spacing
-    string labelText = currentLowIsWeak ? timeframe.period + " Weak Low" : timeframe.period + " Low"
+    // Determine label text based on state
+    string labelText = na
+    color labelColor = lowColor
+    if currentLowIsBroken
+        labelText := timeframe.period + " Broken Low"
+        labelColor := color.new(color.red, 0)  // Red for broken
+    else
+        labelText := currentLowIsWeak ? timeframe.period + " Weak Low" : timeframe.period + " Low"
+
     currentLowLabel := label.new(bar_index + 10, currentValidLow,
                                   text=labelText,
                                   style=label.style_label_left,
-                                  color=lowColor,
+                                  color=labelColor,
                                   textcolor=color.white,
                                   size=size.small)
 
@@ -891,12 +921,19 @@ if htfEnabled and htfInitialized and not na(htfCurrentValidHigh)
     // Delete old label
     if not na(htfCurrentHighLabel)
         label.delete(htfCurrentHighLabel)
-    // Create new label positioned further to the right
-    string labelText = htfCurrentHighIsWeak ? htfTimeframe + " Weak High" : htfTimeframe + " High"
+    // Determine label text based on state
+    string labelText = na
+    color labelColor = htfHighColor
+    if htfCurrentHighIsBroken
+        labelText := htfTimeframe + " Broken High"
+        labelColor := color.new(color.red, 0)  // Red for broken
+    else
+        labelText := htfCurrentHighIsWeak ? htfTimeframe + " Weak High" : htfTimeframe + " High"
+
     htfCurrentHighLabel := label.new(bar_index + 20, htfCurrentValidHigh,
                                       text=labelText,
                                       style=label.style_label_left,
-                                      color=htfHighColor,
+                                      color=labelColor,
                                       textcolor=color.white,
                                       size=size.small)
 
@@ -904,12 +941,19 @@ if htfEnabled and htfInitialized and not na(htfCurrentValidLow)
     // Delete old label
     if not na(htfCurrentLowLabel)
         label.delete(htfCurrentLowLabel)
-    // Create new label positioned further to the right
-    string labelText = htfCurrentLowIsWeak ? htfTimeframe + " Weak Low" : htfTimeframe + " Low"
+    // Determine label text based on state
+    string labelText = na
+    color labelColor = htfLowColor
+    if htfCurrentLowIsBroken
+        labelText := htfTimeframe + " Broken Low"
+        labelColor := color.new(color.red, 0)  // Red for broken
+    else
+        labelText := htfCurrentLowIsWeak ? htfTimeframe + " Weak Low" : htfTimeframe + " Low"
+
     htfCurrentLowLabel := label.new(bar_index + 20, htfCurrentValidLow,
                                      text=labelText,
                                      style=label.style_label_left,
-                                     color=htfLowColor,
+                                     color=labelColor,
                                      textcolor=color.white,
                                      size=size.small)
 
