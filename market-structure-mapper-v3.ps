@@ -657,6 +657,11 @@ if initialized
         bosBullish := true
         currentHighIsBroken := true  // Mark the high as broken
 
+        // Make the broken high line dotted
+        if mostRecentHighIndex >= 0
+            brokenLine = array.get(highLines, mostRecentHighIndex)
+            line.set_style(brokenLine, line.style_dotted)
+
         [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
 
         if not na(newLow) and not na(newLowBar)
@@ -673,6 +678,11 @@ if initialized
     if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and close < currentValidLow and lookingForHigh
         bosBearish := true
         currentLowIsBroken := true  // Mark the low as broken
+
+        // Make the broken low line dotted
+        if mostRecentLowIndex >= 0
+            brokenLine = array.get(lowLines, mostRecentLowIndex)
+            line.set_style(brokenLine, line.style_dotted)
 
         [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
 
@@ -760,6 +770,11 @@ if htfEnabled and htfInitialized and htfNewCandle
         htfBosBullish := true
         htfCurrentHighIsBroken := true  // Mark the HTF high as broken
 
+        // Make the broken HTF high line dotted
+        if htfMostRecentHighIndex >= 0
+            brokenLine = array.get(htfHighLines, htfMostRecentHighIndex)
+            line.set_style(brokenLine, line.style_dotted)
+
         // Use the tracked swing low instead of searching
         if not na(htfSwingLow) and not na(htfSwingLowBar)
             htfCurrentValidLow := htfSwingLow
@@ -779,6 +794,11 @@ if htfEnabled and htfInitialized and htfNewCandle
     if not htfBosBullish and not na(htfCurrentValidLow) and not na(htfCurrentValidHigh) and htfClose < htfCurrentValidLow and htfLookingForHigh
         htfBosBearish := true
         htfCurrentLowIsBroken := true  // Mark the HTF low as broken
+
+        // Make the broken HTF low line dotted
+        if htfMostRecentLowIndex >= 0
+            brokenLine = array.get(htfLowLines, htfMostRecentLowIndex)
+            line.set_style(brokenLine, line.style_dotted)
 
         // Use the tracked swing high instead of searching
         if not na(htfSwingHigh) and not na(htfSwingHighBar)
