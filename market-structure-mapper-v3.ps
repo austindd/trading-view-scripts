@@ -44,10 +44,9 @@ var int currentValidLowBar = na
 var bool initialized = false
 var bool lookingForLow = false
 var bool lookingForHigh = false
-var bool currentHighIsWeak = false  // True if formed via BOS, false if formed via breakdown
-var bool currentLowIsWeak = false   // True if formed via BOS, false if formed via breakout
 var bool currentHighIsBroken = false  // True if high was broken and not yet replaced
 var bool currentLowIsBroken = false   // True if low was broken and not yet replaced
+var string lastBosDirection = "none"  // Track most recent BOS: "bullish", "bearish", or "none"
 
 // Track indices of most recent high/low for solid line display and BOS detection
 var int mostRecentHighIndex = -1
@@ -74,10 +73,9 @@ var int htfCurrentValidLowBar = na
 var bool htfInitialized = false
 var bool htfLookingForLow = false
 var bool htfLookingForHigh = false
-var bool htfCurrentHighIsWeak = false  // True if formed via BOS, false if formed via breakdown
-var bool htfCurrentLowIsWeak = false   // True if formed via BOS, false if formed via breakout
 var bool htfCurrentHighIsBroken = false  // True if high was broken and not yet replaced
 var bool htfCurrentLowIsBroken = false   // True if low was broken and not yet replaced
+var string htfLastBosDirection = "none"  // Track most recent BOS: "bullish", "bearish", or "none"
 
 // Track the range extremes as HTF structure develops (instead of searching backwards)
 var float htfSwingLow = na       // Tracks lowest low since last valid high
@@ -648,6 +646,39 @@ if initialized
             if array.get(lowSweeped, i) and not array.get(lowBroken, i) and i != mostRecentSweptLowIndex
                 sweepLine = array.get(lowLines, i)
                 line.delete(sweepLine)
+
+    // Truncate arrays to keep only latest 50 elements for performance
+    if array.size(highLevels) > 50
+        // Delete the oldest line to prevent memory leak
+        oldLine = array.get(highLines, 0)
+        line.delete(oldLine)
+
+        // Remove first element from all related arrays
+        array.shift(highLevels)
+        array.shift(highBars)
+        array.shift(highLines)
+        array.shift(highBroken)
+        array.shift(highSweeped)
+
+        // Update mostRecentHighIndex
+        if mostRecentHighIndex >= 0
+            mostRecentHighIndex := mostRecentHighIndex - 1
+
+    if array.size(lowLevels) > 50
+        // Delete the oldest line to prevent memory leak
+        oldLine = array.get(lowLines, 0)
+        line.delete(oldLine)
+
+        // Remove first element from all related arrays
+        array.shift(lowLevels)
+        array.shift(lowBars)
+        array.shift(lowLines)
+        array.shift(lowBroken)
+        array.shift(lowSweeped)
+
+        // Update mostRecentLowIndex
+        if mostRecentLowIndex >= 0
+            mostRecentLowIndex := mostRecentLowIndex - 1
     
     bool bosBullish = false
     bool bosBearish = false
@@ -656,6 +687,7 @@ if initialized
     if not na(currentValidHigh) and not na(currentValidLow) and close > currentValidHigh and lookingForLow
         bosBullish := true
         currentHighIsBroken := true  // Mark the high as broken
+        lastBosDirection := "bullish"  // Track that most recent BOS was bullish
 
         // Make the broken high line dotted
         if mostRecentHighIndex >= 0
@@ -669,7 +701,6 @@ if initialized
             currentValidLowBar := newLowBar
             lookingForHigh := true
             lookingForLow := false
-            currentLowIsWeak := true  // Low formed via BOS is weak
             currentLowIsBroken := false  // New low is not broken
 
             addValidLow(newLow, newLowBar)
@@ -678,6 +709,7 @@ if initialized
     if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and close < currentValidLow and lookingForHigh
         bosBearish := true
         currentLowIsBroken := true  // Mark the low as broken
+        lastBosDirection := "bearish"  // Track that most recent BOS was bearish
 
         // Make the broken low line dotted
         if mostRecentLowIndex >= 0
@@ -691,7 +723,6 @@ if initialized
             currentValidHighBar := newHighBar
             lookingForLow := true
             lookingForHigh := false
-            currentHighIsWeak := true  // High formed via BOS is weak
             currentHighIsBroken := false  // New high is not broken
 
             addValidHigh(newHigh, newHighBar)
@@ -707,7 +738,6 @@ if initialized
                 currentValidLowBar := newLowBar
                 lookingForHigh := true
                 lookingForLow := false
-                currentLowIsWeak := false  // Low formed via breakout is strong
                 currentLowIsBroken := false  // New low is not broken
 
                 addValidLow(newLow, newLowBar)
@@ -723,7 +753,6 @@ if initialized
                 currentValidHighBar := newHighBar
                 lookingForLow := true
                 lookingForHigh := false
-                currentHighIsWeak := false  // High formed via breakdown is strong
                 currentHighIsBroken := false  // New high is not broken
 
                 addValidHigh(newHigh, newHighBar)
@@ -769,6 +798,7 @@ if htfEnabled and htfInitialized and htfNewCandle
     if not na(htfCurrentValidHigh) and not na(htfCurrentValidLow) and htfClose > htfCurrentValidHigh and htfLookingForLow
         htfBosBullish := true
         htfCurrentHighIsBroken := true  // Mark the HTF high as broken
+        htfLastBosDirection := "bullish"  // Track that most recent BOS was bullish
 
         // Make the broken HTF high line dotted
         if htfMostRecentHighIndex >= 0
@@ -781,7 +811,6 @@ if htfEnabled and htfInitialized and htfNewCandle
             htfCurrentValidLowBar := htfSwingLowBar
             htfLookingForHigh := true
             htfLookingForLow := false
-            htfCurrentLowIsWeak := true  // HTF Low formed via BOS is weak
             htfCurrentLowIsBroken := false  // New low is not broken
 
             addValidLowHTF(htfSwingLow, htfSwingLowBar)
@@ -794,6 +823,7 @@ if htfEnabled and htfInitialized and htfNewCandle
     if not htfBosBullish and not na(htfCurrentValidLow) and not na(htfCurrentValidHigh) and htfClose < htfCurrentValidLow and htfLookingForHigh
         htfBosBearish := true
         htfCurrentLowIsBroken := true  // Mark the HTF low as broken
+        htfLastBosDirection := "bearish"  // Track that most recent BOS was bearish
 
         // Make the broken HTF low line dotted
         if htfMostRecentLowIndex >= 0
@@ -806,7 +836,6 @@ if htfEnabled and htfInitialized and htfNewCandle
             htfCurrentValidHighBar := htfSwingHighBar
             htfLookingForLow := true
             htfLookingForHigh := false
-            htfCurrentHighIsWeak := true  // HTF High formed via BOS is weak
             htfCurrentHighIsBroken := false  // New high is not broken
 
             addValidHighHTF(htfSwingHigh, htfSwingHighBar)
@@ -825,7 +854,6 @@ if htfEnabled and htfInitialized and htfNewCandle
                 htfCurrentValidLowBar := htfSwingLowBar
                 htfLookingForHigh := true
                 htfLookingForLow := false
-                htfCurrentLowIsWeak := false  // HTF Low formed via breakout is strong
                 htfCurrentLowIsBroken := false  // New low is not broken
 
                 addValidLowHTF(htfSwingLow, htfSwingLowBar)
@@ -844,7 +872,6 @@ if htfEnabled and htfInitialized and htfNewCandle
                 htfCurrentValidHighBar := htfSwingHighBar
                 htfLookingForLow := true
                 htfLookingForHigh := false
-                htfCurrentHighIsWeak := false  // HTF High formed via breakdown is strong
                 htfCurrentHighIsBroken := false  // New high is not broken
 
                 addValidHighHTF(htfSwingHigh, htfSwingHighBar)
@@ -887,6 +914,39 @@ if htfEnabled and htfInitialized
                 htfLine = array.get(htfLowLines, i)
                 line.delete(htfLine)
 
+    // Truncate HTF arrays to keep only latest 50 elements for performance
+    if array.size(htfHighLevels) > 50
+        // Delete the oldest line to prevent memory leak
+        oldLine = array.get(htfHighLines, 0)
+        line.delete(oldLine)
+
+        // Remove first element from all related arrays
+        array.shift(htfHighLevels)
+        array.shift(htfHighBars)
+        array.shift(htfHighLines)
+        array.shift(htfHighBroken)
+        array.shift(htfHighSweeped)
+
+        // Update htfMostRecentHighIndex
+        if htfMostRecentHighIndex >= 0
+            htfMostRecentHighIndex := htfMostRecentHighIndex - 1
+
+    if array.size(htfLowLevels) > 50
+        // Delete the oldest line to prevent memory leak
+        oldLine = array.get(htfLowLines, 0)
+        line.delete(oldLine)
+
+        // Remove first element from all related arrays
+        array.shift(htfLowLevels)
+        array.shift(htfLowBars)
+        array.shift(htfLowLines)
+        array.shift(htfLowBroken)
+        array.shift(htfLowSweeped)
+
+        // Update htfMostRecentLowIndex
+        if htfMostRecentLowIndex >= 0
+            htfMostRecentLowIndex := htfMostRecentLowIndex - 1
+
 // Plot current valid levels for reference (optional - you can comment these out)
 plot(currentValidHigh, "Current Valid High", color=color.new(highColor, 80), linewidth=1, style=plot.style_stepline)
 plot(currentValidLow, "Current Valid Low", color=color.new(lowColor, 80), linewidth=1, style=plot.style_stepline)
@@ -907,7 +967,8 @@ if initialized and not na(currentValidHigh)
         labelText := timeframe.period + " Broken High"
         labelColor := color.new(color.red, 0)  // Red for broken
     else
-        labelText := currentHighIsWeak ? timeframe.period + " Weak High" : timeframe.period + " High"
+        // High is weak if most recent BOS was bullish
+        labelText := lastBosDirection == "bullish" ? timeframe.period + " Weak High" : timeframe.period + " High"
 
     currentHighLabel := label.new(bar_index + 10, currentValidHigh,
                                    text=labelText,
@@ -927,7 +988,8 @@ if initialized and not na(currentValidLow)
         labelText := timeframe.period + " Broken Low"
         labelColor := color.new(color.red, 0)  // Red for broken
     else
-        labelText := currentLowIsWeak ? timeframe.period + " Weak Low" : timeframe.period + " Low"
+        // Low is weak if most recent BOS was bearish
+        labelText := lastBosDirection == "bearish" ? timeframe.period + " Weak Low" : timeframe.period + " Low"
 
     currentLowLabel := label.new(bar_index + 10, currentValidLow,
                                   text=labelText,
@@ -948,7 +1010,8 @@ if htfEnabled and htfInitialized and not na(htfCurrentValidHigh)
         labelText := htfTimeframe + " Broken High"
         labelColor := color.new(color.red, 0)  // Red for broken
     else
-        labelText := htfCurrentHighIsWeak ? htfTimeframe + " Weak High" : htfTimeframe + " High"
+        // High is weak if most recent BOS was bullish
+        labelText := htfLastBosDirection == "bullish" ? htfTimeframe + " Weak High" : htfTimeframe + " High"
 
     htfCurrentHighLabel := label.new(bar_index + 20, htfCurrentValidHigh,
                                       text=labelText,
@@ -968,7 +1031,8 @@ if htfEnabled and htfInitialized and not na(htfCurrentValidLow)
         labelText := htfTimeframe + " Broken Low"
         labelColor := color.new(color.red, 0)  // Red for broken
     else
-        labelText := htfCurrentLowIsWeak ? htfTimeframe + " Weak Low" : htfTimeframe + " Low"
+        // Low is weak if most recent BOS was bearish
+        labelText := htfLastBosDirection == "bearish" ? htfTimeframe + " Weak Low" : htfTimeframe + " Low"
 
     htfCurrentLowLabel := label.new(bar_index + 20, htfCurrentValidLow,
                                      text=labelText,
