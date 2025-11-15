@@ -965,17 +965,17 @@ if initialized and not na(currentValidHigh)
     color labelColor = highColor
     if currentHighIsBroken
         labelText := timeframe.period + " Broken High"
-        labelColor := color.new(color.red, 0)  // Red for broken
+        labelColor := highColor
     else
         // High is weak if most recent BOS was bullish
-        labelText := lastBosDirection == "bullish" ? timeframe.period + " Weak High" : timeframe.period + " High"
+        labelText := lastBosDirection == "bullish" ? timeframe.period + " Weak High" : timeframe.period + " Strong High"
 
     currentHighLabel := label.new(bar_index + 10, currentValidHigh,
                                    text=labelText,
                                    style=label.style_label_left,
                                    color=labelColor,
                                    textcolor=color.white,
-                                   size=size.small)
+                                   size=size.tiny)
 
 if initialized and not na(currentValidLow)
     // Delete old label
@@ -986,17 +986,17 @@ if initialized and not na(currentValidLow)
     color labelColor = lowColor
     if currentLowIsBroken
         labelText := timeframe.period + " Broken Low"
-        labelColor := color.new(color.red, 0)  // Red for broken
+        labelColor := lowColor
     else
         // Low is weak if most recent BOS was bearish
-        labelText := lastBosDirection == "bearish" ? timeframe.period + " Weak Low" : timeframe.period + " Low"
+        labelText := lastBosDirection == "bearish" ? timeframe.period + " Weak Low" : timeframe.period + " Strong Low"
 
     currentLowLabel := label.new(bar_index + 10, currentValidLow,
                                   text=labelText,
                                   style=label.style_label_left,
                                   color=labelColor,
                                   textcolor=color.white,
-                                  size=size.small)
+                                  size=size.tiny)
 
 // Update HTF labels (with more spacing to avoid overlap)
 if htfEnabled and htfInitialized and not na(htfCurrentValidHigh)
@@ -1008,10 +1008,10 @@ if htfEnabled and htfInitialized and not na(htfCurrentValidHigh)
     color labelColor = htfHighColor
     if htfCurrentHighIsBroken
         labelText := htfTimeframe + " Broken High"
-        labelColor := color.new(color.red, 0)  // Red for broken
+        labelColor := htfHighColor
     else
         // High is weak if most recent BOS was bullish
-        labelText := htfLastBosDirection == "bullish" ? htfTimeframe + " Weak High" : htfTimeframe + " High"
+        labelText := htfLastBosDirection == "bullish" ? htfTimeframe + " Weak High" : htfTimeframe + " Strong High"
 
     htfCurrentHighLabel := label.new(bar_index + 20, htfCurrentValidHigh,
                                       text=labelText,
@@ -1029,10 +1029,10 @@ if htfEnabled and htfInitialized and not na(htfCurrentValidLow)
     color labelColor = htfLowColor
     if htfCurrentLowIsBroken
         labelText := htfTimeframe + " Broken Low"
-        labelColor := color.new(color.red, 0)  // Red for broken
+        labelColor := htfLowColor
     else
         // Low is weak if most recent BOS was bearish
-        labelText := htfLastBosDirection == "bearish" ? htfTimeframe + " Weak Low" : htfTimeframe + " Low"
+        labelText := htfLastBosDirection == "bearish" ? htfTimeframe + " Weak Low" : htfTimeframe + " Strong Low"
 
     htfCurrentLowLabel := label.new(bar_index + 20, htfCurrentValidLow,
                                      text=labelText,
@@ -1068,7 +1068,7 @@ if array.size(highLevels) > 0
     // Find most recent swept high (iterate backwards)
     for i = array.size(highLevels) - 1 to 0
         if array.get(highSweeped, i) and not array.get(highBroken, i)
-            sweptLabel = label.new(bar_index + 10, array.get(highLevels, i), text="Swept", style=label.style_label_left, color=color.new(highColor, 50), textcolor=color.white, size=size.tiny)
+            sweptLabel = label.new(bar_index + 10, array.get(highLevels, i), text=timeframe.period + " High Swept", style=label.style_label_left, color=color.new(highColor, 50), textcolor=color.white, size=size.tiny)
             array.push(sweptHighLabels, sweptLabel)
             break  // Only show most recent
 
@@ -1076,7 +1076,7 @@ if array.size(lowLevels) > 0
     // Find most recent swept low (iterate backwards)
     for i = array.size(lowLevels) - 1 to 0
         if array.get(lowSweeped, i) and not array.get(lowBroken, i)
-            sweptLabel = label.new(bar_index + 10, array.get(lowLevels, i), text="Swept", style=label.style_label_left, color=color.new(lowColor, 50), textcolor=color.white, size=size.tiny)
+            sweptLabel = label.new(bar_index + 10, array.get(lowLevels, i), text=timeframe.period + " Low Swept", style=label.style_label_left, color=color.new(lowColor, 50), textcolor=color.white, size=size.tiny)
             array.push(sweptLowLabels, sweptLabel)
             break  // Only show most recent
 
@@ -1085,7 +1085,7 @@ if htfEnabled and array.size(htfHighLevels) > 0
     // Find most recent swept HTF high (iterate backwards)
     for i = array.size(htfHighLevels) - 1 to 0
         if array.get(htfHighSweeped, i) and not array.get(htfHighBroken, i)
-            sweptLabel = label.new(bar_index + 20, array.get(htfHighLevels, i), text="HTF Swept", style=label.style_label_left, color=color.new(htfHighColor, 50), textcolor=color.white, size=size.tiny)
+            sweptLabel = label.new(bar_index + 20, array.get(htfHighLevels, i), text=htfTimeframe + " High Swept", style=label.style_label_left, color=color.new(htfHighColor, 50), textcolor=color.white, size=size.tiny)
             array.push(htfSweptHighLabels, sweptLabel)
             break  // Only show most recent
 
@@ -1093,7 +1093,7 @@ if htfEnabled and array.size(htfLowLevels) > 0
     // Find most recent swept HTF low (iterate backwards)
     for i = array.size(htfLowLevels) - 1 to 0
         if array.get(htfLowSweeped, i) and not array.get(htfLowBroken, i)
-            sweptLabel = label.new(bar_index + 20, array.get(htfLowLevels, i), text="HTF Swept", style=label.style_label_left, color=color.new(htfLowColor, 50), textcolor=color.white, size=size.tiny)
+            sweptLabel = label.new(bar_index + 20, array.get(htfLowLevels, i), text=htfTimeframe + " Low Swept", style=label.style_label_left, color=color.new(htfLowColor, 50), textcolor=color.white, size=size.tiny)
             array.push(htfSweptLowLabels, sweptLabel)
             break  // Only show most recent
 
