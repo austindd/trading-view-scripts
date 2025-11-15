@@ -2,7 +2,7 @@
 // © scientificbest
 
 //@version=5
-indicator("Market Structure Mapper V3 (Multi-Timeframe)", "MSM V3 [SB]", overlay=true, max_lines_count=500, max_labels_count=500)
+indicator("Market Structure Mapper V3 (Multi-Timeframe)", "MSM V3 [SB]", overlay=true, max_lines_count=250, max_labels_count=250)
 
 // Input settings
 showHighLowLabels = input.bool(true, "Show High/Low Labels", group="Display")
@@ -16,12 +16,12 @@ htfTimeframe = input.timeframe("60", "HTF Timeframe", group="Higher Timeframe")
 // Current Timeframe Colors
 highColor = input.color(color.new(color.orange, 0), "Valid High Color", group="Current TF Colors")
 lowColor = input.color(color.new(color.blue, 0), "Valid Low Color", group="Current TF Colors")
-bosColor = input.color(color.new(color.gray, 0), "BOS Color", group="Current TF Colors")
+bosColor = input.color(color.new(color.black, 0), "BOS Color", group="Current TF Colors")
 
 // Higher Timeframe Colors
 htfHighColor = input.color(color.new(color.red, 0), "HTF Valid High Color", group="HTF Colors")
 htfLowColor = input.color(color.new(color.green, 0), "HTF Valid Low Color", group="HTF Colors")
-htfBosColor = input.color(color.new(color.silver, 0), "HTF BOS Color", group="HTF Colors")
+htfBosColor = input.color(color.new(color.black, 0), "HTF BOS Color", group="HTF Colors")
 
 // Arrays to store all historical highs and lows
 var array<float> highLevels = array.new<float>()
@@ -44,6 +44,8 @@ var int currentValidLowBar = na
 var bool initialized = false
 var bool lookingForLow = false
 var bool lookingForHigh = false
+var bool currentHighIsWeak = false  // True if formed via BOS, false if formed via breakdown
+var bool currentLowIsWeak = false   // True if formed via BOS, false if formed via breakout
 
 // Track indices of most recent high/low for solid line display and BOS detection
 var int mostRecentHighIndex = -1
@@ -70,6 +72,14 @@ var int htfCurrentValidLowBar = na
 var bool htfInitialized = false
 var bool htfLookingForLow = false
 var bool htfLookingForHigh = false
+var bool htfCurrentHighIsWeak = false  // True if formed via BOS, false if formed via breakdown
+var bool htfCurrentLowIsWeak = false   // True if formed via BOS, false if formed via breakout
+
+// Track the range extremes as HTF structure develops (instead of searching backwards)
+var float htfSwingLow = na       // Tracks lowest low since last valid high
+var int htfSwingLowBar = na
+var float htfSwingHigh = na      // Tracks highest high since last valid low
+var int htfSwingHighBar = na
 
 // HTF Track indices of most recent high/low
 var int htfMostRecentHighIndex = -1
@@ -80,6 +90,16 @@ var label currentHighLabel = na
 var label currentLowLabel = na
 var label htfCurrentHighLabel = na
 var label htfCurrentLowLabel = na
+
+// Arrays to store swept level labels
+var array<label> sweptHighLabels = array.new<label>()
+var array<label> sweptLowLabels = array.new<label>()
+var array<label> htfSweptHighLabels = array.new<label>()
+var array<label> htfSweptLowLabels = array.new<label>()
+
+// Labels for "looking for" states (when a level was broken and we're seeking replacement)
+var label htfLookingForHighLabel = na
+var label htfLookingForLowLabel = na
 
 // Helper function: Check if current candle is bearish and closes below previous candle's low
 isBearishBreakdown() =>
@@ -167,8 +187,8 @@ findLowestBetweenHTF(startBar, endBar, htfLowData) =>
     lookbackStart := math.max(lookbackStart, 0)
     // Limit lookback to 50 bars max for HTF data to avoid buffer overflow
     // HTF data from request.security has limited historical buffer
-    lookbackEnd := math.min(lookbackEnd, 50)
-    lookbackStart := math.min(lookbackStart, 50)
+    lookbackEnd := math.min(lookbackEnd, 100)
+    lookbackStart := math.min(lookbackStart, 100)
 
     if lookbackStart <= lookbackEnd
         for i = lookbackStart to lookbackEnd
@@ -199,8 +219,8 @@ findHighestBetweenHTF(startBar, endBar, htfHighData) =>
     lookbackStart := math.max(lookbackStart, 0)
     // Limit lookback to 50 bars max for HTF data to avoid buffer overflow
     // HTF data from request.security has limited historical buffer
-    lookbackEnd := math.min(lookbackEnd, 50)
-    lookbackStart := math.min(lookbackStart, 50)
+    lookbackEnd := math.min(lookbackEnd, 100)
+    lookbackStart := math.min(lookbackStart, 100)
 
     if lookbackStart <= lookbackEnd
         for i = lookbackStart to lookbackEnd
@@ -558,7 +578,11 @@ checkBrokenLevelsHTF(float htfHigh, float htfLow, float htfClose) =>
     true
 
 // Get HTF data using request.security
-[htfHigh, htfLow, htfOpen, htfClose] = request.security(syminfo.tickerid, htfTimeframe, [high, low, open, close], lookahead=barmerge.lookahead_on)
+[htfHigh, htfLow, htfOpen, htfClose] = request.security(syminfo.tickerid, htfTimeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
+
+// Detect when we're on a new HTF candle (HTF time has changed)
+htfTime = request.security(syminfo.tickerid, htfTimeframe, time, lookahead=barmerge.lookahead_off)
+bool htfNewCandle = ta.change(htfTime) != 0
 
 // Helper functions for HTF
 htfIsBearishBreakdown() =>
@@ -591,6 +615,35 @@ if not initialized and bar_index > 0
 if initialized
     // First check if any historical levels are broken or sweeped
     checkBrokenLevels()
+
+    // Clean up old swept lines - only keep the most recent swept high and low
+    if array.size(highLevels) > 0
+        int mostRecentSweptHighIndex = -1
+        // Find most recent swept high (iterate backwards)
+        for i = array.size(highLevels) - 1 to 0
+            if array.get(highSweeped, i) and not array.get(highBroken, i)
+                mostRecentSweptHighIndex := i
+                break
+
+        // Delete lines for all swept highs except the most recent
+        for i = 0 to array.size(highLevels) - 1
+            if array.get(highSweeped, i) and not array.get(highBroken, i) and i != mostRecentSweptHighIndex
+                sweepLine = array.get(highLines, i)
+                line.delete(sweepLine)
+
+    if array.size(lowLevels) > 0
+        int mostRecentSweptLowIndex = -1
+        // Find most recent swept low (iterate backwards)
+        for i = array.size(lowLevels) - 1 to 0
+            if array.get(lowSweeped, i) and not array.get(lowBroken, i)
+                mostRecentSweptLowIndex := i
+                break
+
+        // Delete lines for all swept lows except the most recent
+        for i = 0 to array.size(lowLevels) - 1
+            if array.get(lowSweeped, i) and not array.get(lowBroken, i) and i != mostRecentSweptLowIndex
+                sweepLine = array.get(lowLines, i)
+                line.delete(sweepLine)
     
     bool bosBullish = false
     bool bosBearish = false
@@ -598,86 +651,97 @@ if initialized
     // Check for Break of Structure on current valid levels
     if not na(currentValidHigh) and not na(currentValidLow) and close > currentValidHigh and lookingForLow
         bosBullish := true
-        
+
         [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
-        
+
         if not na(newLow) and not na(newLowBar)
             currentValidLow := newLow
             currentValidLowBar := newLowBar
             lookingForHigh := true
             lookingForLow := false
-            
+            currentLowIsWeak := true  // Low formed via BOS is weak
+
             addValidLow(newLow, newLowBar)
             mostRecentLowIndex := array.size(lowLevels) - 1
-    
+
     if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and close < currentValidLow and lookingForHigh
         bosBearish := true
-        
+
         [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
-        
+
         if not na(newHigh) and not na(newHighBar)
             currentValidHigh := newHigh
             currentValidHighBar := newHighBar
             lookingForLow := true
             lookingForHigh := false
-            
+            currentHighIsWeak := true  // High formed via BOS is weak
+
             addValidHigh(newHigh, newHighBar)
             mostRecentHighIndex := array.size(highLevels) - 1
-    
+
     // Look for new valid low
     if not bosBullish and not bosBearish and lookingForLow
         if isBullishBreakout()
             [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
-            
+
             if not na(newLow) and not na(newLowBar)
                 currentValidLow := newLow
                 currentValidLowBar := newLowBar
                 lookingForHigh := true
                 lookingForLow := false
-                
+                currentLowIsWeak := false  // Low formed via breakout is strong
+
                 addValidLow(newLow, newLowBar)
                 mostRecentLowIndex := array.size(lowLevels) - 1
-    
+
     // Look for new valid high
     if not bosBullish and not bosBearish and lookingForHigh
         if isBearishBreakdown()
             [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
-            
+
             if not na(newHigh) and not na(newHighBar)
                 currentValidHigh := newHigh
                 currentValidHighBar := newHighBar
                 lookingForLow := true
                 lookingForHigh := false
-                
+                currentHighIsWeak := false  // High formed via breakdown is strong
+
                 addValidHigh(newHigh, newHighBar)
                 mostRecentHighIndex := array.size(highLevels) - 1
 
-// HTF INITIALIZATION PHASE
-if htfEnabled and not htfInitialized and bar_index > 0
+// HTF INITIALIZATION PHASE (only on new HTF candles)
+if htfEnabled and not htfInitialized and bar_index > 0 and htfNewCandle
     if htfIsBearishBreakdown()
-        float localHigh = htfHigh
-        int localHighBar = bar_index
-
-        // Limit HTF lookback to 50 bars to avoid buffer overflow
-        for i = 1 to math.min(bar_index, 50)
-            if htfHigh[i] > localHigh
-                localHigh := htfHigh[i]
-                localHighBar := bar_index - i
-
-        htfCurrentValidHigh := localHigh
-        htfCurrentValidHighBar := localHighBar
+        // Initialize with current HTF high
+        htfCurrentValidHigh := htfHigh
+        htfCurrentValidHighBar := bar_index
         htfInitialized := true
         htfLookingForLow := true
 
+        // Start tracking swing low from here
+        htfSwingLow := htfLow
+        htfSwingLowBar := bar_index
+
         // Add to array
-        addValidHighHTF(localHigh, localHighBar)
+        addValidHighHTF(htfHigh, bar_index)
         htfMostRecentHighIndex := array.size(htfHighLevels) - 1
 
-// HTF MAIN LOGIC (after initialization)
+// HTF SWING TRACKING (update on every bar to track extremes)
 if htfEnabled and htfInitialized
-    // First check if any historical HTF levels are broken or sweeped
-    checkBrokenLevelsHTF(htfHigh, htfLow, htfClose)
+    // If looking for low, track the lowest low
+    if htfLookingForLow
+        if na(htfSwingLow) or htfLow < htfSwingLow
+            htfSwingLow := htfLow
+            htfSwingLowBar := bar_index
 
+    // If looking for high, track the highest high
+    if htfLookingForHigh
+        if na(htfSwingHigh) or htfHigh > htfSwingHigh
+            htfSwingHigh := htfHigh
+            htfSwingHighBar := bar_index
+
+// HTF MAIN LOGIC (after initialization, only on new HTF candles)
+if htfEnabled and htfInitialized and htfNewCandle
     bool htfBosBullish = false
     bool htfBosBearish = false
 
@@ -685,58 +749,107 @@ if htfEnabled and htfInitialized
     if not na(htfCurrentValidHigh) and not na(htfCurrentValidLow) and htfClose > htfCurrentValidHigh and htfLookingForLow
         htfBosBullish := true
 
-        [newLow, newLowBar] = findLowestBetweenHTF(htfCurrentValidHighBar, bar_index, htfLow)
-
-        if not na(newLow) and not na(newLowBar)
-            htfCurrentValidLow := newLow
-            htfCurrentValidLowBar := newLowBar
+        // Use the tracked swing low instead of searching
+        if not na(htfSwingLow) and not na(htfSwingLowBar)
+            htfCurrentValidLow := htfSwingLow
+            htfCurrentValidLowBar := htfSwingLowBar
             htfLookingForHigh := true
             htfLookingForLow := false
+            htfCurrentLowIsWeak := true  // HTF Low formed via BOS is weak
 
-            addValidLowHTF(newLow, newLowBar)
+            addValidLowHTF(htfSwingLow, htfSwingLowBar)
             htfMostRecentLowIndex := array.size(htfLowLevels) - 1
+
+            // Reset swing tracking for high
+            htfSwingHigh := htfHigh
+            htfSwingHighBar := bar_index
 
     if not htfBosBullish and not na(htfCurrentValidLow) and not na(htfCurrentValidHigh) and htfClose < htfCurrentValidLow and htfLookingForHigh
         htfBosBearish := true
 
-        [newHigh, newHighBar] = findHighestBetweenHTF(htfCurrentValidLowBar, bar_index, htfHigh)
-
-        if not na(newHigh) and not na(newHighBar)
-            htfCurrentValidHigh := newHigh
-            htfCurrentValidHighBar := newHighBar
+        // Use the tracked swing high instead of searching
+        if not na(htfSwingHigh) and not na(htfSwingHighBar)
+            htfCurrentValidHigh := htfSwingHigh
+            htfCurrentValidHighBar := htfSwingHighBar
             htfLookingForLow := true
             htfLookingForHigh := false
+            htfCurrentHighIsWeak := true  // HTF High formed via BOS is weak
 
-            addValidHighHTF(newHigh, newHighBar)
+            addValidHighHTF(htfSwingHigh, htfSwingHighBar)
             htfMostRecentHighIndex := array.size(htfHighLevels) - 1
+
+            // Reset swing tracking for low
+            htfSwingLow := htfLow
+            htfSwingLowBar := bar_index
 
     // Look for new valid low
     if not htfBosBullish and not htfBosBearish and htfLookingForLow
         if htfIsBullishBreakout()
-            [newLow, newLowBar] = findLowestBetweenHTF(htfCurrentValidHighBar, bar_index, htfLow)
-
-            if not na(newLow) and not na(newLowBar)
-                htfCurrentValidLow := newLow
-                htfCurrentValidLowBar := newLowBar
+            // Use the tracked swing low instead of searching
+            if not na(htfSwingLow) and not na(htfSwingLowBar)
+                htfCurrentValidLow := htfSwingLow
+                htfCurrentValidLowBar := htfSwingLowBar
                 htfLookingForHigh := true
                 htfLookingForLow := false
+                htfCurrentLowIsWeak := false  // HTF Low formed via breakout is strong
 
-                addValidLowHTF(newLow, newLowBar)
+                addValidLowHTF(htfSwingLow, htfSwingLowBar)
                 htfMostRecentLowIndex := array.size(htfLowLevels) - 1
+
+                // Reset swing tracking for high
+                htfSwingHigh := htfHigh
+                htfSwingHighBar := bar_index
 
     // Look for new valid high
     if not htfBosBullish and not htfBosBearish and htfLookingForHigh
         if htfIsBearishBreakdown()
-            [newHigh, newHighBar] = findHighestBetweenHTF(htfCurrentValidLowBar, bar_index, htfHigh)
-
-            if not na(newHigh) and not na(newHighBar)
-                htfCurrentValidHigh := newHigh
-                htfCurrentValidHighBar := newHighBar
+            // Use the tracked swing high instead of searching
+            if not na(htfSwingHigh) and not na(htfSwingHighBar)
+                htfCurrentValidHigh := htfSwingHigh
+                htfCurrentValidHighBar := htfSwingHighBar
                 htfLookingForLow := true
                 htfLookingForHigh := false
+                htfCurrentHighIsWeak := false  // HTF High formed via breakdown is strong
 
-                addValidHighHTF(newHigh, newHighBar)
+                addValidHighHTF(htfSwingHigh, htfSwingHighBar)
                 htfMostRecentHighIndex := array.size(htfHighLevels) - 1
+
+                // Reset swing tracking for low
+                htfSwingLow := htfLow
+                htfSwingLowBar := bar_index
+
+// Check HTF broken/swept levels on every bar (not just new HTF candles)
+if htfEnabled and htfInitialized
+    checkBrokenLevelsHTF(htfHigh, htfLow, htfClose)
+
+    // Clean up old swept lines - only keep the most recent swept high and low
+    if array.size(htfHighLevels) > 0
+        int mostRecentSweptHighIndex = -1
+        // Find most recent swept high (iterate backwards)
+        for i = array.size(htfHighLevels) - 1 to 0
+            if array.get(htfHighSweeped, i) and not array.get(htfHighBroken, i)
+                mostRecentSweptHighIndex := i
+                break
+
+        // Delete lines for all swept highs except the most recent
+        for i = 0 to array.size(htfHighLevels) - 1
+            if array.get(htfHighSweeped, i) and not array.get(htfHighBroken, i) and i != mostRecentSweptHighIndex
+                htfLine = array.get(htfHighLines, i)
+                line.delete(htfLine)
+
+    if array.size(htfLowLevels) > 0
+        int mostRecentSweptLowIndex = -1
+        // Find most recent swept low (iterate backwards)
+        for i = array.size(htfLowLevels) - 1 to 0
+            if array.get(htfLowSweeped, i) and not array.get(htfLowBroken, i)
+                mostRecentSweptLowIndex := i
+                break
+
+        // Delete lines for all swept lows except the most recent
+        for i = 0 to array.size(htfLowLevels) - 1
+            if array.get(htfLowSweeped, i) and not array.get(htfLowBroken, i) and i != mostRecentSweptLowIndex
+                htfLine = array.get(htfLowLines, i)
+                line.delete(htfLine)
 
 // Plot current valid levels for reference (optional - you can comment these out)
 plot(currentValidHigh, "Current Valid High", color=color.new(highColor, 80), linewidth=1, style=plot.style_stepline)
@@ -752,8 +865,9 @@ if initialized and not na(currentValidHigh)
     if not na(currentHighLabel)
         label.delete(currentHighLabel)
     // Create new label positioned to the right with spacing
+    string labelText = currentHighIsWeak ? timeframe.period + " Weak High" : timeframe.period + " High"
     currentHighLabel := label.new(bar_index + 10, currentValidHigh,
-                                   text=timeframe.period + " High",
+                                   text=labelText,
                                    style=label.style_label_left,
                                    color=highColor,
                                    textcolor=color.white,
@@ -764,8 +878,9 @@ if initialized and not na(currentValidLow)
     if not na(currentLowLabel)
         label.delete(currentLowLabel)
     // Create new label positioned to the right with spacing
+    string labelText = currentLowIsWeak ? timeframe.period + " Weak Low" : timeframe.period + " Low"
     currentLowLabel := label.new(bar_index + 10, currentValidLow,
-                                  text=timeframe.period + " Low",
+                                  text=labelText,
                                   style=label.style_label_left,
                                   color=lowColor,
                                   textcolor=color.white,
@@ -777,8 +892,9 @@ if htfEnabled and htfInitialized and not na(htfCurrentValidHigh)
     if not na(htfCurrentHighLabel)
         label.delete(htfCurrentHighLabel)
     // Create new label positioned further to the right
+    string labelText = htfCurrentHighIsWeak ? htfTimeframe + " Weak High" : htfTimeframe + " High"
     htfCurrentHighLabel := label.new(bar_index + 20, htfCurrentValidHigh,
-                                      text=htfTimeframe + " High",
+                                      text=labelText,
                                       style=label.style_label_left,
                                       color=htfHighColor,
                                       textcolor=color.white,
@@ -789,9 +905,83 @@ if htfEnabled and htfInitialized and not na(htfCurrentValidLow)
     if not na(htfCurrentLowLabel)
         label.delete(htfCurrentLowLabel)
     // Create new label positioned further to the right
+    string labelText = htfCurrentLowIsWeak ? htfTimeframe + " Weak Low" : htfTimeframe + " Low"
     htfCurrentLowLabel := label.new(bar_index + 20, htfCurrentValidLow,
-                                     text=htfTimeframe + " Low",
+                                     text=labelText,
                                      style=label.style_label_left,
                                      color=htfLowColor,
                                      textcolor=color.white,
                                      size=size.small)
+
+// Update swept level labels (delete old ones and create new ones)
+// Clear old swept labels
+if array.size(sweptHighLabels) > 0
+    for i = 0 to array.size(sweptHighLabels) - 1
+        label.delete(array.get(sweptHighLabels, i))
+    array.clear(sweptHighLabels)
+
+if array.size(sweptLowLabels) > 0
+    for i = 0 to array.size(sweptLowLabels) - 1
+        label.delete(array.get(sweptLowLabels, i))
+    array.clear(sweptLowLabels)
+
+if array.size(htfSweptHighLabels) > 0
+    for i = 0 to array.size(htfSweptHighLabels) - 1
+        label.delete(array.get(htfSweptHighLabels, i))
+    array.clear(htfSweptHighLabels)
+
+if array.size(htfSweptLowLabels) > 0
+    for i = 0 to array.size(htfSweptLowLabels) - 1
+        label.delete(array.get(htfSweptLowLabels, i))
+    array.clear(htfSweptLowLabels)
+
+// Create new swept labels for current TF (only most recent)
+if array.size(highLevels) > 0
+    // Find most recent swept high (iterate backwards)
+    for i = array.size(highLevels) - 1 to 0
+        if array.get(highSweeped, i) and not array.get(highBroken, i)
+            sweptLabel = label.new(bar_index + 10, array.get(highLevels, i), text="Swept", style=label.style_label_left, color=color.new(highColor, 50), textcolor=color.white, size=size.tiny)
+            array.push(sweptHighLabels, sweptLabel)
+            break  // Only show most recent
+
+if array.size(lowLevels) > 0
+    // Find most recent swept low (iterate backwards)
+    for i = array.size(lowLevels) - 1 to 0
+        if array.get(lowSweeped, i) and not array.get(lowBroken, i)
+            sweptLabel = label.new(bar_index + 10, array.get(lowLevels, i), text="Swept", style=label.style_label_left, color=color.new(lowColor, 50), textcolor=color.white, size=size.tiny)
+            array.push(sweptLowLabels, sweptLabel)
+            break  // Only show most recent
+
+// Create new swept labels for HTF (only most recent)
+if htfEnabled and array.size(htfHighLevels) > 0
+    // Find most recent swept HTF high (iterate backwards)
+    for i = array.size(htfHighLevels) - 1 to 0
+        if array.get(htfHighSweeped, i) and not array.get(htfHighBroken, i)
+            sweptLabel = label.new(bar_index + 20, array.get(htfHighLevels, i), text="HTF Swept", style=label.style_label_left, color=color.new(htfHighColor, 50), textcolor=color.white, size=size.tiny)
+            array.push(htfSweptHighLabels, sweptLabel)
+            break  // Only show most recent
+
+if htfEnabled and array.size(htfLowLevels) > 0
+    // Find most recent swept HTF low (iterate backwards)
+    for i = array.size(htfLowLevels) - 1 to 0
+        if array.get(htfLowSweeped, i) and not array.get(htfLowBroken, i)
+            sweptLabel = label.new(bar_index + 20, array.get(htfLowLevels, i), text="HTF Swept", style=label.style_label_left, color=color.new(htfLowColor, 50), textcolor=color.white, size=size.tiny)
+            array.push(htfSweptLowLabels, sweptLabel)
+            break  // Only show most recent
+
+// Show "looking for" labels when HTF levels have been broken and we're seeking replacements
+// When looking for high, it means the previous high was broken and we're waiting for a new one
+if htfEnabled and htfInitialized and htfLookingForHigh and not na(htfCurrentValidLow)
+    // Delete old label
+    if not na(htfLookingForHighLabel)
+        label.delete(htfLookingForHighLabel)
+    // Place label above the current low, showing we're looking for a high
+    // htfLookingForHighLabel := label.new(bar_index + 25, htfCurrentValidLow * 1.001, text="Looking for " + htfTimeframe + " High", style=label.style_label_left, color=color.new(htfHighColor, 70), textcolor=color.white, size=size.tiny)
+
+// When looking for low, it means the previous low was broken and we're waiting for a new one
+if htfEnabled and htfInitialized and htfLookingForLow and not na(htfCurrentValidHigh)
+    // Delete old label
+    if not na(htfLookingForLowLabel)
+        label.delete(htfLookingForLowLabel)
+    // Place label below the current high, showing we're looking for a low
+    // htfLookingForLowLabel := label.new(bar_index + 25, htfCurrentValidHigh * 0.999, text="Looking for " + htfTimeframe + " Low", style=label.style_label_left, color=color.new(htfLowColor, 70), textcolor=color.white, size=size.tiny)
