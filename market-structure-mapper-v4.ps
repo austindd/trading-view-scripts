@@ -114,26 +114,37 @@ var label htfLookingForLowLabel = na
 // NOTIFICATION FLAGS (for alerts)
 // ============================================================================
 
-// Alert condition flags (set at HTF candle close, plotted invisibly)
+// HTF Alert condition flags (set at HTF candle close, reset on next LTF bar)
 var bool htfBosFlag = false
 var bool htfBosLtfBosFlag = false
 var bool htfSweptFlag = false
 var bool htfSweptLtfBosFlag = false
 var bool pullback50Flag = false
 
+// LTF Alert condition flags (set when LTF conditions occur)
+var bool ltfBosFlag = false
+var bool ltfSweptFlag = false
+var bool ltfBosAtExtremeFlag = false
+
 // State tracking for alert conditions
 var bool ltfBosBullishSinceLastHTF = false
 var bool ltfBosBearishSinceLastHTF = false
-var bool waitingForPullback = false
 var float pullback50Level = na
 
 // Track HTF level state changes to detect when they become swept
 var string htfMostRecentHighPrevType = "strong"
 var string htfMostRecentLowPrevType = "strong"
 
+// Track LTF level state changes to detect when they become swept
+var string ltfMostRecentHighPrevType = "strong"
+var string ltfMostRecentLowPrevType = "strong"
+
 // Track HTF BOS for current bar (needed for alert logic)
 var bool htfBosBullish = false
 var bool htfBosBearish = false
+
+// Track whether HTF just closed (to reset HTF flags on next LTF bar)
+var bool htfJustClosed = false
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -554,8 +565,19 @@ if initialized
     // Track LTF BOS for alert conditions
     if bosBullish
         ltfBosBullishSinceLastHTF := true
+        ltfBosFlag := true
+
+        // Check if bullish BOS is below 50% of HTF range
+        if not na(pullback50Level) and close < pullback50Level
+            ltfBosAtExtremeFlag := true
+
     if bosBearish
         ltfBosBearishSinceLastHTF := true
+        ltfBosFlag := true
+
+        // Check if bearish BOS is above 50% of HTF range
+        if not na(pullback50Level) and close > pullback50Level
+            ltfBosAtExtremeFlag := true
 
 // ============================================================================
 // HTF DATA AND LOGIC
@@ -679,9 +701,37 @@ if htfEnabled and htfInitialized
     checkBrokenLevelsHTF(htfHigh, htfLow, htfClose)
 
 // ============================================================================
-// ALERT CONDITION CHECKING (at HTF candle close)
+// ALERT CONDITION CHECKING
 // ============================================================================
 
+// Reset HTF flags on first LTF bar after HTF candle close
+if htfJustClosed
+    htfBosFlag := false
+    htfBosLtfBosFlag := false
+    htfSweptFlag := false
+    htfSweptLtfBosFlag := false
+    htfJustClosed := false
+
+// Detect LTF level sweeps
+if initialized
+    bool ltfHighJustSwept = false
+    bool ltfLowJustSwept = false
+
+    if mostRecentHighIndex >= 0
+        highLevel = array.get(highs, mostRecentHighIndex)
+        if highLevel.levelType == "swept" and ltfMostRecentHighPrevType != "swept"
+            ltfHighJustSwept := true
+            ltfSweptFlag := true
+        ltfMostRecentHighPrevType := highLevel.levelType
+
+    if mostRecentLowIndex >= 0
+        lowLevel = array.get(lows, mostRecentLowIndex)
+        if lowLevel.levelType == "swept" and ltfMostRecentLowPrevType != "swept"
+            ltfLowJustSwept := true
+            ltfSweptFlag := true
+        ltfMostRecentLowPrevType := lowLevel.levelType
+
+// HTF alert conditions (set at HTF candle close)
 if htfEnabled and htfInitialized
     // Detect if HTF levels just became swept this bar
     bool htfHighJustSwept = false
@@ -699,56 +749,46 @@ if htfEnabled and htfInitialized
             htfLowJustSwept := true
         htfMostRecentLowPrevType := lowLevel.levelType
 
-    // Check alert conditions at HTF candle close
-    if htfNewCandle
-        // Reset all flags at start of new HTF candle
-        htfBosFlag := false
-        htfBosLtfBosFlag := false
-        htfSweptFlag := false
-        htfSweptLtfBosFlag := false
-        pullback50Flag := false
+    // Always update 50% level based on current HTF range
+    if not na(htfCurrentValidHigh) and not na(htfCurrentValidLow)
+        pullback50Level := (htfCurrentValidHigh + htfCurrentValidLow) / 2
 
+    // Check HTF alert conditions at HTF candle close
+    if htfNewCandle
         // Store whether HTF BOS occurred
         bool htfBosOccurred = htfBosBullish or htfBosBearish
-        string htfBosDirection = htfBosBullish ? "bullish" : "bearish"
 
-        // Condition 1: HTF BOS
+        // HTF Condition 1: HTF BOS
         if htfBosOccurred
             htfBosFlag := true
+            htfJustClosed := true
 
-            // Condition 2: HTF BOS + LTF BOS same direction
+            // HTF Condition 2: HTF BOS + LTF BOS same direction
             if (htfBosBullish and ltfBosBullishSinceLastHTF) or (htfBosBearish and ltfBosBearishSinceLastHTF)
                 htfBosLtfBosFlag := true
 
-        // Condition 3: HTF Swept
+        // HTF Condition 3: HTF Swept
         if htfHighJustSwept or htfLowJustSwept
             htfSweptFlag := true
+            htfJustClosed := true
 
-            // Condition 4: HTF Swept + LTF BOS in reversal direction
+            // HTF Condition 4: HTF Swept + LTF BOS in reversal direction
             // HTF high swept -> need LTF bearish BOS (reversal down)
             // HTF low swept -> need LTF bullish BOS (reversal up)
             if (htfHighJustSwept and ltfBosBearishSinceLastHTF) or (htfLowJustSwept and ltfBosBullishSinceLastHTF)
                 htfSweptLtfBosFlag := true
 
-        // Condition 5 setup: If any condition 1-4 triggered, set up pullback detection
-        if htfBosFlag or htfBosLtfBosFlag or htfSweptFlag or htfSweptLtfBosFlag
-            waitingForPullback := true
-            // Calculate 50% level between HTF high and low
-            if not na(htfCurrentValidHigh) and not na(htfCurrentValidLow)
-                pullback50Level := (htfCurrentValidHigh + htfCurrentValidLow) / 2
-
         // Reset LTF BOS tracking flags for next HTF candle
         ltfBosBullishSinceLastHTF := false
         ltfBosBearishSinceLastHTF := false
 
-// Check for 50% pullback on every bar (not just HTF candle close)
-if waitingForPullback and not na(pullback50Level)
+// Check for 50% pullback on every bar (no preconditions required)
+if not na(pullback50Level)
     // Check if price touches 50% level (with small tolerance)
     float tolerance = pullback50Level * 0.001
     if (high >= pullback50Level and low <= pullback50Level) or
        (close >= pullback50Level - tolerance and close <= pullback50Level + tolerance)
         pullback50Flag := true
-        waitingForPullback := false
 
 // ============================================================================
 // UPDATE LEVEL STATES (Ensure consistency on every bar)
@@ -1078,8 +1118,15 @@ if htfEnabled and array.size(htfLows) > 1
 
 // These plots are invisible but can be used to create alerts in TradingView
 // To create an alert: Chart settings > Create Alert > Condition: select one of these plots
+
+// HTF Alert Conditions
 plot(htfBosFlag ? 1 : 0, title="Alert: HTF BOS", display=display.none)
 plot(htfBosLtfBosFlag ? 1 : 0, title="Alert: HTF BOS + LTF BOS Same Direction", display=display.none)
 plot(htfSweptFlag ? 1 : 0, title="Alert: HTF Swept", display=display.none)
 plot(htfSweptLtfBosFlag ? 1 : 0, title="Alert: HTF Swept + LTF BOS Reversal", display=display.none)
 plot(pullback50Flag ? 1 : 0, title="Alert: 50% Pullback", display=display.none)
+
+// LTF Alert Conditions
+plot(ltfBosFlag ? 1 : 0, title="Alert: LTF BOS", display=display.none)
+plot(ltfSweptFlag ? 1 : 0, title="Alert: LTF Swept", display=display.none)
+plot(ltfBosAtExtremeFlag ? 1 : 0, title="Alert: LTF BOS at HTF Extreme", display=display.none)
