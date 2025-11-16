@@ -122,13 +122,6 @@ isBearishBreakdown() =>
 isBullishBreakout() =>
     close > open and close > high[1]
 
-// HTF versions
-htfIsBearishBreakdown(htfClose, htfOpen, htfLow) =>
-    htfClose < htfOpen and htfClose < htfLow
-
-htfIsBullishBreakout(htfClose, htfOpen, htfHigh) =>
-    htfClose > htfOpen and htfClose > htfHigh
-
 // Find lowest low between two bar indices
 findLowestBetween(startBar, endBar) =>
     float lowestPrice = na
@@ -549,9 +542,16 @@ if initialized
 htfTime = request.security(syminfo.tickerid, htfTimeframe, time, lookahead=barmerge.lookahead_off)
 bool htfNewCandle = ta.change(htfTime) != 0
 
+// HTF helper functions (defined here because they need HTF data)
+htfIsBearishBreakdown() =>
+    htfClose < htfOpen and htfClose < htfLow[1]
+
+htfIsBullishBreakout() =>
+    htfClose > htfOpen and htfClose > htfHigh[1]
+
 // HTF Initialization
 if htfEnabled and not htfInitialized and bar_index > 0 and htfNewCandle
-    if htfIsBearishBreakdown(htfClose, htfOpen, htfLow)
+    if htfIsBearishBreakdown()
         htfCurrentValidHigh := htfHigh
         htfCurrentValidHighBar := bar_index
         htfInitialized := true
@@ -627,7 +627,7 @@ if htfEnabled and htfInitialized and htfNewCandle
 
     // HTF breakout/breakdown
     if not htfBosBullish and not htfBosBearish and htfLookingForLow
-        if htfIsBullishBreakout(htfClose, htfOpen, htfHigh)
+        if htfIsBullishBreakout()
             if not na(htfSwingLow) and not na(htfSwingLowBar)
                 htfCurrentValidLow := htfSwingLow
                 htfCurrentValidLowBar := htfSwingLowBar
@@ -643,7 +643,7 @@ if htfEnabled and htfInitialized and htfNewCandle
                 htfSwingHighBar := bar_index
 
     if not htfBosBullish and not htfBosBearish and htfLookingForHigh
-        if htfIsBearishBreakdown(htfClose, htfOpen, htfLow)
+        if htfIsBearishBreakdown()
             if not na(htfSwingHigh) and not na(htfSwingHighBar)
                 htfCurrentValidHigh := htfSwingHigh
                 htfCurrentValidHighBar := htfSwingHighBar
