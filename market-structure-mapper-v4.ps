@@ -209,7 +209,7 @@ addHigh(float price, int barIdx, string levelType, color lineColor) =>
                  style=label.style_label_down,
                  color=lineColor,
                  textcolor=color.white,
-                 size=size.small)
+                 size=size.tiny)
 
     true
 
@@ -238,7 +238,7 @@ addLow(float price, int barIdx, string levelType, color lineColor) =>
                  style=label.style_label_up,
                  color=lineColor,
                  textcolor=color.white,
-                 size=size.small)
+                 size=size.tiny)
 
     true
 
@@ -423,6 +423,8 @@ getHighLevelType(string bosDirection) =>
 
 getLowLevelType(string bosDirection) =>
     bosDirection == "bearish" ? "weak" : "strong"
+
+// (State update logic moved to inline code to allow global variable modification)
 
 // ============================================================================
 // INITIALIZATION
@@ -663,31 +665,136 @@ if htfEnabled and htfInitialized
     checkBrokenLevelsHTF(htfHigh, htfLow, htfClose)
 
 // ============================================================================
+// UPDATE LEVEL STATES (Ensure consistency on every bar)
+// ============================================================================
+
+// Update current timeframe level states
+if initialized
+    // Find most recent BOS in highs array
+    int brokenHighIdx = -1
+    if array.size(highs) > 0
+        for i = array.size(highs) - 1 to 0
+            highLevel = array.get(highs, i)
+            if highLevel.levelType == "broken"
+                brokenHighIdx := i
+                break
+
+    // Find most recent BOS in lows array
+    int brokenLowIdx = -1
+    if array.size(lows) > 0
+        for i = array.size(lows) - 1 to 0
+            lowLevel = array.get(lows, i)
+            if lowLevel.levelType == "broken"
+                brokenLowIdx := i
+                break
+
+    // Determine which BOS is most recent and update states accordingly
+    if brokenHighIdx >= 0 or brokenLowIdx >= 0
+        // If we have a broken high that's more recent than any broken low
+        // Then we had a bullish BOS, so next high is weak
+        if brokenHighIdx >= 0 and (brokenLowIdx < 0 or brokenHighIdx > brokenLowIdx)
+            lastBosDirection := "bullish"
+
+            // Update most recent high to be weak (if it exists and isn't broken)
+            if mostRecentHighIndex >= 0
+                currentHigh = array.get(highs, mostRecentHighIndex)
+                if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
+                    currentHigh.levelType := "weak"
+
+            // Update most recent low to be strong (if it exists and isn't broken)
+            if mostRecentLowIndex >= 0
+                currentLow = array.get(lows, mostRecentLowIndex)
+                if currentLow.levelType != "broken" and currentLow.levelType != "swept"
+                    currentLow.levelType := "strong"
+
+        // If we have a broken low that's more recent than any broken high
+        // Then we had a bearish BOS, so next low is weak
+        else if brokenLowIdx >= 0
+            lastBosDirection := "bearish"
+
+            // Update most recent low to be weak (if it exists and isn't broken)
+            if mostRecentLowIndex >= 0
+                currentLow = array.get(lows, mostRecentLowIndex)
+                if currentLow.levelType != "broken" and currentLow.levelType != "swept"
+                    currentLow.levelType := "weak"
+
+            // Update most recent high to be strong (if it exists and isn't broken)
+            if mostRecentHighIndex >= 0
+                currentHigh = array.get(highs, mostRecentHighIndex)
+                if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
+                    currentHigh.levelType := "strong"
+
+// Update HTF level states
+if htfEnabled and htfInitialized
+    int htfBrokenHighIdx = -1
+    if array.size(htfHighs) > 0
+        for i = array.size(htfHighs) - 1 to 0
+            highLevel = array.get(htfHighs, i)
+            if highLevel.levelType == "broken"
+                htfBrokenHighIdx := i
+                break
+
+    int htfBrokenLowIdx = -1
+    if array.size(htfLows) > 0
+        for i = array.size(htfLows) - 1 to 0
+            lowLevel = array.get(htfLows, i)
+            if lowLevel.levelType == "broken"
+                htfBrokenLowIdx := i
+                break
+
+    if htfBrokenHighIdx >= 0 or htfBrokenLowIdx >= 0
+        if htfBrokenHighIdx >= 0 and (htfBrokenLowIdx < 0 or htfBrokenHighIdx > htfBrokenLowIdx)
+            htfLastBosDirection := "bullish"
+
+            if htfMostRecentHighIndex >= 0
+                currentHigh = array.get(htfHighs, htfMostRecentHighIndex)
+                if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
+                    currentHigh.levelType := "weak"
+
+            if htfMostRecentLowIndex >= 0
+                currentLow = array.get(htfLows, htfMostRecentLowIndex)
+                if currentLow.levelType != "broken" and currentLow.levelType != "swept"
+                    currentLow.levelType := "strong"
+
+        else if htfBrokenLowIdx >= 0
+            htfLastBosDirection := "bearish"
+
+            if htfMostRecentLowIndex >= 0
+                currentLow = array.get(htfLows, htfMostRecentLowIndex)
+                if currentLow.levelType != "broken" and currentLow.levelType != "swept"
+                    currentLow.levelType := "weak"
+
+            if htfMostRecentHighIndex >= 0
+                currentHigh = array.get(htfHighs, htfMostRecentHighIndex)
+                if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
+                    currentHigh.levelType := "strong"
+
+// ============================================================================
 // ARRAY TRUNCATION (Performance)
 // ============================================================================
 
-if array.size(highs) > 50
+if array.size(highs) > 30
     oldHigh = array.get(highs, 0)
     line.delete(oldHigh.levelLine)
     array.shift(highs)
     if mostRecentHighIndex >= 0
         mostRecentHighIndex := mostRecentHighIndex - 1
 
-if array.size(lows) > 50
+if array.size(lows) > 30
     oldLow = array.get(lows, 0)
     line.delete(oldLow.levelLine)
     array.shift(lows)
     if mostRecentLowIndex >= 0
         mostRecentLowIndex := mostRecentLowIndex - 1
 
-if array.size(htfHighs) > 50
+if array.size(htfHighs) > 30
     oldHigh = array.get(htfHighs, 0)
     line.delete(oldHigh.levelLine)
     array.shift(htfHighs)
     if htfMostRecentHighIndex >= 0
         htfMostRecentHighIndex := htfMostRecentHighIndex - 1
 
-if array.size(htfLows) > 50
+if array.size(htfLows) > 30
     oldLow = array.get(htfLows, 0)
     line.delete(oldLow.levelLine)
     array.shift(htfLows)
@@ -704,38 +811,50 @@ plot(htfEnabled ? htfCurrentValidHigh : na, "HTF Valid High", color=color.new(ht
 plot(htfEnabled ? htfCurrentValidLow : na, "HTF Valid Low", color=color.new(htfLowColor, 80), linewidth=1, style=plot.style_stepline)
 
 // Update labels for current levels
-if initialized and not na(currentValidHigh)
+if initialized and not na(currentValidHigh) and mostRecentHighIndex >= 0
     if not na(currentHighLabel)
         label.delete(currentHighLabel)
 
+    highLevel = array.get(highs, mostRecentHighIndex)
     string labelText = na
     color labelColor = highColor
-    if currentHighIsBroken
+
+    if highLevel.levelType == "broken"
         labelText := timeframe.period + " Broken High"
         labelColor := color.new(color.red, 0)
+    else if highLevel.levelType == "weak"
+        labelText := timeframe.period + " Weak High"
+    else if highLevel.levelType == "swept"
+        labelText := timeframe.period + " Swept High"
     else
-        labelText := lastBosDirection == "bullish" ? timeframe.period + " Weak High" : timeframe.period + " High"
+        labelText := timeframe.period + " Strong High"
 
-    currentHighLabel := label.new(bar_index + 10, currentValidHigh,
+    currentHighLabel := label.new(bar_index + 5, currentValidHigh,
                                    text=labelText,
                                    style=label.style_label_left,
                                    color=labelColor,
                                    textcolor=color.white,
                                    size=size.small)
 
-if initialized and not na(currentValidLow)
+if initialized and not na(currentValidLow) and mostRecentLowIndex >= 0
     if not na(currentLowLabel)
         label.delete(currentLowLabel)
 
+    lowLevel = array.get(lows, mostRecentLowIndex)
     string labelText = na
     color labelColor = lowColor
-    if currentLowIsBroken
+
+    if lowLevel.levelType == "broken"
         labelText := timeframe.period + " Broken Low"
         labelColor := color.new(color.red, 0)
+    else if lowLevel.levelType == "weak"
+        labelText := timeframe.period + " Weak Low"
+    else if lowLevel.levelType == "swept"
+        labelText := timeframe.period + " Swept Low"
     else
-        labelText := lastBosDirection == "bearish" ? timeframe.period + " Weak Low" : timeframe.period + " Low"
+        labelText := timeframe.period + " Strong Low"
 
-    currentLowLabel := label.new(bar_index + 10, currentValidLow,
+    currentLowLabel := label.new(bar_index + 5, currentValidLow,
                                   text=labelText,
                                   style=label.style_label_left,
                                   color=labelColor,
@@ -743,17 +862,23 @@ if initialized and not na(currentValidLow)
                                   size=size.small)
 
 // HTF labels
-if htfEnabled and htfInitialized and not na(htfCurrentValidHigh)
+if htfEnabled and htfInitialized and not na(htfCurrentValidHigh) and htfMostRecentHighIndex >= 0
     if not na(htfCurrentHighLabel)
         label.delete(htfCurrentHighLabel)
 
+    highLevel = array.get(htfHighs, htfMostRecentHighIndex)
     string labelText = na
     color labelColor = htfHighColor
-    if htfCurrentHighIsBroken
+
+    if highLevel.levelType == "broken"
         labelText := htfTimeframe + " Broken High"
         labelColor := color.new(color.red, 0)
+    else if highLevel.levelType == "weak"
+        labelText := htfTimeframe + " Weak High"
+    else if highLevel.levelType == "swept"
+        labelText := htfTimeframe + " Swept High"
     else
-        labelText := htfLastBosDirection == "bullish" ? htfTimeframe + " Weak High" : htfTimeframe + " High"
+        labelText := htfTimeframe + " Strong High"
 
     htfCurrentHighLabel := label.new(bar_index + 20, htfCurrentValidHigh,
                                       text=labelText,
@@ -762,17 +887,23 @@ if htfEnabled and htfInitialized and not na(htfCurrentValidHigh)
                                       textcolor=color.white,
                                       size=size.small)
 
-if htfEnabled and htfInitialized and not na(htfCurrentValidLow)
+if htfEnabled and htfInitialized and not na(htfCurrentValidLow) and htfMostRecentLowIndex >= 0
     if not na(htfCurrentLowLabel)
         label.delete(htfCurrentLowLabel)
 
+    lowLevel = array.get(htfLows, htfMostRecentLowIndex)
     string labelText = na
     color labelColor = htfLowColor
-    if htfCurrentLowIsBroken
+
+    if lowLevel.levelType == "broken"
         labelText := htfTimeframe + " Broken Low"
         labelColor := color.new(color.red, 0)
+    else if lowLevel.levelType == "weak"
+        labelText := htfTimeframe + " Weak Low"
+    else if lowLevel.levelType == "swept"
+        labelText := htfTimeframe + " Swept Low"
     else
-        labelText := htfLastBosDirection == "bearish" ? htfTimeframe + " Weak Low" : htfTimeframe + " Low"
+        labelText := htfTimeframe + " Strong Low"
 
     htfCurrentLowLabel := label.new(bar_index + 20, htfCurrentValidLow,
                                      text=labelText,
@@ -803,11 +934,11 @@ if array.size(htfSweptLowLabels) > 0
     array.clear(htfSweptLowLabels)
 
 // Find and display most recent swept levels
-if array.size(highs) > 0
-    for i = array.size(highs) - 1 to 0
+if array.size(highs) > 1
+    for i = array.size(highs) - 2 to 0
         highLevel = array.get(highs, i)
         if highLevel.levelType == "swept"
-            sweptLabel = label.new(bar_index + 10, highLevel.price,
+            sweptLabel = label.new(bar_index + 5, highLevel.price,
                                    text="Swept High",
                                    style=label.style_label_left,
                                    color=color.new(highColor, 50),
@@ -816,11 +947,11 @@ if array.size(highs) > 0
             array.push(sweptHighLabels, sweptLabel)
             break
 
-if array.size(lows) > 0
-    for i = array.size(lows) - 1 to 0
+if array.size(lows) > 1
+    for i = array.size(lows) - 2 to 0
         lowLevel = array.get(lows, i)
         if lowLevel.levelType == "swept"
-            sweptLabel = label.new(bar_index + 10, lowLevel.price,
+            sweptLabel = label.new(bar_index + 5, lowLevel.price,
                                    text="Swept Low",
                                    style=label.style_label_left,
                                    color=color.new(lowColor, 50),
@@ -829,8 +960,8 @@ if array.size(lows) > 0
             array.push(sweptLowLabels, sweptLabel)
             break
 
-if htfEnabled and array.size(htfHighs) > 0
-    for i = array.size(htfHighs) - 1 to 0
+if htfEnabled and array.size(htfHighs) > 1
+    for i = array.size(htfHighs) - 2 to 0
         highLevel = array.get(htfHighs, i)
         if highLevel.levelType == "swept"
             sweptLabel = label.new(bar_index + 20, highLevel.price,
@@ -842,8 +973,8 @@ if htfEnabled and array.size(htfHighs) > 0
             array.push(htfSweptHighLabels, sweptLabel)
             break
 
-if htfEnabled and array.size(htfLows) > 0
-    for i = array.size(htfLows) - 1 to 0
+if htfEnabled and array.size(htfLows) > 1
+    for i = array.size(htfLows) - 2 to 0
         lowLevel = array.get(htfLows, i)
         if lowLevel.levelType == "swept"
             sweptLabel = label.new(bar_index + 20, lowLevel.price,
