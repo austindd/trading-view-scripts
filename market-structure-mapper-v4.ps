@@ -5,8 +5,8 @@
 indicator("Market Structure Mapper V4 (Refactored)", "MSM V4 [SB]", overlay=true, max_lines_count=250, max_labels_count=250)
 
 // Input settings
-showHighLowLabels = input.bool(true, "Show High/Low Labels", group="Display")
-showBosLabels = input.bool(false, "Show BOS Labels", group="Display")
+showHighLowLabels = input.bool(false, "Show High/Low Labels", group="Display")
+showBosLabels = input.bool(true, "Show BOS Labels", group="Display")
 lineWidth = input.int(2, "Line Width", minval=1, maxval=5, group="Display")
 
 // Higher Timeframe Settings
@@ -14,13 +14,13 @@ htfEnabled = input.bool(true, "Show HTF Structure", group="Higher Timeframe")
 htfTimeframe = input.timeframe("60", "HTF Timeframe", group="Higher Timeframe")
 
 // Current Timeframe Colors
-highColor = input.color(color.new(color.orange, 0), "Valid High Color", group="Current TF Colors")
-lowColor = input.color(color.new(color.blue, 0), "Valid Low Color", group="Current TF Colors")
+highColor = input.color(color.new(color.red, 0), "Valid High Color", group="Current TF Colors")
+lowColor = input.color(color.new(color.green, 0), "Valid Low Color", group="Current TF Colors")
 bosColor = input.color(color.new(color.black, 0), "BOS Color", group="Current TF Colors")
 
 // Higher Timeframe Colors
-htfHighColor = input.color(color.new(color.red, 0), "HTF Valid High Color", group="HTF Colors")
-htfLowColor = input.color(color.new(color.green, 0), "HTF Valid Low Color", group="HTF Colors")
+htfHighColor = input.color(color.new(color.orange, 0), "HTF Valid High Color", group="HTF Colors")
+htfLowColor = input.color(color.new(color.blue, 0), "HTF Valid Low Color", group="HTF Colors")
 htfBosColor = input.color(color.new(color.black, 0), "HTF BOS Color", group="HTF Colors")
 
 // ============================================================================
@@ -304,7 +304,7 @@ checkBrokenLevels() =>
             // Check for sweep (wick crosses but close doesn't)
             if highLevel.levelType != "swept" and highLevel.levelType != "broken" and high > highLevel.price and close <= highLevel.price
                 highLevel.levelType := "swept"
-                line.set_style(highLevel.levelLine, line.style_dotted)
+                line.set_style(highLevel.levelLine, line.style_dashed)
 
             // Check for break (close crosses above)
             else if highLevel.levelType != "broken" and close > highLevel.price
@@ -315,7 +315,7 @@ checkBrokenLevels() =>
                     line.set_x2(highLevel.levelLine, bar_index)
                     line.set_extend(highLevel.levelLine, extend.none)
                     line.set_style(highLevel.levelLine, line.style_dotted)
-                    line.set_color(highLevel.levelLine, bosColor)
+                    line.set_color(highLevel.levelLine, color.new(bosColor, 30))
 
                     if showBosLabels
                         centerBar = math.round((highLevel.barIndex + bar_index) / 2)
@@ -335,7 +335,7 @@ checkBrokenLevels() =>
             // Check for sweep
             if lowLevel.levelType != "swept" and lowLevel.levelType != "broken" and low < lowLevel.price and close >= lowLevel.price
                 lowLevel.levelType := "swept"
-                line.set_style(lowLevel.levelLine, line.style_dotted)
+                line.set_style(lowLevel.levelLine, line.style_dashed)
 
             // Check for break
             else if lowLevel.levelType != "broken" and close < lowLevel.price
@@ -345,7 +345,7 @@ checkBrokenLevels() =>
                     line.set_x2(lowLevel.levelLine, bar_index)
                     line.set_extend(lowLevel.levelLine, extend.none)
                     line.set_style(lowLevel.levelLine, line.style_dotted)
-                    line.set_color(lowLevel.levelLine, bosColor)
+                    line.set_color(lowLevel.levelLine, color.new(bosColor, 30))
 
                     if showBosLabels
                         centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
@@ -367,7 +367,7 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
 
             if highLevel.levelType != "swept" and highLevel.levelType != "broken" and htfHigh > highLevel.price and htfClose <= highLevel.price
                 highLevel.levelType := "swept"
-                line.set_style(highLevel.levelLine, line.style_dotted)
+                line.set_style(highLevel.levelLine, line.style_dashed)
 
             else if highLevel.levelType != "broken" and htfClose > highLevel.price
                 highLevel.levelType := "broken"
@@ -376,7 +376,7 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
                     line.set_x2(highLevel.levelLine, bar_index)
                     line.set_extend(highLevel.levelLine, extend.none)
                     line.set_style(highLevel.levelLine, line.style_dotted)
-                    line.set_color(highLevel.levelLine, htfBosColor)
+                    line.set_color(highLevel.levelLine, color.new(htfBosColor, 30))
 
                     if showBosLabels
                         centerBar = math.round((highLevel.barIndex + bar_index) / 2)
@@ -394,7 +394,7 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
 
             if lowLevel.levelType != "swept" and lowLevel.levelType != "broken" and htfLow < lowLevel.price and htfClose >= lowLevel.price
                 lowLevel.levelType := "swept"
-                line.set_style(lowLevel.levelLine, line.style_dotted)
+                line.set_style(lowLevel.levelLine, line.style_dashed)
 
             else if lowLevel.levelType != "broken" and htfClose < lowLevel.price
                 lowLevel.levelType := "broken"
@@ -403,7 +403,7 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
                     line.set_x2(lowLevel.levelLine, bar_index)
                     line.set_extend(lowLevel.levelLine, extend.none)
                     line.set_style(lowLevel.levelLine, line.style_dotted)
-                    line.set_color(lowLevel.levelLine, htfBosColor)
+                    line.set_color(lowLevel.levelLine, color.new(htfBosColor, 30))
 
                     if showBosLabels
                         centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
@@ -465,11 +465,6 @@ if initialized
         currentHighIsBroken := true
         lastBosDirection := "bullish"
 
-        // Make broken high line dotted
-        if mostRecentHighIndex >= 0
-            highLevel = array.get(highs, mostRecentHighIndex)
-            line.set_style(highLevel.levelLine, line.style_dotted)
-
         [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
 
         if not na(newLow) and not na(newLowBar)
@@ -486,11 +481,6 @@ if initialized
         bosBearish := true
         currentLowIsBroken := true
         lastBosDirection := "bearish"
-
-        // Make broken low line dotted
-        if mostRecentLowIndex >= 0
-            lowLevel = array.get(lows, mostRecentLowIndex)
-            line.set_style(lowLevel.levelLine, line.style_dotted)
 
         [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
 
@@ -588,10 +578,6 @@ if htfEnabled and htfInitialized and htfNewCandle
         htfCurrentHighIsBroken := true
         htfLastBosDirection := "bullish"
 
-        if htfMostRecentHighIndex >= 0
-            highLevel = array.get(htfHighs, htfMostRecentHighIndex)
-            line.set_style(highLevel.levelLine, line.style_dotted)
-
         if not na(htfSwingLow) and not na(htfSwingLowBar)
             htfCurrentValidLow := htfSwingLow
             htfCurrentValidLowBar := htfSwingLowBar
@@ -609,10 +595,6 @@ if htfEnabled and htfInitialized and htfNewCandle
         htfBosBearish := true
         htfCurrentLowIsBroken := true
         htfLastBosDirection := "bearish"
-
-        if htfMostRecentLowIndex >= 0
-            lowLevel = array.get(htfLows, htfMostRecentLowIndex)
-            line.set_style(lowLevel.levelLine, line.style_dotted)
 
         if not na(htfSwingHigh) and not na(htfSwingHighBar)
             htfCurrentValidHigh := htfSwingHigh
@@ -846,7 +828,7 @@ if initialized and not na(currentValidLow) and mostRecentLowIndex >= 0
 
     if lowLevel.levelType == "broken"
         labelText := timeframe.period + " Broken Low"
-        labelColor := color.new(color.red, 0)
+        labelColor := color.new(color.green, 0)
     else if lowLevel.levelType == "weak"
         labelText := timeframe.period + " Weak Low"
     else if lowLevel.levelType == "swept"
@@ -872,7 +854,7 @@ if htfEnabled and htfInitialized and not na(htfCurrentValidHigh) and htfMostRece
 
     if highLevel.levelType == "broken"
         labelText := htfTimeframe + " Broken High"
-        labelColor := color.new(color.red, 0)
+        labelColor := color.new(color.orange, 0)
     else if highLevel.levelType == "weak"
         labelText := htfTimeframe + " Weak High"
     else if highLevel.levelType == "swept"
@@ -897,7 +879,7 @@ if htfEnabled and htfInitialized and not na(htfCurrentValidLow) and htfMostRecen
 
     if lowLevel.levelType == "broken"
         labelText := htfTimeframe + " Broken Low"
-        labelColor := color.new(color.red, 0)
+        labelColor := color.new(color.blue, 0)
     else if lowLevel.levelType == "weak"
         labelText := htfTimeframe + " Weak Low"
     else if lowLevel.levelType == "swept"
