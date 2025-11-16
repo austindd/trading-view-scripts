@@ -1,0 +1,856 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Market Structure Mapper V4 (Refactored)", "MSM V4 [SB]", overlay=true, max_lines_count=250, max_labels_count=250)
+
+// Input settings
+showHighLowLabels = input.bool(true, "Show High/Low Labels", group="Display")
+showBosLabels = input.bool(false, "Show BOS Labels", group="Display")
+lineWidth = input.int(2, "Line Width", minval=1, maxval=5, group="Display")
+
+// Higher Timeframe Settings
+htfEnabled = input.bool(true, "Show HTF Structure", group="Higher Timeframe")
+htfTimeframe = input.timeframe("60", "HTF Timeframe", group="Higher Timeframe")
+
+// Current Timeframe Colors
+highColor = input.color(color.new(color.orange, 0), "Valid High Color", group="Current TF Colors")
+lowColor = input.color(color.new(color.blue, 0), "Valid Low Color", group="Current TF Colors")
+bosColor = input.color(color.new(color.black, 0), "BOS Color", group="Current TF Colors")
+
+// Higher Timeframe Colors
+htfHighColor = input.color(color.new(color.red, 0), "HTF Valid High Color", group="HTF Colors")
+htfLowColor = input.color(color.new(color.green, 0), "HTF Valid Low Color", group="HTF Colors")
+htfBosColor = input.color(color.new(color.black, 0), "HTF BOS Color", group="HTF Colors")
+
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
+
+// Type for tracking high levels
+type HighLevel
+    float price
+    int barIndex
+    line levelLine
+    string levelType  // "strong", "weak", "broken", "swept"
+
+// Type for tracking low levels
+type LowLevel
+    float price
+    int barIndex
+    line levelLine
+    string levelType  // "strong", "weak", "broken", "swept"
+
+// ============================================================================
+// ARRAYS TO STORE LEVELS (REFACTORED)
+// ============================================================================
+
+// Current Timeframe - All highs in one array, all lows in another
+var array<HighLevel> highs = array.new<HighLevel>()
+var array<LowLevel> lows = array.new<LowLevel>()
+
+// Higher Timeframe
+var array<HighLevel> htfHighs = array.new<HighLevel>()
+var array<LowLevel> htfLows = array.new<LowLevel>()
+
+// ============================================================================
+// MARKET STRUCTURE STATE VARIABLES
+// ============================================================================
+
+// Current Timeframe
+var float currentValidHigh = na
+var float currentValidLow = na
+var int currentValidHighBar = na
+var int currentValidLowBar = na
+var bool initialized = false
+var bool lookingForLow = false
+var bool lookingForHigh = false
+var bool currentHighIsBroken = false
+var bool currentLowIsBroken = false
+var string lastBosDirection = "none"  // "bullish", "bearish", or "none"
+
+// Track indices of most recent high/low
+var int mostRecentHighIndex = -1
+var int mostRecentLowIndex = -1
+
+// Higher Timeframe
+var float htfCurrentValidHigh = na
+var float htfCurrentValidLow = na
+var int htfCurrentValidHighBar = na
+var int htfCurrentValidLowBar = na
+var bool htfInitialized = false
+var bool htfLookingForLow = false
+var bool htfLookingForHigh = false
+var bool htfCurrentHighIsBroken = false
+var bool htfCurrentLowIsBroken = false
+var string htfLastBosDirection = "none"
+
+// HTF swing tracking
+var float htfSwingLow = na
+var int htfSwingLowBar = na
+var float htfSwingHigh = na
+var int htfSwingHighBar = na
+
+// HTF Track indices
+var int htfMostRecentHighIndex = -1
+var int htfMostRecentLowIndex = -1
+
+// Labels
+var label currentHighLabel = na
+var label currentLowLabel = na
+var label htfCurrentHighLabel = na
+var label htfCurrentLowLabel = na
+
+var array<label> sweptHighLabels = array.new<label>()
+var array<label> sweptLowLabels = array.new<label>()
+var array<label> htfSweptHighLabels = array.new<label>()
+var array<label> htfSweptLowLabels = array.new<label>()
+
+// Commented out "looking for" labels
+var label htfLookingForHighLabel = na
+var label htfLookingForLowLabel = na
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+// Check if current candle is bearish and closes below previous candle's low
+isBearishBreakdown() =>
+    close < open and close < low[1]
+
+// Check if current candle is bullish and closes above previous candle's high
+isBullishBreakout() =>
+    close > open and close > high[1]
+
+// HTF versions
+htfIsBearishBreakdown(htfClose, htfOpen, htfLow) =>
+    htfClose < htfOpen and htfClose < htfLow
+
+htfIsBullishBreakout(htfClose, htfOpen, htfHigh) =>
+    htfClose > htfOpen and htfClose > htfHigh
+
+// Find lowest low between two bar indices
+findLowestBetween(startBar, endBar) =>
+    float lowestPrice = na
+    int lowestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, 5000)
+
+    if lookbackStart <= lookbackEnd
+        for i = lookbackStart to lookbackEnd
+            if not na(low[i])
+                if na(lowestPrice) or low[i] < lowestPrice
+                    lowestPrice := low[i]
+                    lowestBarIndex := currentBar - i
+
+    [lowestPrice, lowestBarIndex]
+
+// Find highest high between two bar indices
+findHighestBetween(startBar, endBar) =>
+    float highestPrice = na
+    int highestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, 5000)
+
+    if lookbackStart <= lookbackEnd
+        for i = lookbackStart to lookbackEnd
+            if not na(high[i])
+                if na(highestPrice) or high[i] > highestPrice
+                    highestPrice := high[i]
+                    highestBarIndex := currentBar - i
+
+    [highestPrice, highestBarIndex]
+
+// ============================================================================
+// LEVEL MANAGEMENT FUNCTIONS
+// ============================================================================
+
+// Add a new high level
+addHigh(float price, int barIdx, string levelType, color lineColor) =>
+    // Delete previous most recent high line if it's not broken or swept
+    if mostRecentHighIndex >= 0
+        prevHigh = array.get(highs, mostRecentHighIndex)
+        if prevHigh.levelType != "broken" and prevHigh.levelType != "swept"
+            line.delete(prevHigh.levelLine)
+
+    // Create new line
+    newLine = line.new(barIdx, price, barIdx + 1, price,
+                       color=lineColor,
+                       width=lineWidth,
+                       extend=extend.right,
+                       style=line.style_solid)
+
+    // Create new HighLevel object
+    newHigh = HighLevel.new(price, barIdx, newLine, levelType)
+    array.push(highs, newHigh)
+
+    // Create label if enabled
+    if showHighLowLabels
+        label.new(barIdx, price, "VH",
+                 style=label.style_label_down,
+                 color=lineColor,
+                 textcolor=color.white,
+                 size=size.small)
+
+    true
+
+// Add a new low level
+addLow(float price, int barIdx, string levelType, color lineColor) =>
+    // Delete previous most recent low line if it's not broken or swept
+    if mostRecentLowIndex >= 0
+        prevLow = array.get(lows, mostRecentLowIndex)
+        if prevLow.levelType != "broken" and prevLow.levelType != "swept"
+            line.delete(prevLow.levelLine)
+
+    // Create new line
+    newLine = line.new(barIdx, price, barIdx + 1, price,
+                       color=lineColor,
+                       width=lineWidth,
+                       extend=extend.right,
+                       style=line.style_solid)
+
+    // Create new LowLevel object
+    newLow = LowLevel.new(price, barIdx, newLine, levelType)
+    array.push(lows, newLow)
+
+    // Create label if enabled
+    if showHighLowLabels
+        label.new(barIdx, price, "VL",
+                 style=label.style_label_up,
+                 color=lineColor,
+                 textcolor=color.white,
+                 size=size.small)
+
+    true
+
+// HTF versions
+addHighHTF(float price, int barIdx, string levelType, color lineColor) =>
+    if htfMostRecentHighIndex >= 0
+        prevHigh = array.get(htfHighs, htfMostRecentHighIndex)
+        if prevHigh.levelType != "broken" and prevHigh.levelType != "swept"
+            line.delete(prevHigh.levelLine)
+
+    newLine = line.new(barIdx, price, barIdx + 1, price,
+                       color=lineColor,
+                       width=lineWidth + 1,  // Thicker for HTF
+                       extend=extend.right,
+                       style=line.style_solid)
+
+    newHigh = HighLevel.new(price, barIdx, newLine, levelType)
+    array.push(htfHighs, newHigh)
+
+    if showHighLowLabels
+        label.new(barIdx, price, "HTF VH",
+                 style=label.style_label_down,
+                 color=lineColor,
+                 textcolor=color.white,
+                 size=size.small)
+
+    true
+
+addLowHTF(float price, int barIdx, string levelType, color lineColor) =>
+    if htfMostRecentLowIndex >= 0
+        prevLow = array.get(htfLows, htfMostRecentLowIndex)
+        if prevLow.levelType != "broken" and prevLow.levelType != "swept"
+            line.delete(prevLow.levelLine)
+
+    newLine = line.new(barIdx, price, barIdx + 1, price,
+                       color=lineColor,
+                       width=lineWidth + 1,  // Thicker for HTF
+                       extend=extend.right,
+                       style=line.style_solid)
+
+    newLow = LowLevel.new(price, barIdx, newLine, levelType)
+    array.push(htfLows, newLow)
+
+    if showHighLowLabels
+        label.new(barIdx, price, "HTF VL",
+                 style=label.style_label_up,
+                 color=lineColor,
+                 textcolor=color.white,
+                 size=size.small)
+
+    true
+
+// ============================================================================
+// CHECK FOR BROKEN AND SWEPT LEVELS
+// ============================================================================
+
+checkBrokenLevels() =>
+    // Check highs
+    if array.size(highs) > 0
+        for i = 0 to array.size(highs) - 1
+            highLevel = array.get(highs, i)
+
+            // Check for sweep (wick crosses but close doesn't)
+            if highLevel.levelType != "swept" and highLevel.levelType != "broken" and high > highLevel.price and close <= highLevel.price
+                highLevel.levelType := "swept"
+                line.set_style(highLevel.levelLine, line.style_dotted)
+
+            // Check for break (close crosses above)
+            else if highLevel.levelType != "broken" and close > highLevel.price
+                highLevel.levelType := "broken"
+
+                // Only keep line visible if this is most recent high (valid BOS)
+                if i == mostRecentHighIndex
+                    line.set_x2(highLevel.levelLine, bar_index)
+                    line.set_extend(highLevel.levelLine, extend.none)
+                    line.set_style(highLevel.levelLine, line.style_dotted)
+                    line.set_color(highLevel.levelLine, bosColor)
+
+                    if showBosLabels
+                        centerBar = math.round((highLevel.barIndex + bar_index) / 2)
+                        label.new(centerBar, highLevel.price, "BOS↑",
+                                 style=label.style_label_center,
+                                 color=color.white,
+                                 textcolor=bosColor,
+                                 size=size.tiny)
+                else
+                    line.delete(highLevel.levelLine)
+
+    // Check lows
+    if array.size(lows) > 0
+        for i = 0 to array.size(lows) - 1
+            lowLevel = array.get(lows, i)
+
+            // Check for sweep
+            if lowLevel.levelType != "swept" and lowLevel.levelType != "broken" and low < lowLevel.price and close >= lowLevel.price
+                lowLevel.levelType := "swept"
+                line.set_style(lowLevel.levelLine, line.style_dotted)
+
+            // Check for break
+            else if lowLevel.levelType != "broken" and close < lowLevel.price
+                lowLevel.levelType := "broken"
+
+                if i == mostRecentLowIndex
+                    line.set_x2(lowLevel.levelLine, bar_index)
+                    line.set_extend(lowLevel.levelLine, extend.none)
+                    line.set_style(lowLevel.levelLine, line.style_dotted)
+                    line.set_color(lowLevel.levelLine, bosColor)
+
+                    if showBosLabels
+                        centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
+                        label.new(centerBar, lowLevel.price, "BOS↓",
+                                 style=label.style_label_center,
+                                 color=color.white,
+                                 textcolor=bosColor,
+                                 size=size.tiny)
+                else
+                    line.delete(lowLevel.levelLine)
+
+    true
+
+// HTF version
+checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
+    if array.size(htfHighs) > 0
+        for i = 0 to array.size(htfHighs) - 1
+            highLevel = array.get(htfHighs, i)
+
+            if highLevel.levelType != "swept" and highLevel.levelType != "broken" and htfHigh > highLevel.price and htfClose <= highLevel.price
+                highLevel.levelType := "swept"
+                line.set_style(highLevel.levelLine, line.style_dotted)
+
+            else if highLevel.levelType != "broken" and htfClose > highLevel.price
+                highLevel.levelType := "broken"
+
+                if i == htfMostRecentHighIndex
+                    line.set_x2(highLevel.levelLine, bar_index)
+                    line.set_extend(highLevel.levelLine, extend.none)
+                    line.set_style(highLevel.levelLine, line.style_dotted)
+                    line.set_color(highLevel.levelLine, htfBosColor)
+
+                    if showBosLabels
+                        centerBar = math.round((highLevel.barIndex + bar_index) / 2)
+                        label.new(centerBar, highLevel.price, "HTF BOS↑",
+                                 style=label.style_label_center,
+                                 color=color.white,
+                                 textcolor=htfBosColor,
+                                 size=size.tiny)
+                else
+                    line.delete(highLevel.levelLine)
+
+    if array.size(htfLows) > 0
+        for i = 0 to array.size(htfLows) - 1
+            lowLevel = array.get(htfLows, i)
+
+            if lowLevel.levelType != "swept" and lowLevel.levelType != "broken" and htfLow < lowLevel.price and htfClose >= lowLevel.price
+                lowLevel.levelType := "swept"
+                line.set_style(lowLevel.levelLine, line.style_dotted)
+
+            else if lowLevel.levelType != "broken" and htfClose < lowLevel.price
+                lowLevel.levelType := "broken"
+
+                if i == htfMostRecentLowIndex
+                    line.set_x2(lowLevel.levelLine, bar_index)
+                    line.set_extend(lowLevel.levelLine, extend.none)
+                    line.set_style(lowLevel.levelLine, line.style_dotted)
+                    line.set_color(lowLevel.levelLine, htfBosColor)
+
+                    if showBosLabels
+                        centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
+                        label.new(centerBar, lowLevel.price, "HTF BOS↓",
+                                 style=label.style_label_center,
+                                 color=color.white,
+                                 textcolor=htfBosColor,
+                                 size=size.tiny)
+                else
+                    line.delete(lowLevel.levelLine)
+
+    true
+
+// Determine level type based on BOS direction
+getHighLevelType(string bosDirection) =>
+    bosDirection == "bullish" ? "weak" : "strong"
+
+getLowLevelType(string bosDirection) =>
+    bosDirection == "bearish" ? "weak" : "strong"
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+if not initialized and bar_index > 0
+    if isBearishBreakdown()
+        float localHigh = high
+        int localHighBar = bar_index
+
+        for i = 1 to math.min(bar_index, 200)
+            if high[i] > localHigh
+                localHigh := high[i]
+                localHighBar := bar_index - i
+
+        currentValidHigh := localHigh
+        currentValidHighBar := localHighBar
+        initialized := true
+        lookingForLow := true
+
+        addHigh(localHigh, localHighBar, "strong", highColor)
+        mostRecentHighIndex := array.size(highs) - 1
+
+// ============================================================================
+// MAIN LOGIC
+// ============================================================================
+
+if initialized
+    // Check broken/swept levels
+    checkBrokenLevels()
+
+    bool bosBullish = false
+    bool bosBearish = false
+
+    // Check for Break of Structure
+    if not na(currentValidHigh) and not na(currentValidLow) and close > currentValidHigh and lookingForLow
+        bosBullish := true
+        currentHighIsBroken := true
+        lastBosDirection := "bullish"
+
+        // Make broken high line dotted
+        if mostRecentHighIndex >= 0
+            highLevel = array.get(highs, mostRecentHighIndex)
+            line.set_style(highLevel.levelLine, line.style_dotted)
+
+        [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
+
+        if not na(newLow) and not na(newLowBar)
+            currentValidLow := newLow
+            currentValidLowBar := newLowBar
+            lookingForHigh := true
+            lookingForLow := false
+            currentLowIsBroken := false
+
+            addLow(newLow, newLowBar, "strong", lowColor)
+            mostRecentLowIndex := array.size(lows) - 1
+
+    if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and close < currentValidLow and lookingForHigh
+        bosBearish := true
+        currentLowIsBroken := true
+        lastBosDirection := "bearish"
+
+        // Make broken low line dotted
+        if mostRecentLowIndex >= 0
+            lowLevel = array.get(lows, mostRecentLowIndex)
+            line.set_style(lowLevel.levelLine, line.style_dotted)
+
+        [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
+
+        if not na(newHigh) and not na(newHighBar)
+            currentValidHigh := newHigh
+            currentValidHighBar := newHighBar
+            lookingForLow := true
+            lookingForHigh := false
+            currentHighIsBroken := false
+
+            addHigh(newHigh, newHighBar, "strong", highColor)
+            mostRecentHighIndex := array.size(highs) - 1
+
+    // Look for new valid low via breakout
+    if not bosBullish and not bosBearish and lookingForLow
+        if isBullishBreakout()
+            [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
+
+            if not na(newLow) and not na(newLowBar)
+                currentValidLow := newLow
+                currentValidLowBar := newLowBar
+                lookingForHigh := true
+                lookingForLow := false
+                currentLowIsBroken := false
+
+                levelType = getLowLevelType(lastBosDirection)
+                addLow(newLow, newLowBar, levelType, lowColor)
+                mostRecentLowIndex := array.size(lows) - 1
+
+    // Look for new valid high via breakdown
+    if not bosBullish and not bosBearish and lookingForHigh
+        if isBearishBreakdown()
+            [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
+
+            if not na(newHigh) and not na(newHighBar)
+                currentValidHigh := newHigh
+                currentValidHighBar := newHighBar
+                lookingForLow := true
+                lookingForHigh := false
+                currentHighIsBroken := false
+
+                levelType = getHighLevelType(lastBosDirection)
+                addHigh(newHigh, newHighBar, levelType, highColor)
+                mostRecentHighIndex := array.size(highs) - 1
+
+// ============================================================================
+// HTF DATA AND LOGIC
+// ============================================================================
+
+[htfHigh, htfLow, htfOpen, htfClose] = request.security(syminfo.tickerid, htfTimeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
+htfTime = request.security(syminfo.tickerid, htfTimeframe, time, lookahead=barmerge.lookahead_off)
+bool htfNewCandle = ta.change(htfTime) != 0
+
+// HTF Initialization
+if htfEnabled and not htfInitialized and bar_index > 0 and htfNewCandle
+    if htfIsBearishBreakdown(htfClose, htfOpen, htfLow)
+        htfCurrentValidHigh := htfHigh
+        htfCurrentValidHighBar := bar_index
+        htfInitialized := true
+        htfLookingForLow := true
+
+        htfSwingLow := htfLow
+        htfSwingLowBar := bar_index
+
+        addHighHTF(htfHigh, bar_index, "strong", htfHighColor)
+        htfMostRecentHighIndex := array.size(htfHighs) - 1
+
+// HTF swing tracking
+if htfEnabled and htfInitialized
+    if htfLookingForLow
+        if na(htfSwingLow) or htfLow < htfSwingLow
+            htfSwingLow := htfLow
+            htfSwingLowBar := bar_index
+
+    if htfLookingForHigh
+        if na(htfSwingHigh) or htfHigh > htfSwingHigh
+            htfSwingHigh := htfHigh
+            htfSwingHighBar := bar_index
+
+// HTF main logic (only on new HTF candles)
+if htfEnabled and htfInitialized and htfNewCandle
+    bool htfBosBullish = false
+    bool htfBosBearish = false
+
+    // Check HTF BOS
+    if not na(htfCurrentValidHigh) and not na(htfCurrentValidLow) and htfClose > htfCurrentValidHigh and htfLookingForLow
+        htfBosBullish := true
+        htfCurrentHighIsBroken := true
+        htfLastBosDirection := "bullish"
+
+        if htfMostRecentHighIndex >= 0
+            highLevel = array.get(htfHighs, htfMostRecentHighIndex)
+            line.set_style(highLevel.levelLine, line.style_dotted)
+
+        if not na(htfSwingLow) and not na(htfSwingLowBar)
+            htfCurrentValidLow := htfSwingLow
+            htfCurrentValidLowBar := htfSwingLowBar
+            htfLookingForHigh := true
+            htfLookingForLow := false
+            htfCurrentLowIsBroken := false
+
+            addLowHTF(htfSwingLow, htfSwingLowBar, "strong", htfLowColor)
+            htfMostRecentLowIndex := array.size(htfLows) - 1
+
+            htfSwingHigh := htfHigh
+            htfSwingHighBar := bar_index
+
+    if not htfBosBullish and not na(htfCurrentValidLow) and not na(htfCurrentValidHigh) and htfClose < htfCurrentValidLow and htfLookingForHigh
+        htfBosBearish := true
+        htfCurrentLowIsBroken := true
+        htfLastBosDirection := "bearish"
+
+        if htfMostRecentLowIndex >= 0
+            lowLevel = array.get(htfLows, htfMostRecentLowIndex)
+            line.set_style(lowLevel.levelLine, line.style_dotted)
+
+        if not na(htfSwingHigh) and not na(htfSwingHighBar)
+            htfCurrentValidHigh := htfSwingHigh
+            htfCurrentValidHighBar := htfSwingHighBar
+            htfLookingForLow := true
+            htfLookingForHigh := false
+            htfCurrentHighIsBroken := false
+
+            addHighHTF(htfSwingHigh, htfSwingHighBar, "strong", htfHighColor)
+            htfMostRecentHighIndex := array.size(htfHighs) - 1
+
+            htfSwingLow := htfLow
+            htfSwingLowBar := bar_index
+
+    // HTF breakout/breakdown
+    if not htfBosBullish and not htfBosBearish and htfLookingForLow
+        if htfIsBullishBreakout(htfClose, htfOpen, htfHigh)
+            if not na(htfSwingLow) and not na(htfSwingLowBar)
+                htfCurrentValidLow := htfSwingLow
+                htfCurrentValidLowBar := htfSwingLowBar
+                htfLookingForHigh := true
+                htfLookingForLow := false
+                htfCurrentLowIsBroken := false
+
+                levelType = getLowLevelType(htfLastBosDirection)
+                addLowHTF(htfSwingLow, htfSwingLowBar, levelType, htfLowColor)
+                htfMostRecentLowIndex := array.size(htfLows) - 1
+
+                htfSwingHigh := htfHigh
+                htfSwingHighBar := bar_index
+
+    if not htfBosBullish and not htfBosBearish and htfLookingForHigh
+        if htfIsBearishBreakdown(htfClose, htfOpen, htfLow)
+            if not na(htfSwingHigh) and not na(htfSwingHighBar)
+                htfCurrentValidHigh := htfSwingHigh
+                htfCurrentValidHighBar := htfSwingHighBar
+                htfLookingForLow := true
+                htfLookingForHigh := false
+                htfCurrentHighIsBroken := false
+
+                levelType = getHighLevelType(htfLastBosDirection)
+                addHighHTF(htfSwingHigh, htfSwingHighBar, levelType, htfHighColor)
+                htfMostRecentHighIndex := array.size(htfHighs) - 1
+
+                htfSwingLow := htfLow
+                htfSwingLowBar := bar_index
+
+// Check HTF broken/swept levels
+if htfEnabled and htfInitialized
+    checkBrokenLevelsHTF(htfHigh, htfLow, htfClose)
+
+// ============================================================================
+// ARRAY TRUNCATION (Performance)
+// ============================================================================
+
+if array.size(highs) > 50
+    oldHigh = array.get(highs, 0)
+    line.delete(oldHigh.levelLine)
+    array.shift(highs)
+    if mostRecentHighIndex >= 0
+        mostRecentHighIndex := mostRecentHighIndex - 1
+
+if array.size(lows) > 50
+    oldLow = array.get(lows, 0)
+    line.delete(oldLow.levelLine)
+    array.shift(lows)
+    if mostRecentLowIndex >= 0
+        mostRecentLowIndex := mostRecentLowIndex - 1
+
+if array.size(htfHighs) > 50
+    oldHigh = array.get(htfHighs, 0)
+    line.delete(oldHigh.levelLine)
+    array.shift(htfHighs)
+    if htfMostRecentHighIndex >= 0
+        htfMostRecentHighIndex := htfMostRecentHighIndex - 1
+
+if array.size(htfLows) > 50
+    oldLow = array.get(htfLows, 0)
+    line.delete(oldLow.levelLine)
+    array.shift(htfLows)
+    if htfMostRecentLowIndex >= 0
+        htfMostRecentLowIndex := htfMostRecentLowIndex - 1
+
+// ============================================================================
+// PLOTS AND LABELS
+// ============================================================================
+
+plot(currentValidHigh, "Current Valid High", color=color.new(highColor, 80), linewidth=1, style=plot.style_stepline)
+plot(currentValidLow, "Current Valid Low", color=color.new(lowColor, 80), linewidth=1, style=plot.style_stepline)
+plot(htfEnabled ? htfCurrentValidHigh : na, "HTF Valid High", color=color.new(htfHighColor, 80), linewidth=1, style=plot.style_stepline)
+plot(htfEnabled ? htfCurrentValidLow : na, "HTF Valid Low", color=color.new(htfLowColor, 80), linewidth=1, style=plot.style_stepline)
+
+// Update labels for current levels
+if initialized and not na(currentValidHigh)
+    if not na(currentHighLabel)
+        label.delete(currentHighLabel)
+
+    string labelText = na
+    color labelColor = highColor
+    if currentHighIsBroken
+        labelText := timeframe.period + " Broken High"
+        labelColor := color.new(color.red, 0)
+    else
+        labelText := lastBosDirection == "bullish" ? timeframe.period + " Weak High" : timeframe.period + " High"
+
+    currentHighLabel := label.new(bar_index + 10, currentValidHigh,
+                                   text=labelText,
+                                   style=label.style_label_left,
+                                   color=labelColor,
+                                   textcolor=color.white,
+                                   size=size.small)
+
+if initialized and not na(currentValidLow)
+    if not na(currentLowLabel)
+        label.delete(currentLowLabel)
+
+    string labelText = na
+    color labelColor = lowColor
+    if currentLowIsBroken
+        labelText := timeframe.period + " Broken Low"
+        labelColor := color.new(color.red, 0)
+    else
+        labelText := lastBosDirection == "bearish" ? timeframe.period + " Weak Low" : timeframe.period + " Low"
+
+    currentLowLabel := label.new(bar_index + 10, currentValidLow,
+                                  text=labelText,
+                                  style=label.style_label_left,
+                                  color=labelColor,
+                                  textcolor=color.white,
+                                  size=size.small)
+
+// HTF labels
+if htfEnabled and htfInitialized and not na(htfCurrentValidHigh)
+    if not na(htfCurrentHighLabel)
+        label.delete(htfCurrentHighLabel)
+
+    string labelText = na
+    color labelColor = htfHighColor
+    if htfCurrentHighIsBroken
+        labelText := htfTimeframe + " Broken High"
+        labelColor := color.new(color.red, 0)
+    else
+        labelText := htfLastBosDirection == "bullish" ? htfTimeframe + " Weak High" : htfTimeframe + " High"
+
+    htfCurrentHighLabel := label.new(bar_index + 20, htfCurrentValidHigh,
+                                      text=labelText,
+                                      style=label.style_label_left,
+                                      color=labelColor,
+                                      textcolor=color.white,
+                                      size=size.small)
+
+if htfEnabled and htfInitialized and not na(htfCurrentValidLow)
+    if not na(htfCurrentLowLabel)
+        label.delete(htfCurrentLowLabel)
+
+    string labelText = na
+    color labelColor = htfLowColor
+    if htfCurrentLowIsBroken
+        labelText := htfTimeframe + " Broken Low"
+        labelColor := color.new(color.red, 0)
+    else
+        labelText := htfLastBosDirection == "bearish" ? htfTimeframe + " Weak Low" : htfTimeframe + " Low"
+
+    htfCurrentLowLabel := label.new(bar_index + 20, htfCurrentValidLow,
+                                     text=labelText,
+                                     style=label.style_label_left,
+                                     color=labelColor,
+                                     textcolor=color.white,
+                                     size=size.small)
+
+// Swept level labels (most recent only)
+if array.size(sweptHighLabels) > 0
+    for i = 0 to array.size(sweptHighLabels) - 1
+        label.delete(array.get(sweptHighLabels, i))
+    array.clear(sweptHighLabels)
+
+if array.size(sweptLowLabels) > 0
+    for i = 0 to array.size(sweptLowLabels) - 1
+        label.delete(array.get(sweptLowLabels, i))
+    array.clear(sweptLowLabels)
+
+if array.size(htfSweptHighLabels) > 0
+    for i = 0 to array.size(htfSweptHighLabels) - 1
+        label.delete(array.get(htfSweptHighLabels, i))
+    array.clear(htfSweptHighLabels)
+
+if array.size(htfSweptLowLabels) > 0
+    for i = 0 to array.size(htfSweptLowLabels) - 1
+        label.delete(array.get(htfSweptLowLabels, i))
+    array.clear(htfSweptLowLabels)
+
+// Find and display most recent swept levels
+if array.size(highs) > 0
+    for i = array.size(highs) - 1 to 0
+        highLevel = array.get(highs, i)
+        if highLevel.levelType == "swept"
+            sweptLabel = label.new(bar_index + 10, highLevel.price,
+                                   text="Swept High",
+                                   style=label.style_label_left,
+                                   color=color.new(highColor, 50),
+                                   textcolor=color.white,
+                                   size=size.small)
+            array.push(sweptHighLabels, sweptLabel)
+            break
+
+if array.size(lows) > 0
+    for i = array.size(lows) - 1 to 0
+        lowLevel = array.get(lows, i)
+        if lowLevel.levelType == "swept"
+            sweptLabel = label.new(bar_index + 10, lowLevel.price,
+                                   text="Swept Low",
+                                   style=label.style_label_left,
+                                   color=color.new(lowColor, 50),
+                                   textcolor=color.white,
+                                   size=size.small)
+            array.push(sweptLowLabels, sweptLabel)
+            break
+
+if htfEnabled and array.size(htfHighs) > 0
+    for i = array.size(htfHighs) - 1 to 0
+        highLevel = array.get(htfHighs, i)
+        if highLevel.levelType == "swept"
+            sweptLabel = label.new(bar_index + 20, highLevel.price,
+                                   text="HTF Swept High",
+                                   style=label.style_label_left,
+                                   color=color.new(htfHighColor, 50),
+                                   textcolor=color.white,
+                                   size=size.small)
+            array.push(htfSweptHighLabels, sweptLabel)
+            break
+
+if htfEnabled and array.size(htfLows) > 0
+    for i = array.size(htfLows) - 1 to 0
+        lowLevel = array.get(htfLows, i)
+        if lowLevel.levelType == "swept"
+            sweptLabel = label.new(bar_index + 20, lowLevel.price,
+                                   text="HTF Swept Low",
+                                   style=label.style_label_left,
+                                   color=color.new(htfLowColor, 50),
+                                   textcolor=color.white,
+                                   size=size.small)
+            array.push(htfSweptLowLabels, sweptLabel)
+            break
