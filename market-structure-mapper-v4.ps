@@ -125,11 +125,13 @@ var bool pullback50Flag = false
 var bool ltfBosFlag = false
 var bool ltfSweptFlag = false
 var bool ltfBosAtExtremeFlag = false
+var bool pullback25Flag = false
 
 // State tracking for alert conditions
 var bool ltfBosBullishSinceLastHTF = false
 var bool ltfBosBearishSinceLastHTF = false
 var float pullback50Level = na
+var float pullback25Level = na
 
 // Track HTF level state changes to detect when they become swept
 var string htfMostRecentHighPrevType = "strong"
@@ -749,9 +751,10 @@ if htfEnabled and htfInitialized
             htfLowJustSwept := true
         htfMostRecentLowPrevType := lowLevel.levelType
 
-    // Always update 50% level based on current HTF range
+    // Always update 50% and 25% levels based on current HTF range
     if not na(htfCurrentValidHigh) and not na(htfCurrentValidLow)
         pullback50Level := (htfCurrentValidHigh + htfCurrentValidLow) / 2
+        pullback25Level := htfCurrentValidLow + (htfCurrentValidHigh - htfCurrentValidLow) * 0.25
 
     // Check HTF alert conditions at HTF candle close
     if htfNewCandle
@@ -789,6 +792,14 @@ if not na(pullback50Level)
     if (high >= pullback50Level and low <= pullback50Level) or
        (close >= pullback50Level - tolerance and close <= pullback50Level + tolerance)
         pullback50Flag := true
+
+// Check for 25% pullback (low 50% mark) on every bar
+if not na(pullback25Level)
+    // Check if price crosses 25% level (with small tolerance)
+    float tolerance = pullback25Level * 0.001
+    if (high >= pullback25Level and low <= pullback25Level) or
+       (close >= pullback25Level - tolerance and close <= pullback25Level + tolerance)
+        pullback25Flag := true
 
 // ============================================================================
 // UPDATE LEVEL STATES (Ensure consistency on every bar)
@@ -1065,7 +1076,7 @@ if array.size(highs) > 1
         highLevel = array.get(highs, i)
         if highLevel.levelType == "swept"
             sweptLabel = label.new(bar_index + 5, highLevel.price,
-                                   text="Swept High",
+                                   text=timeframe.period + " Swept High",
                                    style=label.style_label_left,
                                    color=color.new(highColor, 50),
                                    textcolor=color.white,
@@ -1078,7 +1089,7 @@ if array.size(lows) > 1
         lowLevel = array.get(lows, i)
         if lowLevel.levelType == "swept"
             sweptLabel = label.new(bar_index + 5, lowLevel.price,
-                                   text="Swept Low",
+                                   text=timeframe.period + " Swept Low",
                                    style=label.style_label_left,
                                    color=color.new(lowColor, 50),
                                    textcolor=color.white,
@@ -1091,7 +1102,7 @@ if htfEnabled and array.size(htfHighs) > 1
         highLevel = array.get(htfHighs, i)
         if highLevel.levelType == "swept"
             sweptLabel = label.new(bar_index + 20, highLevel.price,
-                                   text="HTF Swept High",
+                                   text=htfTimeframe + " Swept High",
                                    style=label.style_label_left,
                                    color=color.new(htfHighColor, 50),
                                    textcolor=color.white,
@@ -1104,7 +1115,7 @@ if htfEnabled and array.size(htfLows) > 1
         lowLevel = array.get(htfLows, i)
         if lowLevel.levelType == "swept"
             sweptLabel = label.new(bar_index + 20, lowLevel.price,
-                                   text="HTF Swept Low",
+                                   text=htfTimeframe + " Swept Low",
                                    style=label.style_label_left,
                                    color=color.new(htfLowColor, 50),
                                    textcolor=color.white,
@@ -1124,7 +1135,10 @@ plot(htfBosFlag ? 1 : 0, title="Alert: HTF BOS", display=display.none)
 plot(htfBosLtfBosFlag ? 1 : 0, title="Alert: HTF BOS + LTF BOS Same Direction", display=display.none)
 plot(htfSweptFlag ? 1 : 0, title="Alert: HTF Swept", display=display.none)
 plot(htfSweptLtfBosFlag ? 1 : 0, title="Alert: HTF Swept + LTF BOS Reversal", display=display.none)
+
+// Pullback Alert Conditions
 plot(pullback50Flag ? 1 : 0, title="Alert: 50% Pullback", display=display.none)
+plot(pullback25Flag ? 1 : 0, title="Alert: 25% Pullback (Low 50% Mark)", display=display.none)
 
 // LTF Alert Conditions
 plot(ltfBosFlag ? 1 : 0, title="Alert: LTF BOS", display=display.none)
