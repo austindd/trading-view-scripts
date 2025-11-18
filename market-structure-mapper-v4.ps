@@ -145,9 +145,6 @@ var string ltfMostRecentLowPrevType = "strong"
 var bool htfBosBullish = false
 var bool htfBosBearish = false
 
-// Track whether HTF just closed (to reset HTF flags on next LTF bar)
-var bool htfJustClosed = false
-
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -706,14 +703,6 @@ if htfEnabled and htfInitialized
 // ALERT CONDITION CHECKING
 // ============================================================================
 
-// Reset HTF flags on first LTF bar after HTF candle close
-if htfJustClosed
-    htfBosFlag := false
-    htfBosLtfBosFlag := false
-    htfSweptFlag := false
-    htfSweptLtfBosFlag := false
-    htfJustClosed := false
-
 // Detect LTF level sweeps
 if initialized
     bool ltfHighJustSwept = false
@@ -764,7 +753,6 @@ if htfEnabled and htfInitialized
         // HTF Condition 1: HTF BOS
         if htfBosOccurred
             htfBosFlag := true
-            htfJustClosed := true
 
             // HTF Condition 2: HTF BOS + LTF BOS same direction
             if (htfBosBullish and ltfBosBullishSinceLastHTF) or (htfBosBearish and ltfBosBearishSinceLastHTF)
@@ -773,7 +761,6 @@ if htfEnabled and htfInitialized
         // HTF Condition 3: HTF Swept
         if htfHighJustSwept or htfLowJustSwept
             htfSweptFlag := true
-            htfJustClosed := true
 
             // HTF Condition 4: HTF Swept + LTF BOS in reversal direction
             // HTF high swept -> need LTF bearish BOS (reversal down)
@@ -1124,23 +1111,31 @@ if htfEnabled and array.size(htfLows) > 1
             break
 
 // ============================================================================
-// ALERT FLAG PLOTS (invisible - for creating alerts)
+// ALERT CONDITIONS
 // ============================================================================
 
-// These plots are invisible but can be used to create alerts in TradingView
-// To create an alert: Chart settings > Create Alert > Condition: select one of these plots
-
 // HTF Alert Conditions
-plot(htfBosFlag ? 1 : 0, title="Alert: HTF BOS", display=display.none)
-plot(htfBosLtfBosFlag ? 1 : 0, title="Alert: HTF BOS + LTF BOS Same Direction", display=display.none)
-plot(htfSweptFlag ? 1 : 0, title="Alert: HTF Swept", display=display.none)
-plot(htfSweptLtfBosFlag ? 1 : 0, title="Alert: HTF Swept + LTF BOS Reversal", display=display.none)
+alertcondition(htfBosFlag, title="HTF BOS", message="HTF Break of Structure occurred on {{ticker}}")
+alertcondition(htfBosLtfBosFlag, title="HTF BOS + LTF BOS Same Direction", message="HTF and LTF both broke structure in same direction on {{ticker}}")
+alertcondition(htfSweptFlag, title="HTF Swept", message="HTF level swept on {{ticker}}")
+alertcondition(htfSweptLtfBosFlag, title="HTF Swept + LTF BOS Reversal", message="HTF level swept followed by LTF reversal BOS on {{ticker}}")
 
 // Pullback Alert Conditions
-plot(pullback50Flag ? 1 : 0, title="Alert: 50% Pullback", display=display.none)
-plot(pullback25Flag ? 1 : 0, title="Alert: 25% Pullback (Low 50% Mark)", display=display.none)
+alertcondition(pullback50Flag, title="50% Pullback", message="Price touched 50% level on {{ticker}}")
+alertcondition(pullback25Flag, title="25% Pullback (Low 50% Mark)", message="Price touched 25% level (low 50% mark) on {{ticker}}")
 
 // LTF Alert Conditions
-plot(ltfBosFlag ? 1 : 0, title="Alert: LTF BOS", display=display.none)
-plot(ltfSweptFlag ? 1 : 0, title="Alert: LTF Swept", display=display.none)
-plot(ltfBosAtExtremeFlag ? 1 : 0, title="Alert: LTF BOS at HTF Extreme", display=display.none)
+alertcondition(ltfBosFlag, title="LTF BOS", message="LTF Break of Structure occurred on {{ticker}}")
+alertcondition(ltfSweptFlag, title="LTF Swept", message="LTF level swept on {{ticker}}")
+alertcondition(ltfBosAtExtremeFlag, title="LTF BOS at HTF Extreme", message="LTF BOS occurred at HTF extreme (bullish below 50% or bearish above 50%) on {{ticker}}")
+
+// Reset all alert flags at end of bar
+htfBosFlag := false
+htfBosLtfBosFlag := false
+htfSweptFlag := false
+htfSweptLtfBosFlag := false
+pullback50Flag := false
+pullback25Flag := false
+ltfBosFlag := false
+ltfSweptFlag := false
+ltfBosAtExtremeFlag := false
