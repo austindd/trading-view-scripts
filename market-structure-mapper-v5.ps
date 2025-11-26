@@ -16,6 +16,7 @@ htfTimeframe = input.timeframe("60", "HTF Timeframe", group="Higher Timeframe")
 
 // Zone Settings
 showCtfZones = input.bool(true, "Show Zones", group="Zones")
+showBrokenZones = input.bool(false, "Show Broken Zones", group="Zones")
 maxZonesPerSide = input.int(20, "Max Zones Per Side", minval=10, maxval=250, group="Zones")
 
 // Current Timeframe Colors
@@ -1443,16 +1444,17 @@ if barstate.islast and showCtfZones
     array.clear(supplyZoneTimes)
 
     // Render demand zones (newest first, up to limit)
-    // Skip broken zones to avoid visual clutter from overlapping
     if array.size(demandZones) > 0
         for i = array.size(demandZones) - 1 to 0
             if demandZonesRendered >= maxZonesPerSide
                 break
             zone = array.get(demandZones, i)
-            if zone.broken
+            // Skip broken zones unless showBrokenZones is enabled
+            if zone.broken and not showBrokenZones
                 continue
             if not na(zone.leftTime) and not na(zone.top) and not na(zone.bottom)
-                box.new(zone.leftTime, zone.top, time, zone.bottom,
+                zoneEndTime = zone.broken ? zone.rightTime : time
+                box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
                        bgcolor=demandZoneColor,
                        border_color=demandZoneBorderColorInput,
                        border_width=1,
@@ -1463,16 +1465,17 @@ if barstate.islast and showCtfZones
                 demandSkipped := demandSkipped + 1
 
     // Render supply zones (newest first, up to limit)
-    // Skip broken zones to avoid visual clutter from overlapping
     if array.size(supplyZones) > 0
         for i = array.size(supplyZones) - 1 to 0
             if supplyZonesRendered >= maxZonesPerSide
                 break
             zone = array.get(supplyZones, i)
-            if zone.broken
+            // Skip broken zones unless showBrokenZones is enabled
+            if zone.broken and not showBrokenZones
                 continue
             if not na(zone.leftTime) and not na(zone.top) and not na(zone.bottom)
-                box.new(zone.leftTime, zone.top, time, zone.bottom,
+                zoneEndTime = zone.broken ? zone.rightTime : time
+                box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
                        bgcolor=supplyZoneColor,
                        border_color=supplyZoneBorderColorInput,
                        border_width=1,
