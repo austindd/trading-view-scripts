@@ -252,28 +252,28 @@ findHighestBetween(startBar, endBar) =>
 // ============================================================================
 
 // Calculate demand zone from a valid low
-// Returns [zoneTop, zoneBottom] or [na, na] if zone cannot be calculated
+// Returns [zoneTop, zoneBottom, leftBarIndex] or [na, na, na] if zone cannot be calculated
 calculateZoneFromLow(int lowBarIndex) =>
     float zoneTop = na
     float zoneBottom = na
+    int leftBarIndex = lowBarIndex
 
     // Find all bearish candles to the left of the low until we hit a bullish candle
     int barsBack = bar_index - lowBarIndex
 
     if barsBack >= 0 and barsBack < 5000
-        // Start from the low bar and go left
-        int leftmostBearishBar = lowBarIndex
         float highestInZone = na
         float lowestInZone = na
+        int leftmostBarIndex = lowBarIndex
 
-        // Scan left from the low bar
-        for i = barsBack to math.min(barsBack + 500, 5000)
+        // Scan left starting from one bar before the low bar
+        for i = barsBack + 1 to math.min(barsBack + 500, 5000)
             if not na(open[i]) and not na(close[i])
                 bool isBearish = close[i] < open[i]
 
                 if isBearish
                     // This is a bearish candle, include it in the zone
-                    leftmostBearishBar := bar_index - i
+                    leftmostBarIndex := bar_index - i
                     if na(highestInZone) or high[i] > highestInZone
                         highestInZone := high[i]
                     if na(lowestInZone) or low[i] < lowestInZone
@@ -282,36 +282,42 @@ calculateZoneFromLow(int lowBarIndex) =>
                     // Hit a bullish candle, stop here (don't include it)
                     break
 
-        // Set zone boundaries
+        // If we found at least one bearish candle, use that for the zone
         if not na(highestInZone) and not na(lowestInZone)
             zoneTop := highestInZone
             zoneBottom := lowestInZone
+            leftBarIndex := leftmostBarIndex
+        // Fallback: if no bearish candles found to the left, use the low bar itself
+        else if barsBack >= 0
+            zoneTop := high[barsBack]
+            zoneBottom := low[barsBack]
+            leftBarIndex := lowBarIndex
 
-    [zoneTop, zoneBottom]
+    [zoneTop, zoneBottom, leftBarIndex]
 
 // Calculate supply zone from a valid high
-// Returns [zoneTop, zoneBottom] or [na, na] if zone cannot be calculated
+// Returns [zoneTop, zoneBottom, leftBarIndex] or [na, na, na] if zone cannot be calculated
 calculateZoneFromHigh(int highBarIndex) =>
     float zoneTop = na
     float zoneBottom = na
+    int leftBarIndex = highBarIndex
 
     // Find all bullish candles to the left of the high until we hit a bearish candle
     int barsBack = bar_index - highBarIndex
 
     if barsBack >= 0 and barsBack < 5000
-        // Start from the high bar and go left
-        int leftmostBullishBar = highBarIndex
         float highestInZone = na
         float lowestInZone = na
+        int leftmostBarIndex = highBarIndex
 
-        // Scan left from the high bar
-        for i = barsBack to math.min(barsBack + 500, 5000)
+        // Scan left starting from one bar before the high bar
+        for i = barsBack + 1 to math.min(barsBack + 500, 5000)
             if not na(open[i]) and not na(close[i])
                 bool isBullish = close[i] > open[i]
 
                 if isBullish
                     // This is a bullish candle, include it in the zone
-                    leftmostBullishBar := bar_index - i
+                    leftmostBarIndex := bar_index - i
                     if na(highestInZone) or high[i] > highestInZone
                         highestInZone := high[i]
                     if na(lowestInZone) or low[i] < lowestInZone
@@ -320,12 +326,18 @@ calculateZoneFromHigh(int highBarIndex) =>
                     // Hit a bearish candle, stop here (don't include it)
                     break
 
-        // Set zone boundaries
+        // If we found at least one bullish candle, use that for the zone
         if not na(highestInZone) and not na(lowestInZone)
             zoneTop := highestInZone
             zoneBottom := lowestInZone
+            leftBarIndex := leftmostBarIndex
+        // Fallback: if no bullish candles found to the left, use the high bar itself
+        else if barsBack >= 0
+            zoneTop := high[barsBack]
+            zoneBottom := low[barsBack]
+            leftBarIndex := highBarIndex
 
-    [zoneTop, zoneBottom]
+    [zoneTop, zoneBottom, leftBarIndex]
 
 // Check if a zone should be aligned (for CTF zones in aligned mode)
 // A CTF zone is aligned if it corresponds to a HTF high or low
@@ -726,8 +738,6 @@ if initialized
 
     bool bosBullish = false
     bool bosBearish = false
-    bool cleanBullishBos = false
-    bool cleanBearishBos = false
 
     // Check for Break of Structure
     if not na(currentValidHigh) and not na(currentValidLow) and close > currentValidHigh and lookingForLow
@@ -735,11 +745,14 @@ if initialized
         currentHighIsBroken := true
         lastBosDirection := "bullish"
 
-        // Check if this is a "clean" BOS (no intermediate highs or lows between previousValidLow and currentValidHigh)
-        // For a clean bullish BOS, we need to go from a low directly to breaking the high
-        // This means we were looking for a low, found it, and now broke the high without finding another high in between
-        if not na(previousValidLow) and not na(previousValidLowBar)
-            cleanBullishBos := true
+        // Create demand zone at the current valid low (the low that led to this BOS)
+        if showCtfZones and not na(currentValidLow) and not na(currentValidLowBar)
+            [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromLow(currentValidLowBar)
+            if not na(zoneTop) and not na(zoneBottom)
+                bool isAligned = alignedModeOnly ? isZoneAlignedWithHtf(currentValidLowBar, true) : true
+                // Only create zone if not in aligned mode, or if aligned
+                if not alignedModeOnly or isAligned
+                    addDemandZone(zoneTop, zoneBottom, zoneLeftBar, demandZoneColor, isAligned)
 
         [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
 
@@ -757,23 +770,18 @@ if initialized
             addLow(newLow, newLowBar, "strong", lowColor)
             mostRecentLowIndex := array.size(lows) - 1
 
-            // Create demand zone if clean BOS and zones enabled
-            if cleanBullishBos and showCtfZones
-                [zoneTop, zoneBottom] = calculateZoneFromLow(previousValidLowBar)
-                if not na(zoneTop) and not na(zoneBottom)
-                    bool isAligned = alignedModeOnly ? isZoneAlignedWithHtf(previousValidLowBar, true) : true
-                    // Only create zone if not in aligned mode, or if aligned
-                    if not alignedModeOnly or isAligned
-                        addDemandZone(zoneTop, zoneBottom, previousValidLowBar, demandZoneColor, isAligned)
-
     if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and close < currentValidLow and lookingForHigh
         bosBearish := true
         currentLowIsBroken := true
         lastBosDirection := "bearish"
 
-        // Check for clean bearish BOS
-        if not na(previousValidHigh) and not na(previousValidHighBar)
-            cleanBearishBos := true
+        // Create supply zone at the current valid high (the high that led to this BOS)
+        if showCtfZones and not na(currentValidHigh) and not na(currentValidHighBar)
+            [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromHigh(currentValidHighBar)
+            if not na(zoneTop) and not na(zoneBottom)
+                bool isAligned = alignedModeOnly ? isZoneAlignedWithHtf(currentValidHighBar, false) : true
+                if not alignedModeOnly or isAligned
+                    addSupplyZone(zoneTop, zoneBottom, zoneLeftBar, supplyZoneColor, isAligned)
 
         [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
 
@@ -790,14 +798,6 @@ if initialized
 
             addHigh(newHigh, newHighBar, "strong", highColor)
             mostRecentHighIndex := array.size(highs) - 1
-
-            // Create supply zone if clean BOS and zones enabled
-            if cleanBearishBos and showCtfZones
-                [zoneTop, zoneBottom] = calculateZoneFromHigh(previousValidHighBar)
-                if not na(zoneTop) and not na(zoneBottom)
-                    bool isAligned = alignedModeOnly ? isZoneAlignedWithHtf(previousValidHighBar, false) : true
-                    if not alignedModeOnly or isAligned
-                        addSupplyZone(zoneTop, zoneBottom, previousValidHighBar, supplyZoneColor, isAligned)
 
     // Look for new valid low via breakout
     if not bosBullish and not bosBearish and lookingForLow
@@ -895,18 +895,17 @@ if htfEnabled and htfInitialized and htfNewCandle
     htfBosBullish := false
     htfBosBearish := false
 
-    bool htfCleanBullishBos = false
-    bool htfCleanBearishBos = false
-
     // Check HTF BOS
     if not na(htfCurrentValidHigh) and not na(htfCurrentValidLow) and htfClose > htfCurrentValidHigh and htfLookingForLow
         htfBosBullish := true
         htfCurrentHighIsBroken := true
         htfLastBosDirection := "bullish"
 
-        // Check for clean HTF BOS
-        if not na(htfPreviousValidLow) and not na(htfPreviousValidLowBar)
-            htfCleanBullishBos := true
+        // Create HTF demand zone at the current valid low (the low that led to this BOS)
+        if showHtfZones and not na(htfCurrentValidLow) and not na(htfCurrentValidLowBar)
+            [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromLow(htfCurrentValidLowBar)
+            if not na(zoneTop) and not na(zoneBottom)
+                addDemandZoneHTF(zoneTop, zoneBottom, zoneLeftBar, htfDemandZoneColor)
 
         if not na(htfSwingLow) and not na(htfSwingLowBar)
             // Store previous low
@@ -922,12 +921,6 @@ if htfEnabled and htfInitialized and htfNewCandle
             addLowHTF(htfSwingLow, htfSwingLowBar, "strong", htfLowColor)
             htfMostRecentLowIndex := array.size(htfLows) - 1
 
-            // Create HTF demand zone if clean BOS
-            if htfCleanBullishBos and showHtfZones
-                [zoneTop, zoneBottom] = calculateZoneFromLow(htfPreviousValidLowBar)
-                if not na(zoneTop) and not na(zoneBottom)
-                    addDemandZoneHTF(zoneTop, zoneBottom, htfPreviousValidLowBar, htfDemandZoneColor)
-
             htfSwingHigh := htfHigh
             htfSwingHighBar := bar_index
 
@@ -936,9 +929,11 @@ if htfEnabled and htfInitialized and htfNewCandle
         htfCurrentLowIsBroken := true
         htfLastBosDirection := "bearish"
 
-        // Check for clean HTF BOS
-        if not na(htfPreviousValidHigh) and not na(htfPreviousValidHighBar)
-            htfCleanBearishBos := true
+        // Create HTF supply zone at the current valid high (the high that led to this BOS)
+        if showHtfZones and not na(htfCurrentValidHigh) and not na(htfCurrentValidHighBar)
+            [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromHigh(htfCurrentValidHighBar)
+            if not na(zoneTop) and not na(zoneBottom)
+                addSupplyZoneHTF(zoneTop, zoneBottom, zoneLeftBar, htfSupplyZoneColor)
 
         if not na(htfSwingHigh) and not na(htfSwingHighBar)
             // Store previous high
@@ -953,12 +948,6 @@ if htfEnabled and htfInitialized and htfNewCandle
 
             addHighHTF(htfSwingHigh, htfSwingHighBar, "strong", htfHighColor)
             htfMostRecentHighIndex := array.size(htfHighs) - 1
-
-            // Create HTF supply zone if clean BOS
-            if htfCleanBearishBos and showHtfZones
-                [zoneTop, zoneBottom] = calculateZoneFromHigh(htfPreviousValidHighBar)
-                if not na(zoneTop) and not na(zoneBottom)
-                    addSupplyZoneHTF(zoneTop, zoneBottom, htfPreviousValidHighBar, htfSupplyZoneColor)
 
             htfSwingLow := htfLow
             htfSwingLowBar := bar_index
