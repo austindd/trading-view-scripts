@@ -265,22 +265,26 @@ calculateZoneFromLow(int lowBarIndex) =>
         float highestInZone = na
         float lowestInZone = na
         int leftmostBarIndex = lowBarIndex
+        bool foundFirstBearish = false
 
         // Scan left starting from one bar before the low bar
+        // Continue until we find at least one bearish candle
         for i = barsBack + 1 to math.min(barsBack + 500, 5000)
             if not na(open[i]) and not na(close[i])
                 bool isBearish = close[i] < open[i]
 
                 if isBearish
-                    // This is a bearish candle, include it in the zone
+                    // Found a bearish candle - include it in the zone
+                    foundFirstBearish := true
                     leftmostBarIndex := bar_index - i
                     if na(highestInZone) or high[i] > highestInZone
                         highestInZone := high[i]
                     if na(lowestInZone) or low[i] < lowestInZone
                         lowestInZone := low[i]
-                else
-                    // Hit a bullish candle, stop here (don't include it)
+                else if foundFirstBearish
+                    // We already found bearish candles, and now hit a bullish one - stop
                     break
+                // else: haven't found a bearish candle yet, keep scanning left
 
         // If we found at least one bearish candle, use that for the zone
         if not na(highestInZone) and not na(lowestInZone)
@@ -313,22 +317,26 @@ calculateZoneFromHigh(int highBarIndex) =>
         float highestInZone = na
         float lowestInZone = na
         int leftmostBarIndex = highBarIndex
+        bool foundFirstBullish = false
 
         // Scan left starting from one bar before the high bar
+        // Continue until we find at least one bullish candle
         for i = barsBack + 1 to math.min(barsBack + 500, 5000)
             if not na(open[i]) and not na(close[i])
                 bool isBullish = close[i] > open[i]
 
                 if isBullish
-                    // This is a bullish candle, include it in the zone
+                    // Found a bullish candle - include it in the zone
+                    foundFirstBullish := true
                     leftmostBarIndex := bar_index - i
                     if na(highestInZone) or high[i] > highestInZone
                         highestInZone := high[i]
                     if na(lowestInZone) or low[i] < lowestInZone
                         lowestInZone := low[i]
-                else
-                    // Hit a bearish candle, stop here (don't include it)
+                else if foundFirstBullish
+                    // We already found bullish candles, and now hit a bearish one - stop
                     break
+                // else: haven't found a bullish candle yet, keep scanning left
 
         // If we found at least one bullish candle, use that for the zone
         if not na(highestInZone) and not na(lowestInZone)
