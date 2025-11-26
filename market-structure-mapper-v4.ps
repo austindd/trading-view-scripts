@@ -240,7 +240,7 @@ addHigh(float price, int barIdx, string levelType, color lineColor) =>
 
     // Create label if enabled
     if showHighLowLabels
-        label.new(barIdx, price, "VH",
+        label.new(barIdx, price, "",
                  style=label.style_label_down,
                  color=lineColor,
                  textcolor=color.white,
@@ -269,7 +269,7 @@ addLow(float price, int barIdx, string levelType, color lineColor) =>
 
     // Create label if enabled
     if showHighLowLabels
-        label.new(barIdx, price, "VL",
+        label.new(barIdx, price, "",
                  style=label.style_label_up,
                  color=lineColor,
                  textcolor=color.white,
@@ -294,7 +294,7 @@ addHighHTF(float price, int barIdx, string levelType, color lineColor) =>
     array.push(htfHighs, newHigh)
 
     if showHighLowLabels
-        label.new(barIdx, price, "HTF VH",
+        label.new(barIdx, price, "",
                  style=label.style_label_down,
                  color=lineColor,
                  textcolor=color.white,
@@ -318,7 +318,7 @@ addLowHTF(float price, int barIdx, string levelType, color lineColor) =>
     array.push(htfLows, newLow)
 
     if showHighLowLabels
-        label.new(barIdx, price, "HTF VL",
+        label.new(barIdx, price, "",
                  style=label.style_label_up,
                  color=lineColor,
                  textcolor=color.white,
@@ -415,7 +415,7 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
 
                     if showBosLabels
                         centerBar = math.round((highLevel.barIndex + bar_index) / 2)
-                        label.new(centerBar, highLevel.price, "HTF BOS↑",
+                        label.new(centerBar, highLevel.price, htfTimeframe + " BOS↑",
                                  style=label.style_label_center,
                                  color=color.white,
                                  textcolor=htfBosColor,
@@ -442,7 +442,7 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
 
                     if showBosLabels
                         centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
-                        label.new(centerBar, lowLevel.price, "HTF BOS↓",
+                        label.new(centerBar, lowLevel.price, htfTimeframe + " BOS↓",
                                  style=label.style_label_center,
                                  color=color.white,
                                  textcolor=htfBosColor,
