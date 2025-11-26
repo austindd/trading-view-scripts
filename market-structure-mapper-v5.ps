@@ -15,11 +15,8 @@ htfEnabled = input.bool(true, "Show HTF Structure", group="Higher Timeframe")
 htfTimeframe = input.timeframe("60", "HTF Timeframe", group="Higher Timeframe")
 
 // Zone Settings
-showCtfZones = input.bool(true, "Show Current TF Zones", group="Zones")
-showHtfZones = input.bool(true, "Show HTF Zones", group="Zones")
-alignedModeOnly = input.bool(false, "Aligned Mode (CTF zones aligned with HTF only)", group="Zones")
-maxCtfZones = input.int(20, "Max CTF Zones Per Side", minval=5, maxval=100, group="Zones")
-maxHtfZones = input.int(15, "Max HTF Zones Per Side", minval=5, maxval=100, group="Zones")
+showCtfZones = input.bool(true, "Show Zones", group="Zones")
+maxZonesPerSide = input.int(20, "Max Zones Per Side", minval=10, maxval=250, group="Zones")
 
 // Current Timeframe Colors
 highColor = input.color(color.new(color.red, 0), "Valid High Color", group="Current TF Colors")
@@ -34,10 +31,6 @@ supplyZoneBorderColorInput = input.color(color.new(color.red, 50), "Supply Zone 
 htfHighColor = input.color(color.new(color.orange, 0), "HTF Valid High Color", group="HTF Colors")
 htfLowColor = input.color(color.new(color.blue, 0), "HTF Valid Low Color", group="HTF Colors")
 htfBosColor = input.color(color.new(color.black, 0), "HTF BOS Color", group="HTF Colors")
-htfDemandZoneColor = input.color(color.new(color.blue, 85), "HTF Demand Zone Color", group="HTF Colors")
-htfDemandZoneBorderColorInput = input.color(color.new(color.blue, 50), "HTF Demand Zone Border Color", group="HTF Colors")
-htfSupplyZoneColor = input.color(color.new(color.orange, 85), "HTF Supply Zone Color", group="HTF Colors")
-htfSupplyZoneBorderColorInput = input.color(color.new(color.orange, 50), "HTF Supply Zone Border Color", group="HTF Colors")
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -64,8 +57,6 @@ type Zone
     int leftTime
     int rightTime
     bool broken
-    bool isHtfAligned  // Track if this CTF zone aligns with HTF zone
-    bool isHtf  // Track if this is an HTF zone
 
 // ============================================================================
 // ARRAYS TO STORE LEVELS AND ZONES
@@ -82,8 +73,6 @@ var array<LowLevel> htfLows = array.new<LowLevel>()
 // Zones
 var array<Zone> demandZones = array.new<Zone>()
 var array<Zone> supplyZones = array.new<Zone>()
-var array<Zone> htfDemandZones = array.new<Zone>()
-var array<Zone> htfSupplyZones = array.new<Zone>()
 
 // ============================================================================
 // MARKET STRUCTURE STATE VARIABLES
@@ -359,30 +348,6 @@ calculateZoneFromHigh(int highBarIndex) =>
 
     [zoneTop, zoneBottom, leftTime]
 
-// Check if a zone should be aligned (for CTF zones in aligned mode)
-// A CTF zone is aligned if it corresponds to a HTF high or low
-isZoneAlignedWithHtf(int levelBarIndex, bool isLow) =>
-    bool aligned = false
-
-    // Check if this CTF level bar matches any HTF level bar (within tolerance)
-    if isLow
-        if array.size(htfLows) > 0
-            for i = 0 to array.size(htfLows) - 1
-                htfLow = array.get(htfLows, i)
-                // Check if bars are close enough (within a few bars tolerance)
-                if math.abs(levelBarIndex - htfLow.barIndex) < 10
-                    aligned := true
-                    break
-    else
-        if array.size(htfHighs) > 0
-            for i = 0 to array.size(htfHighs) - 1
-                htfHigh = array.get(htfHighs, i)
-                if math.abs(levelBarIndex - htfHigh.barIndex) < 10
-                    aligned := true
-                    break
-
-    aligned
-
 // ============================================================================
 // LEVEL MANAGEMENT FUNCTIONS
 // ============================================================================
@@ -498,30 +463,6 @@ addLowHTF(float price, int barIdx, string levelType, color lineColor) =>
 // ZONE MANAGEMENT FUNCTIONS
 // ============================================================================
 
-// Add a demand zone - just store data, don't create box yet
-// No limit - we'll handle rendering limits separately
-addDemandZone(float top, float bottom, int leftTime, bool isAligned) =>
-    newZone = Zone.new(top, bottom, leftTime, time, false, isAligned, false)
-    array.push(demandZones, newZone)
-    true
-
-// Add a supply zone - just store data, don't create box yet
-// No limit - we'll handle rendering limits separately
-addSupplyZone(float top, float bottom, int leftTime, bool isAligned) =>
-    newZone = Zone.new(top, bottom, leftTime, time, false, isAligned, false)
-    array.push(supplyZones, newZone)
-    true
-
-// HTF zone versions
-addDemandZoneHTF(float top, float bottom, int leftTime) =>
-    newZone = Zone.new(top, bottom, leftTime, time, false, false, true)
-    array.push(htfDemandZones, newZone)
-    true
-
-addSupplyZoneHTF(float top, float bottom, int leftTime) =>
-    newZone = Zone.new(top, bottom, leftTime, time, false, false, true)
-    array.push(htfSupplyZones, newZone)
-    true
 
 // Check and update broken zones - just mark as broken, don't delete yet
 checkBrokenZones() =>
@@ -537,22 +478,6 @@ checkBrokenZones() =>
     if array.size(supplyZones) > 0
         for i = 0 to array.size(supplyZones) - 1
             zone = array.get(supplyZones, i)
-            if not zone.broken and close > zone.top
-                zone.broken := true
-                zone.rightTime := time
-
-    // Check HTF demand zones
-    if array.size(htfDemandZones) > 0
-        for i = 0 to array.size(htfDemandZones) - 1
-            zone = array.get(htfDemandZones, i)
-            if not zone.broken and close < zone.bottom
-                zone.broken := true
-                zone.rightTime := time
-
-    // Check HTF supply zones
-    if array.size(htfSupplyZones) > 0
-        for i = 0 to array.size(htfSupplyZones) - 1
-            zone = array.get(htfSupplyZones, i)
             if not zone.broken and close > zone.top
                 zone.broken := true
                 zone.rightTime := time
@@ -669,7 +594,7 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
                 if not na(lowBar)
                     [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromLow(lowBar)
                     if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
-                        newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, false)
+                        newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false)
                         array.push(demandZones, newZone)
                         demandCreated := demandCreated + 1
 
@@ -707,7 +632,7 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
                 if not na(highBar)
                     [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromHigh(highBar)
                     if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
-                        newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, false)
+                        newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false)
                         array.push(supplyZones, newZone)
                         supplyCreated := supplyCreated + 1
 
@@ -1484,8 +1409,7 @@ var int supplySkipped = 0
 var array<int> demandZoneTimes = array.new<int>()
 var array<int> supplyZoneTimes = array.new<int>()
 
-// Max boxes we can render (Pine Script limit is 500, leave some room for other uses)
-int maxBoxesPerSide = 200
+// Use user-configured max zones per side
 
 if barstate.islast
     // Delete all existing boxes
@@ -1503,44 +1427,36 @@ if barstate.islast and showCtfZones
     // Render demand zones (newest first, up to limit)
     if array.size(demandZones) > 0
         for i = array.size(demandZones) - 1 to 0
-            if demandZonesRendered >= maxBoxesPerSide
+            if demandZonesRendered >= maxZonesPerSide
                 break
             zone = array.get(demandZones, i)
-            // Only show if not in aligned mode, or if aligned
-            if not alignedModeOnly or zone.isHtfAligned
-                zoneEndTime = zone.broken ? zone.rightTime : time
-                if not na(zone.leftTime) and not na(zoneEndTime) and not na(zone.top) and not na(zone.bottom)
-                    box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
-                           bgcolor=demandZoneColor,
-                           border_color=demandZoneBorderColorInput,
-                           border_width=1,
-                           xloc=xloc.bar_time)
-                    array.push(demandZoneTimes, zone.leftTime)
-                    demandZonesRendered := demandZonesRendered + 1
-                else
-                    demandSkipped := demandSkipped + 1
+            zoneEndTime = zone.broken ? zone.rightTime : time
+            if not na(zone.leftTime) and not na(zoneEndTime) and not na(zone.top) and not na(zone.bottom)
+                box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
+                       bgcolor=demandZoneColor,
+                       border_color=demandZoneBorderColorInput,
+                       border_width=1,
+                       xloc=xloc.bar_time)
+                array.push(demandZoneTimes, zone.leftTime)
+                demandZonesRendered := demandZonesRendered + 1
             else
                 demandSkipped := demandSkipped + 1
 
     // Render supply zones (newest first, up to limit)
     if array.size(supplyZones) > 0
         for i = array.size(supplyZones) - 1 to 0
-            if supplyZonesRendered >= maxBoxesPerSide
+            if supplyZonesRendered >= maxZonesPerSide
                 break
             zone = array.get(supplyZones, i)
-            // Only show if not in aligned mode, or if aligned
-            if not alignedModeOnly or zone.isHtfAligned
-                zoneEndTime = zone.broken ? zone.rightTime : time
-                if not na(zone.leftTime) and not na(zoneEndTime) and not na(zone.top) and not na(zone.bottom)
-                    box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
-                           bgcolor=supplyZoneColor,
-                           border_color=supplyZoneBorderColorInput,
-                           border_width=1,
-                           xloc=xloc.bar_time)
-                    array.push(supplyZoneTimes, zone.leftTime)
-                    supplyZonesRendered := supplyZonesRendered + 1
-                else
-                    supplySkipped := supplySkipped + 1
+            zoneEndTime = zone.broken ? zone.rightTime : time
+            if not na(zone.leftTime) and not na(zoneEndTime) and not na(zone.top) and not na(zone.bottom)
+                box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
+                       bgcolor=supplyZoneColor,
+                       border_color=supplyZoneBorderColorInput,
+                       border_width=1,
+                       xloc=xloc.bar_time)
+                array.push(supplyZoneTimes, zone.leftTime)
+                supplyZonesRendered := supplyZonesRendered + 1
             else
                 supplySkipped := supplySkipped + 1
 
