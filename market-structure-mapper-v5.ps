@@ -761,18 +761,19 @@ if initialized
         currentHighIsBroken := true
         lastBosDirection := "bullish"
 
-        // Create demand zone at the current valid low (the low that led to this BOS)
-        if showCtfZones and not na(currentValidLow) and not na(currentValidLowBar)
-            [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromLow(currentValidLowBar)
-            if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftBar)
-                bool isAligned = isZoneAlignedWithHtf(currentValidLowBar, true)
-                // Only create zone if not in aligned mode, or if aligned
-                if not alignedModeOnly or isAligned
-                    addDemandZone(zoneTop, zoneBottom, zoneLeftBar, demandZoneColor, isAligned)
-
+        // First, find the new low that led to this BOS
         [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
 
         if not na(newLow) and not na(newLowBar)
+            // Create demand zone at the NEW low (the low that led to this BOS)
+            if showCtfZones
+                [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromLow(newLowBar)
+                if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftBar)
+                    bool isAligned = isZoneAlignedWithHtf(newLowBar, true)
+                    // Only create zone if not in aligned mode, or if aligned
+                    if not alignedModeOnly or isAligned
+                        addDemandZone(zoneTop, zoneBottom, zoneLeftBar, demandZoneColor, isAligned)
+
             // Store previous low before updating
             previousValidLow := currentValidLow
             previousValidLowBar := currentValidLowBar
@@ -791,17 +792,18 @@ if initialized
         currentLowIsBroken := true
         lastBosDirection := "bearish"
 
-        // Create supply zone at the current valid high (the high that led to this BOS)
-        if showCtfZones and not na(currentValidHigh) and not na(currentValidHighBar)
-            [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromHigh(currentValidHighBar)
-            if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftBar)
-                bool isAligned = isZoneAlignedWithHtf(currentValidHighBar, false)
-                if not alignedModeOnly or isAligned
-                    addSupplyZone(zoneTop, zoneBottom, zoneLeftBar, supplyZoneColor, isAligned)
-
+        // First, find the new high that led to this BOS
         [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
 
         if not na(newHigh) and not na(newHighBar)
+            // Create supply zone at the NEW high (the high that led to this BOS)
+            if showCtfZones
+                [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromHigh(newHighBar)
+                if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftBar)
+                    bool isAligned = isZoneAlignedWithHtf(newHighBar, false)
+                    if not alignedModeOnly or isAligned
+                        addSupplyZone(zoneTop, zoneBottom, zoneLeftBar, supplyZoneColor, isAligned)
+
             // Store previous high before updating
             previousValidHigh := currentValidHigh
             previousValidHighBar := currentValidHighBar
@@ -917,13 +919,13 @@ if htfEnabled and htfInitialized and htfNewCandle
         htfCurrentHighIsBroken := true
         htfLastBosDirection := "bullish"
 
-        // Create HTF demand zone at the current valid low (the low that led to this BOS)
-        if showHtfZones and not na(htfCurrentValidLow) and not na(htfCurrentValidLowBar)
-            [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromLow(htfCurrentValidLowBar)
-            if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftBar)
-                addDemandZoneHTF(zoneTop, zoneBottom, zoneLeftBar, htfDemandZoneColor)
-
         if not na(htfSwingLow) and not na(htfSwingLowBar)
+            // Create HTF demand zone at the swing low (the low that led to this BOS)
+            if showHtfZones
+                [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromLow(htfSwingLowBar)
+                if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftBar)
+                    addDemandZoneHTF(zoneTop, zoneBottom, zoneLeftBar, htfDemandZoneColor)
+
             // Store previous low
             htfPreviousValidLow := htfCurrentValidLow
             htfPreviousValidLowBar := htfCurrentValidLowBar
@@ -945,13 +947,13 @@ if htfEnabled and htfInitialized and htfNewCandle
         htfCurrentLowIsBroken := true
         htfLastBosDirection := "bearish"
 
-        // Create HTF supply zone at the current valid high (the high that led to this BOS)
-        if showHtfZones and not na(htfCurrentValidHigh) and not na(htfCurrentValidHighBar)
-            [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromHigh(htfCurrentValidHighBar)
-            if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftBar)
-                addSupplyZoneHTF(zoneTop, zoneBottom, zoneLeftBar, htfSupplyZoneColor)
-
         if not na(htfSwingHigh) and not na(htfSwingHighBar)
+            // Create HTF supply zone at the swing high (the high that led to this BOS)
+            if showHtfZones
+                [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromHigh(htfSwingHighBar)
+                if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftBar)
+                    addSupplyZoneHTF(zoneTop, zoneBottom, zoneLeftBar, htfSupplyZoneColor)
+
             // Store previous high
             htfPreviousValidHigh := htfCurrentValidHigh
             htfPreviousValidHighBar := htfCurrentValidHighBar
