@@ -594,9 +594,18 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
                 if not na(lowBar)
                     [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromLow(lowBar)
                     if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
-                        newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false)
-                        array.push(demandZones, newZone)
-                        demandCreated := demandCreated + 1
+                        // Check for duplicate zone at same location
+                        bool isDuplicate = false
+                        if array.size(demandZones) > 0
+                            for j = array.size(demandZones) - 1 to math.max(0, array.size(demandZones) - 20)
+                                existingZone = array.get(demandZones, j)
+                                if existingZone.leftTime == zoneLeftTime and existingZone.top == zoneTop and existingZone.bottom == zoneBottom
+                                    isDuplicate := true
+                                    break
+                        if not isDuplicate
+                            newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false)
+                            array.push(demandZones, newZone)
+                            demandCreated := demandCreated + 1
 
     if array.size(htfLows) > 0
         for i = 0 to array.size(htfLows) - 1
@@ -632,9 +641,18 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
                 if not na(highBar)
                     [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromHigh(highBar)
                     if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
-                        newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false)
-                        array.push(supplyZones, newZone)
-                        supplyCreated := supplyCreated + 1
+                        // Check for duplicate zone at same location
+                        bool isDuplicate = false
+                        if array.size(supplyZones) > 0
+                            for j = array.size(supplyZones) - 1 to math.max(0, array.size(supplyZones) - 20)
+                                existingZone = array.get(supplyZones, j)
+                                if existingZone.leftTime == zoneLeftTime and existingZone.top == zoneTop and existingZone.bottom == zoneBottom
+                                    isDuplicate := true
+                                    break
+                        if not isDuplicate
+                            newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false)
+                            array.push(supplyZones, newZone)
+                            supplyCreated := supplyCreated + 1
 
     [bullishLabels, bearishLabels, demandCreated, supplyCreated]
 
@@ -1425,14 +1443,16 @@ if barstate.islast and showCtfZones
     array.clear(supplyZoneTimes)
 
     // Render demand zones (newest first, up to limit)
+    // Skip broken zones to avoid visual clutter from overlapping
     if array.size(demandZones) > 0
         for i = array.size(demandZones) - 1 to 0
             if demandZonesRendered >= maxZonesPerSide
                 break
             zone = array.get(demandZones, i)
-            zoneEndTime = zone.broken ? zone.rightTime : time
-            if not na(zone.leftTime) and not na(zoneEndTime) and not na(zone.top) and not na(zone.bottom)
-                box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
+            if zone.broken
+                continue
+            if not na(zone.leftTime) and not na(zone.top) and not na(zone.bottom)
+                box.new(zone.leftTime, zone.top, time, zone.bottom,
                        bgcolor=demandZoneColor,
                        border_color=demandZoneBorderColorInput,
                        border_width=1,
@@ -1443,14 +1463,16 @@ if barstate.islast and showCtfZones
                 demandSkipped := demandSkipped + 1
 
     // Render supply zones (newest first, up to limit)
+    // Skip broken zones to avoid visual clutter from overlapping
     if array.size(supplyZones) > 0
         for i = array.size(supplyZones) - 1 to 0
             if supplyZonesRendered >= maxZonesPerSide
                 break
             zone = array.get(supplyZones, i)
-            zoneEndTime = zone.broken ? zone.rightTime : time
-            if not na(zone.leftTime) and not na(zoneEndTime) and not na(zone.top) and not na(zone.bottom)
-                box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
+            if zone.broken
+                continue
+            if not na(zone.leftTime) and not na(zone.top) and not na(zone.bottom)
+                box.new(zone.leftTime, zone.top, time, zone.bottom,
                        bgcolor=supplyZoneColor,
                        border_color=supplyZoneBorderColorInput,
                        border_width=1,
