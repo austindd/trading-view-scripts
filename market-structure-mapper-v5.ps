@@ -288,10 +288,14 @@ calculateZoneFromLow(int lowBarIndex) =>
             zoneBottom := lowestInZone
             leftBarIndex := leftmostBarIndex
         // Fallback: if no bearish candles found to the left, use the low bar itself
-        else if barsBack >= 0
-            zoneTop := high[barsBack]
-            zoneBottom := low[barsBack]
-            leftBarIndex := lowBarIndex
+        else
+            // Use a small zone around the low point
+            float lowValue = barsBack >= 0 and not na(low[barsBack]) ? low[barsBack] : na
+            float highValue = barsBack >= 0 and not na(high[barsBack]) ? high[barsBack] : na
+            if not na(lowValue) and not na(highValue)
+                zoneTop := highValue
+                zoneBottom := lowValue
+                leftBarIndex := lowBarIndex
 
     [zoneTop, zoneBottom, leftBarIndex]
 
@@ -332,10 +336,14 @@ calculateZoneFromHigh(int highBarIndex) =>
             zoneBottom := lowestInZone
             leftBarIndex := leftmostBarIndex
         // Fallback: if no bullish candles found to the left, use the high bar itself
-        else if barsBack >= 0
-            zoneTop := high[barsBack]
-            zoneBottom := low[barsBack]
-            leftBarIndex := highBarIndex
+        else
+            // Use a small zone around the high point
+            float lowValue = barsBack >= 0 and not na(low[barsBack]) ? low[barsBack] : na
+            float highValue = barsBack >= 0 and not na(high[barsBack]) ? high[barsBack] : na
+            if not na(lowValue) and not na(highValue)
+                zoneTop := highValue
+                zoneBottom := lowValue
+                leftBarIndex := highBarIndex
 
     [zoneTop, zoneBottom, leftBarIndex]
 
@@ -748,8 +756,8 @@ if initialized
         // Create demand zone at the current valid low (the low that led to this BOS)
         if showCtfZones and not na(currentValidLow) and not na(currentValidLowBar)
             [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromLow(currentValidLowBar)
-            if not na(zoneTop) and not na(zoneBottom)
-                bool isAligned = alignedModeOnly ? isZoneAlignedWithHtf(currentValidLowBar, true) : true
+            if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftBar)
+                bool isAligned = isZoneAlignedWithHtf(currentValidLowBar, true)
                 // Only create zone if not in aligned mode, or if aligned
                 if not alignedModeOnly or isAligned
                     addDemandZone(zoneTop, zoneBottom, zoneLeftBar, demandZoneColor, isAligned)
@@ -778,8 +786,8 @@ if initialized
         // Create supply zone at the current valid high (the high that led to this BOS)
         if showCtfZones and not na(currentValidHigh) and not na(currentValidHighBar)
             [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromHigh(currentValidHighBar)
-            if not na(zoneTop) and not na(zoneBottom)
-                bool isAligned = alignedModeOnly ? isZoneAlignedWithHtf(currentValidHighBar, false) : true
+            if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftBar)
+                bool isAligned = isZoneAlignedWithHtf(currentValidHighBar, false)
                 if not alignedModeOnly or isAligned
                     addSupplyZone(zoneTop, zoneBottom, zoneLeftBar, supplyZoneColor, isAligned)
 
@@ -866,27 +874,27 @@ htfIsBullishBreakout() =>
 // HTF Initialization
 if htfEnabled and not htfInitialized and bar_index > 0 and htfNewCandle
     if htfIsBearishBreakdown()
-        htfCurrentValidHigh := htfHigh
+        htfCurrentValidHigh := high
         htfCurrentValidHighBar := bar_index
         htfInitialized := true
         htfLookingForLow := true
 
-        htfSwingLow := htfLow
+        htfSwingLow := low
         htfSwingLowBar := bar_index
 
-        addHighHTF(htfHigh, bar_index, "strong", htfHighColor)
+        addHighHTF(high, bar_index, "strong", htfHighColor)
         htfMostRecentHighIndex := array.size(htfHighs) - 1
 
-// HTF swing tracking
+// HTF swing tracking - track actual LTF bars where HTF extremes occur
 if htfEnabled and htfInitialized
     if htfLookingForLow
-        if na(htfSwingLow) or htfLow < htfSwingLow
-            htfSwingLow := htfLow
+        if na(htfSwingLow) or low < htfSwingLow
+            htfSwingLow := low
             htfSwingLowBar := bar_index
 
     if htfLookingForHigh
-        if na(htfSwingHigh) or htfHigh > htfSwingHigh
-            htfSwingHigh := htfHigh
+        if na(htfSwingHigh) or high > htfSwingHigh
+            htfSwingHigh := high
             htfSwingHighBar := bar_index
 
 // HTF main logic (only on new HTF candles)
@@ -904,7 +912,7 @@ if htfEnabled and htfInitialized and htfNewCandle
         // Create HTF demand zone at the current valid low (the low that led to this BOS)
         if showHtfZones and not na(htfCurrentValidLow) and not na(htfCurrentValidLowBar)
             [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromLow(htfCurrentValidLowBar)
-            if not na(zoneTop) and not na(zoneBottom)
+            if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftBar)
                 addDemandZoneHTF(zoneTop, zoneBottom, zoneLeftBar, htfDemandZoneColor)
 
         if not na(htfSwingLow) and not na(htfSwingLowBar)
@@ -921,7 +929,7 @@ if htfEnabled and htfInitialized and htfNewCandle
             addLowHTF(htfSwingLow, htfSwingLowBar, "strong", htfLowColor)
             htfMostRecentLowIndex := array.size(htfLows) - 1
 
-            htfSwingHigh := htfHigh
+            htfSwingHigh := high
             htfSwingHighBar := bar_index
 
     if not htfBosBullish and not na(htfCurrentValidLow) and not na(htfCurrentValidHigh) and htfClose < htfCurrentValidLow and htfLookingForHigh
@@ -932,7 +940,7 @@ if htfEnabled and htfInitialized and htfNewCandle
         // Create HTF supply zone at the current valid high (the high that led to this BOS)
         if showHtfZones and not na(htfCurrentValidHigh) and not na(htfCurrentValidHighBar)
             [zoneTop, zoneBottom, zoneLeftBar] = calculateZoneFromHigh(htfCurrentValidHighBar)
-            if not na(zoneTop) and not na(zoneBottom)
+            if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftBar)
                 addSupplyZoneHTF(zoneTop, zoneBottom, zoneLeftBar, htfSupplyZoneColor)
 
         if not na(htfSwingHigh) and not na(htfSwingHighBar)
@@ -949,7 +957,7 @@ if htfEnabled and htfInitialized and htfNewCandle
             addHighHTF(htfSwingHigh, htfSwingHighBar, "strong", htfHighColor)
             htfMostRecentHighIndex := array.size(htfHighs) - 1
 
-            htfSwingLow := htfLow
+            htfSwingLow := low
             htfSwingLowBar := bar_index
 
     // HTF breakout/breakdown
@@ -966,7 +974,7 @@ if htfEnabled and htfInitialized and htfNewCandle
                 addLowHTF(htfSwingLow, htfSwingLowBar, levelType, htfLowColor)
                 htfMostRecentLowIndex := array.size(htfLows) - 1
 
-                htfSwingHigh := htfHigh
+                htfSwingHigh := high
                 htfSwingHighBar := bar_index
 
     if not htfBosBullish and not htfBosBearish and htfLookingForHigh
@@ -982,7 +990,7 @@ if htfEnabled and htfInitialized and htfNewCandle
                 addHighHTF(htfSwingHigh, htfSwingHighBar, levelType, htfHighColor)
                 htfMostRecentHighIndex := array.size(htfHighs) - 1
 
-                htfSwingLow := htfLow
+                htfSwingLow := low
                 htfSwingLowBar := bar_index
 
 // Check HTF broken/swept levels
