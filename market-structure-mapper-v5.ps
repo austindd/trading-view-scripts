@@ -2,7 +2,7 @@
 // © scientificbest
 
 //@version=5
-indicator("Market Structure Mapper V5 (With Zones)", "MSM V5 [SB]", overlay=true, max_lines_count=250, max_labels_count=250, max_boxes_count=500)
+indicator("Market Structure Mapper V5 (With Zones) v2", "MSM V5 [SB] v2", overlay=true, max_lines_count=250, max_labels_count=250, max_boxes_count=500)
 
 // Input settings
 showHighLowLabels = input.bool(false, "Show High/Low Labels", group="Display")
@@ -17,6 +17,8 @@ htfTimeframe = input.timeframe("60", "HTF Timeframe", group="Higher Timeframe")
 showCtfZones = input.bool(true, "Show Current TF Zones", group="Zones")
 showHtfZones = input.bool(true, "Show HTF Zones", group="Zones")
 alignedModeOnly = input.bool(false, "Aligned Mode (CTF zones aligned with HTF only)", group="Zones")
+maxCtfZones = input.int(20, "Max CTF Zones Per Side", minval=5, maxval=100, group="Zones")
+maxHtfZones = input.int(15, "Max HTF Zones Per Side", minval=5, maxval=100, group="Zones")
 
 // Current Timeframe Colors
 highColor = input.color(color.new(color.red, 0), "Valid High Color", group="Current TF Colors")
@@ -147,6 +149,20 @@ var array<label> sweptLowLabels = array.new<label>()
 var array<label> htfSweptHighLabels = array.new<label>()
 var array<label> htfSweptLowLabels = array.new<label>()
 
+// Debug counters
+var int ctfBullishBOS = 0
+var int ctfBearishBOS = 0
+var int htfBullishBOS = 0
+var int htfBearishBOS = 0
+var int htfBullishLabels = 0  // BOS labels created by checkBrokenLevelsHTF
+var int htfBearishLabels = 0  // BOS labels created by checkBrokenLevelsHTF
+var int demandZonesCreated = 0
+var int supplyZonesCreated = 0
+var int demandZonesBlocked = 0
+var int supplyZonesBlocked = 0
+var int swingNaCount = 0
+var int calcNaCount = 0
+
 // ============================================================================
 // NOTIFICATION FLAGS (for alerts)
 // ============================================================================
@@ -257,120 +273,88 @@ findHighestBetween(startBar, endBar) =>
 // ============================================================================
 
 // Calculate demand zone from a valid low
-// Returns [zoneTop, zoneBottom, leftTime] - ALWAYS returns valid values
+// Find the entire LTF downswing that ended at this low
+// Returns [zoneTop, zoneBottom, leftTime]
 calculateZoneFromLow(int lowBarIndex) =>
     float zoneTop = na
     float zoneBottom = na
-    int leftBarIndex = lowBarIndex
+    int leftTime = na
 
     int barsBack = bar_index - lowBarIndex
 
-    // Simple approach: scan the 10 candles before the low, find all bearish ones
-    float highestInZone = na
-    float lowestInZone = na
-    int leftmostBarIndex = lowBarIndex
-    int bearishCount = 0
+    if barsBack >= 0 and barsBack < 5000
+        // Start at the low - this is our zone bottom
+        zoneBottom := low[barsBack]
+        zoneTop := high[barsBack]
 
-    if barsBack >= 0
-        // Scan up to 10 bars left from the low
-        int scanLimit = math.min(barsBack + 10, 5000)
-        for i = barsBack + 1 to scanLimit
-            if not na(open[i]) and not na(close[i]) and not na(high[i]) and not na(low[i])
-                bool isBearish = close[i] < open[i]
+        // Scan left from the low to find where the downswing started
+        // A downswing means price was making lower lows as it came down
+        // We keep scanning left while we find lower lows (continuing the downswing)
+        // Stop when we find a higher low (that's where the downswing started)
+        int swingStartOffset = barsBack
+        float prevLow = low[barsBack]
 
-                if isBearish
-                    bearishCount := bearishCount + 1
-                    leftmostBarIndex := bar_index - i
-                    if na(highestInZone) or high[i] > highestInZone
-                        highestInZone := high[i]
-                    if na(lowestInZone) or low[i] < lowestInZone
-                        lowestInZone := low[i]
+        for i = barsBack + 1 to math.min(barsBack + 100, 5000)
+            if not na(high[i]) and not na(low[i]) and not na(time[i])
+                // Track highest high for zone top
+                if high[i] > zoneTop
+                    zoneTop := high[i]
 
-                    // Stop after finding 5 bearish candles
-                    if bearishCount >= 5
-                        break
+                // If this bar's low is higher than our tracking low,
+                // we've found where the downswing started
+                if low[i] > prevLow
+                    // Include this bar as the start of the zone
+                    swingStartOffset := i
+                    break
+                else
+                    // This bar continues the downswing (lower or equal low)
+                    prevLow := low[i]
+                    swingStartOffset := i
 
-    // If we found bearish candles, use them
-    if bearishCount > 0 and not na(highestInZone) and not na(lowestInZone)
-        zoneTop := highestInZone
-        zoneBottom := lowestInZone
-        leftBarIndex := leftmostBarIndex
-    else
-        // Fallback: create zone from the low bar and 2 bars to its left
-        float minLow = na
-        float maxHigh = na
-        for i = barsBack to math.min(barsBack + 2, 5000)
-            if not na(high[i]) and not na(low[i])
-                if na(maxHigh) or high[i] > maxHigh
-                    maxHigh := high[i]
-                if na(minLow) or low[i] < minLow
-                    minLow := low[i]
-                leftBarIndex := bar_index - i
-
-        zoneTop := maxHigh
-        zoneBottom := minLow
-
-    // Get time at the left bar index
-    int leftTime = time[bar_index - leftBarIndex]
+        leftTime := time[swingStartOffset]
 
     [zoneTop, zoneBottom, leftTime]
 
 // Calculate supply zone from a valid high
-// Returns [zoneTop, zoneBottom, leftTime] - ALWAYS returns valid values
+// Find the entire LTF upswing that ended at this high
+// Returns [zoneTop, zoneBottom, leftTime]
 calculateZoneFromHigh(int highBarIndex) =>
     float zoneTop = na
     float zoneBottom = na
-    int leftBarIndex = highBarIndex
+    int leftTime = na
 
     int barsBack = bar_index - highBarIndex
 
-    // Simple approach: scan the 10 candles before the high, find all bullish ones
-    float highestInZone = na
-    float lowestInZone = na
-    int leftmostBarIndex = highBarIndex
-    int bullishCount = 0
+    if barsBack >= 0 and barsBack < 5000
+        // Start at the high - this is our zone top
+        zoneTop := high[barsBack]
+        zoneBottom := low[barsBack]
 
-    if barsBack >= 0
-        // Scan up to 10 bars left from the high
-        int scanLimit = math.min(barsBack + 10, 5000)
-        for i = barsBack + 1 to scanLimit
-            if not na(open[i]) and not na(close[i]) and not na(high[i]) and not na(low[i])
-                bool isBullish = close[i] > open[i]
+        // Scan left from the high to find where the upswing started
+        // An upswing means price was making higher highs as it went up
+        // We keep scanning left while we find higher highs (continuing the upswing)
+        // Stop when we find a lower high (that's where the upswing started)
+        int swingStartOffset = barsBack
+        float prevHigh = high[barsBack]
 
-                if isBullish
-                    bullishCount := bullishCount + 1
-                    leftmostBarIndex := bar_index - i
-                    if na(highestInZone) or high[i] > highestInZone
-                        highestInZone := high[i]
-                    if na(lowestInZone) or low[i] < lowestInZone
-                        lowestInZone := low[i]
+        for i = barsBack + 1 to math.min(barsBack + 100, 5000)
+            if not na(high[i]) and not na(low[i]) and not na(time[i])
+                // Track lowest low for zone bottom
+                if low[i] < zoneBottom
+                    zoneBottom := low[i]
 
-                    // Stop after finding 5 bullish candles
-                    if bullishCount >= 5
-                        break
+                // If this bar's high is lower than our tracking high,
+                // we've found where the upswing started
+                if high[i] < prevHigh
+                    // Include this bar as the start of the zone
+                    swingStartOffset := i
+                    break
+                else
+                    // This bar continues the upswing (higher or equal high)
+                    prevHigh := high[i]
+                    swingStartOffset := i
 
-    // If we found bullish candles, use them
-    if bullishCount > 0 and not na(highestInZone) and not na(lowestInZone)
-        zoneTop := highestInZone
-        zoneBottom := lowestInZone
-        leftBarIndex := leftmostBarIndex
-    else
-        // Fallback: create zone from the high bar and 2 bars to its left
-        float minLow = na
-        float maxHigh = na
-        for i = barsBack to math.min(barsBack + 2, 5000)
-            if not na(high[i]) and not na(low[i])
-                if na(maxHigh) or high[i] > maxHigh
-                    maxHigh := high[i]
-                if na(minLow) or low[i] < minLow
-                    minLow := low[i]
-                leftBarIndex := bar_index - i
-
-        zoneTop := maxHigh
-        zoneBottom := minLow
-
-    // Get time at the left bar index
-    int leftTime = time[bar_index - leftBarIndex]
+        leftTime := time[swingStartOffset]
 
     [zoneTop, zoneBottom, leftTime]
 
@@ -514,12 +498,14 @@ addLowHTF(float price, int barIdx, string levelType, color lineColor) =>
 // ============================================================================
 
 // Add a demand zone - just store data, don't create box yet
+// No limit - we'll handle rendering limits separately
 addDemandZone(float top, float bottom, int leftTime, bool isAligned) =>
     newZone = Zone.new(top, bottom, leftTime, time, false, isAligned, false)
     array.push(demandZones, newZone)
     true
 
 // Add a supply zone - just store data, don't create box yet
+// No limit - we'll handle rendering limits separately
 addSupplyZone(float top, float bottom, int leftTime, bool isAligned) =>
     newZone = Zone.new(top, bottom, leftTime, time, false, isAligned, false)
     array.push(supplyZones, newZone)
@@ -640,8 +626,14 @@ checkBrokenLevels() =>
 
     true
 
-// HTF version
+// HTF version - checks for broken levels AND creates zones
+// Returns [bullishLabelsCreated, bearishLabelsCreated, demandZonesCreated, supplyZonesCreated]
 checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
+    int bullishLabels = 0
+    int bearishLabels = 0
+    int demandCreated = 0
+    int supplyCreated = 0
+
     if array.size(htfHighs) > 0
         for i = 0 to array.size(htfHighs) - 1
             highLevel = array.get(htfHighs, i)
@@ -653,21 +645,30 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
             else if highLevel.levelType != "broken" and htfClose > highLevel.price
                 highLevel.levelType := "broken"
 
-                if i == htfMostRecentHighIndex
-                    line.set_x2(highLevel.levelLine, bar_index)
-                    line.set_extend(highLevel.levelLine, extend.none)
-                    line.set_style(highLevel.levelLine, line.style_dotted)
-                    line.set_color(highLevel.levelLine, color.new(htfBosColor, 30))
+                // Style the broken line
+                line.set_x2(highLevel.levelLine, bar_index)
+                line.set_extend(highLevel.levelLine, extend.none)
+                line.set_style(highLevel.levelLine, line.style_dotted)
+                line.set_color(highLevel.levelLine, color.new(htfBosColor, 30))
 
-                    if showBosLabels
-                        centerBar = math.round((highLevel.barIndex + bar_index) / 2)
-                        label.new(centerBar, highLevel.price, htfTimeframe + " BOS↑",
-                                 style=label.style_label_center,
-                                 color=color.white,
-                                 textcolor=htfBosColor,
-                                 size=size.tiny)
-                else
-                    line.delete(highLevel.levelLine)
+                // Create BOS label
+                if showBosLabels
+                    centerBar = math.round((highLevel.barIndex + bar_index) / 2)
+                    label.new(centerBar, highLevel.price, htfTimeframe + " BOS↑",
+                             style=label.style_label_center,
+                             color=color.white,
+                             textcolor=htfBosColor,
+                             size=size.tiny)
+                    bullishLabels := bullishLabels + 1
+
+                // Create demand zone - find the low that formed before this high was broken
+                // We need to find a swing low that occurred AFTER this high was created
+                // Use the highLevel.barIndex to calculate zone
+                [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromLow(highLevel.barIndex)
+                if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
+                    newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, false)
+                    array.push(demandZones, newZone)
+                    demandCreated := demandCreated + 1
 
     if array.size(htfLows) > 0
         for i = 0 to array.size(htfLows) - 1
@@ -680,23 +681,31 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
             else if lowLevel.levelType != "broken" and htfClose < lowLevel.price
                 lowLevel.levelType := "broken"
 
-                if i == htfMostRecentLowIndex
-                    line.set_x2(lowLevel.levelLine, bar_index)
-                    line.set_extend(lowLevel.levelLine, extend.none)
-                    line.set_style(lowLevel.levelLine, line.style_dotted)
-                    line.set_color(lowLevel.levelLine, color.new(htfBosColor, 30))
+                // Style the broken line
+                line.set_x2(lowLevel.levelLine, bar_index)
+                line.set_extend(lowLevel.levelLine, extend.none)
+                line.set_style(lowLevel.levelLine, line.style_dotted)
+                line.set_color(lowLevel.levelLine, color.new(htfBosColor, 30))
 
-                    if showBosLabels
-                        centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
-                        label.new(centerBar, lowLevel.price, htfTimeframe + " BOS↓",
-                                 style=label.style_label_center,
-                                 color=color.white,
-                                 textcolor=htfBosColor,
-                                 size=size.tiny)
-                else
-                    line.delete(lowLevel.levelLine)
+                // Create BOS label
+                if showBosLabels
+                    centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
+                    label.new(centerBar, lowLevel.price, htfTimeframe + " BOS↓",
+                             style=label.style_label_center,
+                             color=color.white,
+                             textcolor=htfBosColor,
+                             size=size.tiny)
+                    bearishLabels := bearishLabels + 1
 
-    true
+                // Create supply zone - find the high that formed before this low was broken
+                // Use the lowLevel.barIndex to calculate zone
+                [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromHigh(lowLevel.barIndex)
+                if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
+                    newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, false)
+                    array.push(supplyZones, newZone)
+                    supplyCreated := supplyCreated + 1
+
+    [bullishLabels, bearishLabels, demandCreated, supplyCreated]
 
 // Determine level type based on BOS direction
 getHighLevelType(string bosDirection) =>
@@ -744,19 +753,13 @@ if initialized
         bosBullish := true
         currentHighIsBroken := true
         lastBosDirection := "bullish"
+        ctfBullishBOS := ctfBullishBOS + 1
 
         // First, find the new low that led to this BOS
         [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
 
         if not na(newLow) and not na(newLowBar)
-            // Create demand zone at the NEW low (the low that led to this BOS)
-            if showCtfZones
-                [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromLow(newLowBar)
-                if not na(zoneTop) and not na(zoneBottom)
-                    bool isAligned = isZoneAlignedWithHtf(newLowBar, true)
-                    // Only create zone if not in aligned mode, or if aligned
-                    if not alignedModeOnly or isAligned
-                        addDemandZone(zoneTop, zoneBottom, zoneLeftTime, isAligned)
+            // NOTE: Zone creation moved to HTF BOS section only
 
             // Store previous low before updating
             previousValidLow := currentValidLow
@@ -775,18 +778,13 @@ if initialized
         bosBearish := true
         currentLowIsBroken := true
         lastBosDirection := "bearish"
+        ctfBearishBOS := ctfBearishBOS + 1
 
         // First, find the new high that led to this BOS
         [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
 
         if not na(newHigh) and not na(newHighBar)
-            // Create supply zone at the NEW high (the high that led to this BOS)
-            if showCtfZones
-                [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromHigh(newHighBar)
-                if not na(zoneTop) and not na(zoneBottom)
-                    bool isAligned = isZoneAlignedWithHtf(newHighBar, false)
-                    if not alignedModeOnly or isAligned
-                        addSupplyZone(zoneTop, zoneBottom, zoneLeftTime, isAligned)
+            // NOTE: Zone creation moved to HTF BOS section only
 
             // Store previous high before updating
             previousValidHigh := currentValidHigh
@@ -866,18 +864,38 @@ htfIsBullishBreakout() =>
     htfClose > htfOpen and htfClose > htfHigh[1]
 
 // HTF Initialization
+// IMPORTANT: We need to set BOTH htfCurrentValidHigh AND htfCurrentValidLow
+// Otherwise BOS detection fails because it requires both to be non-NA
 if htfEnabled and not htfInitialized and bar_index > 0 and htfNewCandle
     if htfIsBearishBreakdown()
-        htfCurrentValidHigh := high
-        htfCurrentValidHighBar := bar_index
+        // Find the highest high in the lookback period for initial valid high
+        float initHigh = high
+        int initHighBar = bar_index
+        for i = 1 to math.min(bar_index, 200)
+            if high[i] > initHigh
+                initHigh := high[i]
+                initHighBar := bar_index - i
+
+        htfCurrentValidHigh := initHigh
+        htfCurrentValidHighBar := initHighBar
+
+        // Also set an initial valid low to the current bar's low
+        // This allows BOS detection to work immediately
+        htfCurrentValidLow := low
+        htfCurrentValidLowBar := bar_index
+
         htfInitialized := true
         htfLookingForLow := true
 
         htfSwingLow := low
         htfSwingLowBar := bar_index
 
-        addHighHTF(high, bar_index, "strong", htfHighColor)
+        addHighHTF(initHigh, initHighBar, "strong", htfHighColor)
         htfMostRecentHighIndex := array.size(htfHighs) - 1
+
+        // Also add the initial low level
+        addLowHTF(low, bar_index, "strong", htfLowColor)
+        htfMostRecentLowIndex := array.size(htfLows) - 1
 
 // HTF swing tracking - track actual LTF bars where HTF extremes occur
 if htfEnabled and htfInitialized
@@ -897,62 +915,55 @@ if htfEnabled and htfInitialized and htfNewCandle
     htfBosBullish := false
     htfBosBearish := false
 
-    // Check HTF BOS
+    // Check HTF BOS - zones are now created in checkBrokenLevelsHTF
+    // This section just updates state tracking for the market structure
     if not na(htfCurrentValidHigh) and not na(htfCurrentValidLow) and htfClose > htfCurrentValidHigh and htfLookingForLow
         htfBosBullish := true
         htfCurrentHighIsBroken := true
         htfLastBosDirection := "bullish"
+        htfBullishBOS := htfBullishBOS + 1
 
         if not na(htfSwingLow) and not na(htfSwingLowBar)
-            // Create HTF demand zone at the swing low (the low that led to this BOS)
-            if showHtfZones
-                [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromLow(htfSwingLowBar)
-                if not na(zoneTop) and not na(zoneBottom)
-                    addDemandZoneHTF(zoneTop, zoneBottom, zoneLeftTime)
-
             // Store previous low
             htfPreviousValidLow := htfCurrentValidLow
             htfPreviousValidLowBar := htfCurrentValidLowBar
 
             htfCurrentValidLow := htfSwingLow
             htfCurrentValidLowBar := htfSwingLowBar
-            htfLookingForHigh := true
-            htfLookingForLow := false
-            htfCurrentLowIsBroken := false
 
             addLowHTF(htfSwingLow, htfSwingLowBar, "strong", htfLowColor)
             htfMostRecentLowIndex := array.size(htfLows) - 1
 
-            htfSwingHigh := high
-            htfSwingHighBar := bar_index
+        // CRITICAL: Always update direction flags after BOS
+        htfLookingForHigh := true
+        htfLookingForLow := false
+        htfCurrentLowIsBroken := false
+        htfSwingHigh := high
+        htfSwingHighBar := bar_index
 
     if not htfBosBullish and not na(htfCurrentValidLow) and not na(htfCurrentValidHigh) and htfClose < htfCurrentValidLow and htfLookingForHigh
         htfBosBearish := true
         htfCurrentLowIsBroken := true
         htfLastBosDirection := "bearish"
+        htfBearishBOS := htfBearishBOS + 1
 
         if not na(htfSwingHigh) and not na(htfSwingHighBar)
-            // Create HTF supply zone at the swing high (the high that led to this BOS)
-            if showHtfZones
-                [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromHigh(htfSwingHighBar)
-                if not na(zoneTop) and not na(zoneBottom)
-                    addSupplyZoneHTF(zoneTop, zoneBottom, zoneLeftTime)
-
             // Store previous high
             htfPreviousValidHigh := htfCurrentValidHigh
             htfPreviousValidHighBar := htfCurrentValidHighBar
 
             htfCurrentValidHigh := htfSwingHigh
             htfCurrentValidHighBar := htfSwingHighBar
-            htfLookingForLow := true
-            htfLookingForHigh := false
-            htfCurrentHighIsBroken := false
 
             addHighHTF(htfSwingHigh, htfSwingHighBar, "strong", htfHighColor)
             htfMostRecentHighIndex := array.size(htfHighs) - 1
 
-            htfSwingLow := low
-            htfSwingLowBar := bar_index
+        // CRITICAL: Always update direction flags after BOS
+        htfLookingForLow := true
+        htfLookingForHigh := false
+        htfCurrentHighIsBroken := false
+        htfSwingLow := low
+        htfSwingLowBar := bar_index
 
     // HTF breakout/breakdown
     if not htfBosBullish and not htfBosBearish and htfLookingForLow
@@ -987,9 +998,14 @@ if htfEnabled and htfInitialized and htfNewCandle
                 htfSwingLow := low
                 htfSwingLowBar := bar_index
 
-// Check HTF broken/swept levels
-if htfEnabled and htfInitialized
-    checkBrokenLevelsHTF(htfHigh, htfLow, htfClose)
+// Check HTF broken/swept levels - ONLY on new HTF candles
+// This now also creates zones for every broken level
+if htfEnabled and htfInitialized and htfNewCandle
+    [bullLabels, bearLabels, demandFromLabels, supplyFromLabels] = checkBrokenLevelsHTF(htfHigh, htfLow, htfClose)
+    htfBullishLabels := htfBullishLabels + bullLabels
+    htfBearishLabels := htfBearishLabels + bearLabels
+    demandZonesCreated := demandZonesCreated + demandFromLabels
+    supplyZonesCreated := supplyZonesCreated + supplyFromLabels
 
 // ============================================================================
 // ALERT CONDITION CHECKING
@@ -1205,18 +1221,33 @@ if array.size(htfLows) > 30
     if htfMostRecentLowIndex >= 0
         htfMostRecentLowIndex := htfMostRecentLowIndex - 1
 
-// Truncate zone arrays - keep only most recent zones
-if array.size(demandZones) > 50
-    array.shift(demandZones)
+// Remove old broken zones to keep arrays clean
+// NOTE: Disabled automatic removal - let size limit handle cleanup
+// if array.size(demandZones) > 0
+//     for i = array.size(demandZones) - 1 to 0
+//         zone = array.get(demandZones, i)
+//         if zone.broken and (time - zone.rightTime) > (100 * (time - time[1]))
+//             array.remove(demandZones, i)
 
-if array.size(supplyZones) > 50
-    array.shift(supplyZones)
+// if array.size(supplyZones) > 0
+//     for i = array.size(supplyZones) - 1 to 0
+//         zone = array.get(supplyZones, i)
+//         if zone.broken and (time - zone.rightTime) > (100 * (time - time[1]))
+//             array.remove(supplyZones, i)
 
-if array.size(htfDemandZones) > 50
-    array.shift(htfDemandZones)
+// if array.size(htfDemandZones) > 0
+//     for i = array.size(htfDemandZones) - 1 to 0
+//         zone = array.get(htfDemandZones, i)
+//         if zone.broken and (time - zone.rightTime) > (100 * (time - time[1]))
+//             array.remove(htfDemandZones, i)
 
-if array.size(htfSupplyZones) > 50
-    array.shift(htfSupplyZones)
+// if array.size(htfSupplyZones) > 0
+//     for i = array.size(htfSupplyZones) - 1 to 0
+//         zone = array.get(htfSupplyZones, i)
+//         if zone.broken and (time - zone.rightTime) > (100 * (time - time[1]))
+//             array.remove(htfSupplyZones, i)
+
+// Zone array size limiting is now handled at insertion time in addDemandZone/addSupplyZone
 
 // ============================================================================
 // PLOTS AND LABELS
@@ -1434,62 +1465,119 @@ ltfSweptFlag := false
 ltfBosAtExtremeFlag := false
 
 // ============================================================================
-// ZONE RENDERING - Only on last bar
+// ZONE RENDERING - On every bar (like the working indicator)
 // ============================================================================
 
-// Delete all existing boxes first
-if barstate.islast
-    for bx in box.all
-        bx.delete()
+// Delete all existing boxes on every bar
+for bx in box.all
+    bx.delete()
 
-// Render all zones on the last bar
-if barstate.islast and showCtfZones
-    // Render demand zones
+// Render all zones on every bar
+var int demandZonesRendered = 0
+var int supplyZonesRendered = 0
+var int htfDemandZonesRendered = 0
+var int htfSupplyZonesRendered = 0
+var int demandSkipped = 0
+var int supplySkipped = 0
+var array<int> demandZoneTimes = array.new<int>()
+var array<int> supplyZoneTimes = array.new<int>()
+
+// Max boxes we can render (Pine Script limit is 500, leave some room for other uses)
+int maxBoxesPerSide = 200
+
+if showCtfZones
+    demandZonesRendered := 0
+    supplyZonesRendered := 0
+    demandSkipped := 0
+    supplySkipped := 0
+    array.clear(demandZoneTimes)
+    array.clear(supplyZoneTimes)
+
+    // Render demand zones (newest first, up to limit)
     if array.size(demandZones) > 0
-        for i = 0 to array.size(demandZones) - 1
+        for i = array.size(demandZones) - 1 to 0
+            if demandZonesRendered >= maxBoxesPerSide
+                break
             zone = array.get(demandZones, i)
             // Only show if not in aligned mode, or if aligned
             if not alignedModeOnly or zone.isHtfAligned
                 zoneEndTime = zone.broken ? zone.rightTime : time
-                box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
-                       bgcolor=demandZoneColor,
-                       border_color=demandZoneBorderColorInput,
-                       border_width=1,
-                       xloc=xloc.bar_time)
+                if not na(zone.leftTime) and not na(zoneEndTime) and not na(zone.top) and not na(zone.bottom)
+                    box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
+                           bgcolor=demandZoneColor,
+                           border_color=demandZoneBorderColorInput,
+                           border_width=1,
+                           xloc=xloc.bar_time)
+                    array.push(demandZoneTimes, zone.leftTime)
+                    demandZonesRendered := demandZonesRendered + 1
+                else
+                    demandSkipped := demandSkipped + 1
+            else
+                demandSkipped := demandSkipped + 1
 
-    // Render supply zones
+    // Render supply zones (newest first, up to limit)
     if array.size(supplyZones) > 0
-        for i = 0 to array.size(supplyZones) - 1
+        for i = array.size(supplyZones) - 1 to 0
+            if supplyZonesRendered >= maxBoxesPerSide
+                break
             zone = array.get(supplyZones, i)
             // Only show if not in aligned mode, or if aligned
             if not alignedModeOnly or zone.isHtfAligned
                 zoneEndTime = zone.broken ? zone.rightTime : time
-                box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
-                       bgcolor=supplyZoneColor,
-                       border_color=supplyZoneBorderColorInput,
-                       border_width=1,
-                       xloc=xloc.bar_time)
+                if not na(zone.leftTime) and not na(zoneEndTime) and not na(zone.top) and not na(zone.bottom)
+                    box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
+                           bgcolor=supplyZoneColor,
+                           border_color=supplyZoneBorderColorInput,
+                           border_width=1,
+                           xloc=xloc.bar_time)
+                    array.push(supplyZoneTimes, zone.leftTime)
+                    supplyZonesRendered := supplyZonesRendered + 1
+                else
+                    supplySkipped := supplySkipped + 1
+            else
+                supplySkipped := supplySkipped + 1
 
-// Render HTF zones on the last bar
-if barstate.islast and showHtfZones
-    // Render HTF demand zones
-    if array.size(htfDemandZones) > 0
-        for i = 0 to array.size(htfDemandZones) - 1
-            zone = array.get(htfDemandZones, i)
-            zoneEndTime = zone.broken ? zone.rightTime : time
-            box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
-                   bgcolor=htfDemandZoneColor,
-                   border_color=htfDemandZoneBorderColorInput,
-                   border_width=2,
-                   xloc=xloc.bar_time)
+// NOTE: HTF zones are now stored in the main demandZones/supplyZones arrays
+// No separate HTF rendering needed
 
-    // Render HTF supply zones
-    if array.size(htfSupplyZones) > 0
-        for i = 0 to array.size(htfSupplyZones) - 1
-            zone = array.get(htfSupplyZones, i)
-            zoneEndTime = zone.broken ? zone.rightTime : time
-            box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
-                   bgcolor=htfSupplyZoneColor,
-                   border_color=htfSupplyZoneBorderColorInput,
-                   border_width=2,
-                   xloc=xloc.bar_time)
+// Debug labels showing zone counts and BOS events
+if barstate.islast
+    var label debugLabel = na
+    label.delete(debugLabel)
+
+    // Count broken zones
+    int brokenDemand = 0
+    int brokenSupply = 0
+    if array.size(demandZones) > 0
+        for i = 0 to array.size(demandZones) - 1
+            if array.get(demandZones, i).broken
+                brokenDemand := brokenDemand + 1
+    if array.size(supplyZones) > 0
+        for i = 0 to array.size(supplyZones) - 1
+            if array.get(supplyZones, i).broken
+                brokenSupply := brokenSupply + 1
+
+    // Calculate time spans of rendered zones
+    int demandOldest = array.size(demandZoneTimes) > 0 ? array.get(demandZoneTimes, array.size(demandZoneTimes) - 1) : na
+    int demandNewest = array.size(demandZoneTimes) > 0 ? array.get(demandZoneTimes, 0) : na
+    int supplyOldest = array.size(supplyZoneTimes) > 0 ? array.get(supplyZoneTimes, array.size(supplyZoneTimes) - 1) : na
+    int supplyNewest = array.size(supplyZoneTimes) > 0 ? array.get(supplyZoneTimes, 0) : na
+
+    // Calculate bars ago
+    int demandOldestBarsAgo = not na(demandOldest) ? math.round((time - demandOldest) / (time - time[1])) : na
+    int demandNewestBarsAgo = not na(demandNewest) ? math.round((time - demandNewest) / (time - time[1])) : na
+    int supplyOldestBarsAgo = not na(supplyOldest) ? math.round((time - supplyOldest) / (time - time[1])) : na
+    int supplyNewestBarsAgo = not na(supplyNewest) ? math.round((time - supplyNewest) / (time - time[1])) : na
+
+    string debugText = "ZONE DEBUG v4:\n"
+    debugText := debugText + "HTF Labels: " + str.tostring(htfBullishLabels) + " bull / " + str.tostring(htfBearishLabels) + " bear\n"
+    debugText := debugText + "Zones created: " + str.tostring(demandZonesCreated) + " D / " + str.tostring(supplyZonesCreated) + " S\n"
+    debugText := debugText + "In array: " + str.tostring(array.size(demandZones)) + " D / " + str.tostring(array.size(supplyZones)) + " S\n"
+    debugText := debugText + "Rendered: " + str.tostring(demandZonesRendered) + " D / " + str.tostring(supplyZonesRendered) + " S\n"
+    debugText := debugText + "Total boxes: " + str.tostring(array.size(box.all))
+
+    debugLabel := label.new(bar_index, high, debugText,
+                           style=label.style_label_down,
+                           color=color.yellow,
+                           textcolor=color.black,
+                           size=size.small)
