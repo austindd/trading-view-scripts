@@ -263,97 +263,166 @@ findHighestBetween(startBar, endBar) =>
 // ZONE CALCULATION FUNCTIONS
 // ============================================================================
 
-// Calculate demand zone from a valid low (HTF swing low)
-// Find the LTF swing that formed this HTF low
-// We scan backwards from the low to find where the immediate LTF downswing started
-// (i.e., the minor swing high just before the low)
+// These functions use the CTF market structure arrays (highs/lows) to find
+// the actual valid highs and lows around an HTF swing point.
+
+// Calculate demand zone from an HTF swing low
+// Uses the CTF lows array to find the nearest valid low
+// Uses the CTF highs array to find valid highs on either side
+// Zone bottom = the CTF valid low price
+// Zone top = the LOWER of the two CTF valid highs (immediately before and after)
 // Returns [zoneTop, zoneBottom, leftTime]
 calculateZoneFromLow(int lowBarIndex) =>
     float zoneTop = na
     float zoneBottom = na
     int leftTime = na
 
-    int barsBack = bar_index - lowBarIndex
+    // Find the CTF valid low nearest to this bar index
+    int nearestLowIdx = -1
+    int nearestLowDistance = 999999
 
-    if barsBack >= 0 and barsBack < 5000
-        // The zone bottom is the low of the HTF swing low bar
-        zoneBottom := low[barsBack]
+    if array.size(lows) > 0
+        for i = 0 to array.size(lows) - 1
+            lowLevel = array.get(lows, i)
+            int distance = math.abs(lowLevel.barIndex - lowBarIndex)
+            if distance < nearestLowDistance
+                nearestLowDistance := distance
+                nearestLowIdx := i
 
-        // Find the LTF swing high that immediately preceded this low
-        // This is the start of the small downswing that formed the HTF low
-        // We look for where price made a minor high before dropping to make this low
+    if nearestLowIdx >= 0
+        nearestLow = array.get(lows, nearestLowIdx)
+        zoneBottom := nearestLow.price
 
-        // Track the highest high as we scan back
-        float ltfSwingHigh = high[barsBack]
-        int ltfSwingHighOffset = barsBack
+        // Find the CTF valid high immediately BEFORE this low
+        // This is the high from which price dropped to create the low
+        // Search backwards through highs to find the first one before nearestLow
+        float highBeforePrice = na
+        int highBeforeBar = na
+        int highBeforeIdx = -1
 
-        // Scan backwards to find the LTF swing high
-        // The LTF swing high is where price peaked before making this low
-        // We detect it by finding where highs stop making new highs
-        bool foundPeak = false
-
-        for i = barsBack + 1 to math.min(barsBack + 50, 5000)
-            if not na(high[i]) and not na(low[i]) and not na(time[i])
-                if high[i] > ltfSwingHigh
-                    // Still finding higher highs, update the peak
-                    ltfSwingHigh := high[i]
-                    ltfSwingHighOffset := i
-                else if high[i] < ltfSwingHigh
-                    // Found a bar with a lower high after our peak
-                    // This confirms the peak was the LTF swing high
-                    foundPeak := true
+        if array.size(highs) > 0
+            for i = array.size(highs) - 1 to 0
+                highLevel = array.get(highs, i)
+                if highLevel.barIndex <= nearestLow.barIndex
+                    highBeforePrice := highLevel.price
+                    highBeforeBar := highLevel.barIndex
+                    highBeforeIdx := i
                     break
 
-        // The zone spans from the LTF swing high to the HTF low
-        zoneTop := ltfSwingHigh
-        leftTime := time[ltfSwingHighOffset]
+        // Find the CTF valid high immediately AFTER this low
+        // This is the high that price rallied to after the low
+        // Search forwards through highs to find the first one after nearestLow
+        float highAfterPrice = na
+        int highAfterBar = na
+
+        if array.size(highs) > 0
+            for i = 0 to array.size(highs) - 1
+                highLevel = array.get(highs, i)
+                if highLevel.barIndex >= nearestLow.barIndex
+                    highAfterPrice := highLevel.price
+                    highAfterBar := highLevel.barIndex
+                    break
+
+        // Use the LOWER of the two valid highs (creates smaller zone)
+        if not na(highBeforePrice) and not na(highAfterPrice)
+            if highBeforePrice <= highAfterPrice
+                zoneTop := highBeforePrice
+                leftTime := time[bar_index - highBeforeBar]
+            else
+                zoneTop := highAfterPrice
+                leftTime := time[bar_index - highAfterBar]
+        else if not na(highBeforePrice)
+            zoneTop := highBeforePrice
+            leftTime := time[bar_index - highBeforeBar]
+        else if not na(highAfterPrice)
+            zoneTop := highAfterPrice
+            leftTime := time[bar_index - highAfterBar]
+        else
+            // Fallback: use the high at the low bar
+            int barsBack = bar_index - lowBarIndex
+            if barsBack >= 0 and barsBack < 5000
+                zoneTop := high[barsBack]
+                leftTime := time[barsBack]
 
     [zoneTop, zoneBottom, leftTime]
 
-// Calculate supply zone from a valid high (HTF swing high)
-// Find the LTF swing that formed this HTF high
-// We scan backwards from the high to find where the immediate LTF upswing started
-// (i.e., the minor swing low just before the high)
+// Calculate supply zone from an HTF swing high
+// Uses the CTF highs array to find the nearest valid high
+// Uses the CTF lows array to find valid lows on either side
+// Zone top = the CTF valid high price
+// Zone bottom = the HIGHER of the two CTF valid lows (immediately before and after)
 // Returns [zoneTop, zoneBottom, leftTime]
 calculateZoneFromHigh(int highBarIndex) =>
     float zoneTop = na
     float zoneBottom = na
     int leftTime = na
 
-    int barsBack = bar_index - highBarIndex
+    // Find the CTF valid high nearest to this bar index
+    int nearestHighIdx = -1
+    int nearestHighDistance = 999999
 
-    if barsBack >= 0 and barsBack < 5000
-        // The zone top is the high of the HTF swing high bar
-        zoneTop := high[barsBack]
+    if array.size(highs) > 0
+        for i = 0 to array.size(highs) - 1
+            highLevel = array.get(highs, i)
+            int distance = math.abs(highLevel.barIndex - highBarIndex)
+            if distance < nearestHighDistance
+                nearestHighDistance := distance
+                nearestHighIdx := i
 
-        // Find the LTF swing low that immediately preceded this high
-        // This is the start of the small upswing that formed the HTF high
-        // We look for where price made a minor low before rallying to make this high
+    if nearestHighIdx >= 0
+        nearestHigh = array.get(highs, nearestHighIdx)
+        zoneTop := nearestHigh.price
 
-        // Track the lowest low as we scan back
-        float ltfSwingLow = low[barsBack]
-        int ltfSwingLowOffset = barsBack
+        // Find the CTF valid low immediately BEFORE this high
+        // This is the low from which price rallied to create the high
+        // Search backwards through lows to find the first one before nearestHigh
+        float lowBeforePrice = na
+        int lowBeforeBar = na
+        int lowBeforeIdx = -1
 
-        // Scan backwards to find the LTF swing low
-        // The LTF swing low is where price bottomed before making this high
-        // We detect it by finding where lows stop making new lows
-        bool foundTrough = false
-
-        for i = barsBack + 1 to math.min(barsBack + 50, 5000)
-            if not na(high[i]) and not na(low[i]) and not na(time[i])
-                if low[i] < ltfSwingLow
-                    // Still finding lower lows, update the trough
-                    ltfSwingLow := low[i]
-                    ltfSwingLowOffset := i
-                else if low[i] > ltfSwingLow
-                    // Found a bar with a higher low after our trough
-                    // This confirms the trough was the LTF swing low
-                    foundTrough := true
+        if array.size(lows) > 0
+            for i = array.size(lows) - 1 to 0
+                lowLevel = array.get(lows, i)
+                if lowLevel.barIndex <= nearestHigh.barIndex
+                    lowBeforePrice := lowLevel.price
+                    lowBeforeBar := lowLevel.barIndex
+                    lowBeforeIdx := i
                     break
 
-        // The zone spans from the LTF swing low to the HTF high
-        zoneBottom := ltfSwingLow
-        leftTime := time[ltfSwingLowOffset]
+        // Find the CTF valid low immediately AFTER this high
+        // This is the low that price dropped to after the high
+        // Search forwards through lows to find the first one after nearestHigh
+        float lowAfterPrice = na
+        int lowAfterBar = na
+
+        if array.size(lows) > 0
+            for i = 0 to array.size(lows) - 1
+                lowLevel = array.get(lows, i)
+                if lowLevel.barIndex >= nearestHigh.barIndex
+                    lowAfterPrice := lowLevel.price
+                    lowAfterBar := lowLevel.barIndex
+                    break
+
+        // Use the HIGHER of the two valid lows (creates smaller zone)
+        if not na(lowBeforePrice) and not na(lowAfterPrice)
+            if lowBeforePrice >= lowAfterPrice
+                zoneBottom := lowBeforePrice
+                leftTime := time[bar_index - lowBeforeBar]
+            else
+                zoneBottom := lowAfterPrice
+                leftTime := time[bar_index - lowAfterBar]
+        else if not na(lowBeforePrice)
+            zoneBottom := lowBeforePrice
+            leftTime := time[bar_index - lowBeforeBar]
+        else if not na(lowAfterPrice)
+            zoneBottom := lowAfterPrice
+            leftTime := time[bar_index - lowAfterBar]
+        else
+            // Fallback: use the low at the high bar
+            int barsBack = bar_index - highBarIndex
+            if barsBack >= 0 and barsBack < 5000
+                zoneBottom := low[barsBack]
+                leftTime := time[barsBack]
 
     [zoneTop, zoneBottom, leftTime]
 
@@ -837,7 +906,7 @@ if htfEnabled and not htfInitialized and bar_index > 0 and htfNewCandle
         htfCurrentValidHigh := initHigh
         htfCurrentValidHighBar := initHighBar
 
-        // Also set an initial valid low to the current bar's low
+        // Also set an initial valid low to current bar
         // This allows BOS detection to work immediately
         htfCurrentValidLow := low
         htfCurrentValidLowBar := bar_index
@@ -845,6 +914,7 @@ if htfEnabled and not htfInitialized and bar_index > 0 and htfNewCandle
         htfInitialized := true
         htfLookingForLow := true
 
+        // Initialize swing tracking for the NEW HTF candle - start with current bar
         htfSwingLow := low
         htfSwingLowBar := bar_index
 
@@ -855,19 +925,9 @@ if htfEnabled and not htfInitialized and bar_index > 0 and htfNewCandle
         addLowHTF(low, bar_index, "strong", htfLowColor)
         htfMostRecentLowIndex := array.size(htfLows) - 1
 
-// HTF swing tracking - track actual LTF bars where HTF extremes occur
-if htfEnabled and htfInitialized
-    if htfLookingForLow
-        if na(htfSwingLow) or low < htfSwingLow
-            htfSwingLow := low
-            htfSwingLowBar := bar_index
-
-    if htfLookingForHigh
-        if na(htfSwingHigh) or high > htfSwingHigh
-            htfSwingHigh := high
-            htfSwingHighBar := bar_index
-
 // HTF main logic (only on new HTF candles)
+// IMPORTANT: This must run BEFORE swing tracking updates, so we use the
+// swing values from the PREVIOUS HTF candle, not contaminated by current bar
 if htfEnabled and htfInitialized and htfNewCandle
     // Reset HTF BOS flags
     htfBosBullish := false
@@ -875,27 +935,31 @@ if htfEnabled and htfInitialized and htfNewCandle
 
     // Check HTF BOS - zones are now created in checkBrokenLevelsHTF
     // This section just updates state tracking for the market structure
+    // Use findLowestBetween/findHighestBetween for accurate swing detection
     if not na(htfCurrentValidHigh) and not na(htfCurrentValidLow) and htfClose > htfCurrentValidHigh and htfLookingForLow
         htfBosBullish := true
         htfCurrentHighIsBroken := true
         htfLastBosDirection := "bullish"
         htfBullishBOS := htfBullishBOS + 1
 
-        if not na(htfSwingLow) and not na(htfSwingLowBar)
+        // Find the actual lowest low between the last valid high and now
+        [foundLow, foundLowBar] = findLowestBetween(htfCurrentValidHighBar, bar_index)
+        if not na(foundLow) and not na(foundLowBar)
             // Store previous low
             htfPreviousValidLow := htfCurrentValidLow
             htfPreviousValidLowBar := htfCurrentValidLowBar
 
-            htfCurrentValidLow := htfSwingLow
-            htfCurrentValidLowBar := htfSwingLowBar
+            htfCurrentValidLow := foundLow
+            htfCurrentValidLowBar := foundLowBar
 
-            addLowHTF(htfSwingLow, htfSwingLowBar, "strong", htfLowColor)
+            addLowHTF(foundLow, foundLowBar, "strong", htfLowColor)
             htfMostRecentLowIndex := array.size(htfLows) - 1
 
         // CRITICAL: Always update direction flags after BOS
         htfLookingForHigh := true
         htfLookingForLow := false
         htfCurrentLowIsBroken := false
+        // Reset swing tracking for the NEW HTF candle - start with current bar
         htfSwingHigh := high
         htfSwingHighBar := bar_index
 
@@ -905,54 +969,64 @@ if htfEnabled and htfInitialized and htfNewCandle
         htfLastBosDirection := "bearish"
         htfBearishBOS := htfBearishBOS + 1
 
-        if not na(htfSwingHigh) and not na(htfSwingHighBar)
+        // Find the actual highest high between the last valid low and now
+        [foundHigh, foundHighBar] = findHighestBetween(htfCurrentValidLowBar, bar_index)
+        if not na(foundHigh) and not na(foundHighBar)
             // Store previous high
             htfPreviousValidHigh := htfCurrentValidHigh
             htfPreviousValidHighBar := htfCurrentValidHighBar
 
-            htfCurrentValidHigh := htfSwingHigh
-            htfCurrentValidHighBar := htfSwingHighBar
+            htfCurrentValidHigh := foundHigh
+            htfCurrentValidHighBar := foundHighBar
 
-            addHighHTF(htfSwingHigh, htfSwingHighBar, "strong", htfHighColor)
+            addHighHTF(foundHigh, foundHighBar, "strong", htfHighColor)
             htfMostRecentHighIndex := array.size(htfHighs) - 1
 
         // CRITICAL: Always update direction flags after BOS
         htfLookingForLow := true
         htfLookingForHigh := false
         htfCurrentHighIsBroken := false
+        // Reset swing tracking for the NEW HTF candle - start with current bar
         htfSwingLow := low
         htfSwingLowBar := bar_index
 
     // HTF breakout/breakdown
+    // Use findLowestBetween/findHighestBetween like CTF does for accuracy
     if not htfBosBullish and not htfBosBearish and htfLookingForLow
         if htfIsBullishBreakout()
-            if not na(htfSwingLow) and not na(htfSwingLowBar)
-                htfCurrentValidLow := htfSwingLow
-                htfCurrentValidLowBar := htfSwingLowBar
+            // Find the actual lowest low between the last valid high and now
+            [foundLow, foundLowBar] = findLowestBetween(htfCurrentValidHighBar, bar_index)
+            if not na(foundLow) and not na(foundLowBar)
+                htfCurrentValidLow := foundLow
+                htfCurrentValidLowBar := foundLowBar
                 htfLookingForHigh := true
                 htfLookingForLow := false
                 htfCurrentLowIsBroken := false
 
                 levelType = getLowLevelType(htfLastBosDirection)
-                addLowHTF(htfSwingLow, htfSwingLowBar, levelType, htfLowColor)
+                addLowHTF(foundLow, foundLowBar, levelType, htfLowColor)
                 htfMostRecentLowIndex := array.size(htfLows) - 1
 
+                // Reset swing tracking for the NEW HTF candle - start with current bar
                 htfSwingHigh := high
                 htfSwingHighBar := bar_index
 
     if not htfBosBullish and not htfBosBearish and htfLookingForHigh
         if htfIsBearishBreakdown()
-            if not na(htfSwingHigh) and not na(htfSwingHighBar)
-                htfCurrentValidHigh := htfSwingHigh
-                htfCurrentValidHighBar := htfSwingHighBar
+            // Find the actual highest high between the last valid low and now
+            [foundHigh, foundHighBar] = findHighestBetween(htfCurrentValidLowBar, bar_index)
+            if not na(foundHigh) and not na(foundHighBar)
+                htfCurrentValidHigh := foundHigh
+                htfCurrentValidHighBar := foundHighBar
                 htfLookingForLow := true
                 htfLookingForHigh := false
                 htfCurrentHighIsBroken := false
 
                 levelType = getHighLevelType(htfLastBosDirection)
-                addHighHTF(htfSwingHigh, htfSwingHighBar, levelType, htfHighColor)
+                addHighHTF(foundHigh, foundHighBar, levelType, htfHighColor)
                 htfMostRecentHighIndex := array.size(htfHighs) - 1
 
+                // Reset swing tracking for the NEW HTF candle - start with current bar
                 htfSwingLow := low
                 htfSwingLowBar := bar_index
 
@@ -964,6 +1038,20 @@ if htfEnabled and htfInitialized and htfNewCandle
     htfBearishLabels := htfBearishLabels + bearLabels
     demandZonesCreated := demandZonesCreated + demandFromLabels
     supplyZonesCreated := supplyZonesCreated + supplyFromLabels
+
+// HTF swing tracking - track actual LTF bars where HTF extremes occur
+// IMPORTANT: This runs AFTER the htfNewCandle logic so the swing values
+// from the previous HTF candle are used before being updated
+if htfEnabled and htfInitialized
+    if htfLookingForLow
+        if na(htfSwingLow) or low < htfSwingLow
+            htfSwingLow := low
+            htfSwingLowBar := bar_index
+
+    if htfLookingForHigh
+        if na(htfSwingHigh) or high > htfSwingHigh
+            htfSwingHigh := high
+            htfSwingHighBar := bar_index
 
 // ============================================================================
 // ALERT CONDITION CHECKING
