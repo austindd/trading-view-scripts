@@ -263,8 +263,10 @@ findHighestBetween(startBar, endBar) =>
 // ZONE CALCULATION FUNCTIONS
 // ============================================================================
 
-// Calculate demand zone from a valid low
-// Find the entire LTF downswing that ended at this low
+// Calculate demand zone from a valid low (HTF swing low)
+// Find the LTF swing that formed this HTF low
+// We scan backwards from the low to find where the immediate LTF downswing started
+// (i.e., the minor swing high just before the low)
 // Returns [zoneTop, zoneBottom, leftTime]
 calculateZoneFromLow(int lowBarIndex) =>
     float zoneTop = na
@@ -274,40 +276,44 @@ calculateZoneFromLow(int lowBarIndex) =>
     int barsBack = bar_index - lowBarIndex
 
     if barsBack >= 0 and barsBack < 5000
-        // Start at the low - this is our zone bottom
+        // The zone bottom is the low of the HTF swing low bar
         zoneBottom := low[barsBack]
-        zoneTop := high[barsBack]
 
-        // Scan left from the low to find where the downswing started
-        // A downswing means price was making lower lows as it came down
-        // We keep scanning left while we find lower lows (continuing the downswing)
-        // Stop when we find a higher low (that's where the downswing started)
-        int swingStartOffset = barsBack
-        float prevLow = low[barsBack]
+        // Find the LTF swing high that immediately preceded this low
+        // This is the start of the small downswing that formed the HTF low
+        // We look for where price made a minor high before dropping to make this low
 
-        for i = barsBack + 1 to math.min(barsBack + 100, 5000)
+        // Track the highest high as we scan back
+        float ltfSwingHigh = high[barsBack]
+        int ltfSwingHighOffset = barsBack
+
+        // Scan backwards to find the LTF swing high
+        // The LTF swing high is where price peaked before making this low
+        // We detect it by finding where highs stop making new highs
+        bool foundPeak = false
+
+        for i = barsBack + 1 to math.min(barsBack + 50, 5000)
             if not na(high[i]) and not na(low[i]) and not na(time[i])
-                // Track highest high for zone top
-                if high[i] > zoneTop
-                    zoneTop := high[i]
-
-                // If this bar's low is higher than our tracking low,
-                // we've found where the downswing started
-                if low[i] > prevLow
-                    // Include this bar as the start of the zone
-                    swingStartOffset := i
+                if high[i] > ltfSwingHigh
+                    // Still finding higher highs, update the peak
+                    ltfSwingHigh := high[i]
+                    ltfSwingHighOffset := i
+                else if high[i] < ltfSwingHigh
+                    // Found a bar with a lower high after our peak
+                    // This confirms the peak was the LTF swing high
+                    foundPeak := true
                     break
-                else
-                    // This bar continues the downswing (lower or equal low)
-                    prevLow := low[i]
-                    swingStartOffset := i
 
-        leftTime := time[swingStartOffset]
+        // The zone spans from the LTF swing high to the HTF low
+        zoneTop := ltfSwingHigh
+        leftTime := time[ltfSwingHighOffset]
 
     [zoneTop, zoneBottom, leftTime]
 
-// Calculate supply zone from a valid high
-// Find the entire LTF upswing that ended at this high
+// Calculate supply zone from a valid high (HTF swing high)
+// Find the LTF swing that formed this HTF high
+// We scan backwards from the high to find where the immediate LTF upswing started
+// (i.e., the minor swing low just before the high)
 // Returns [zoneTop, zoneBottom, leftTime]
 calculateZoneFromHigh(int highBarIndex) =>
     float zoneTop = na
@@ -317,35 +323,37 @@ calculateZoneFromHigh(int highBarIndex) =>
     int barsBack = bar_index - highBarIndex
 
     if barsBack >= 0 and barsBack < 5000
-        // Start at the high - this is our zone top
+        // The zone top is the high of the HTF swing high bar
         zoneTop := high[barsBack]
-        zoneBottom := low[barsBack]
 
-        // Scan left from the high to find where the upswing started
-        // An upswing means price was making higher highs as it went up
-        // We keep scanning left while we find higher highs (continuing the upswing)
-        // Stop when we find a lower high (that's where the upswing started)
-        int swingStartOffset = barsBack
-        float prevHigh = high[barsBack]
+        // Find the LTF swing low that immediately preceded this high
+        // This is the start of the small upswing that formed the HTF high
+        // We look for where price made a minor low before rallying to make this high
 
-        for i = barsBack + 1 to math.min(barsBack + 100, 5000)
+        // Track the lowest low as we scan back
+        float ltfSwingLow = low[barsBack]
+        int ltfSwingLowOffset = barsBack
+
+        // Scan backwards to find the LTF swing low
+        // The LTF swing low is where price bottomed before making this high
+        // We detect it by finding where lows stop making new lows
+        bool foundTrough = false
+
+        for i = barsBack + 1 to math.min(barsBack + 50, 5000)
             if not na(high[i]) and not na(low[i]) and not na(time[i])
-                // Track lowest low for zone bottom
-                if low[i] < zoneBottom
-                    zoneBottom := low[i]
-
-                // If this bar's high is lower than our tracking high,
-                // we've found where the upswing started
-                if high[i] < prevHigh
-                    // Include this bar as the start of the zone
-                    swingStartOffset := i
+                if low[i] < ltfSwingLow
+                    // Still finding lower lows, update the trough
+                    ltfSwingLow := low[i]
+                    ltfSwingLowOffset := i
+                else if low[i] > ltfSwingLow
+                    // Found a bar with a higher low after our trough
+                    // This confirms the trough was the LTF swing low
+                    foundTrough := true
                     break
-                else
-                    // This bar continues the upswing (higher or equal high)
-                    prevHigh := high[i]
-                    swingStartOffset := i
 
-        leftTime := time[swingStartOffset]
+        // The zone spans from the LTF swing low to the HTF high
+        zoneBottom := ltfSwingLow
+        leftTime := time[ltfSwingLowOffset]
 
     [zoneTop, zoneBottom, leftTime]
 
