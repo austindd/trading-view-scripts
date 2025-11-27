@@ -763,8 +763,9 @@ checkBrokenLevels() =>
 
 // HTF version - checks for broken/swept levels
 // Creates zones for immediate BOS (when most recent level is broken, including after sweep)
+// Uses savedHighIdx/savedLowIdx which are captured BEFORE main BOS logic updates them
 // Returns [bullishLabelsCreated, bearishLabelsCreated, demandZonesCreated, supplyZonesCreated]
-checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
+checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowIdx) =>
     int bullishLabels = 0
     int bearishLabels = 0
     int demandCreated = 0
@@ -798,8 +799,8 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
                     bullishLabels := bullishLabels + 1
 
                 // Create zone if this is the most recent high (immediate BOS)
-                // This catches ALL immediate BOS cases, including swept-then-broken
-                if i == htfMostRecentHighIndex
+                // Use savedHighIdx which was captured BEFORE main logic updated it
+                if i == savedHighIdx
                     // Bullish BOS (high broken) -> Create DEMAND zone
                     [lowPrice, lowBar] = findLowestBetween(highLevel.barIndex, bar_index)
                     if not na(lowBar)
@@ -845,8 +846,8 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
                     bearishLabels := bearishLabels + 1
 
                 // Create zone if this is the most recent low (immediate BOS)
-                // This catches ALL immediate BOS cases, including swept-then-broken
-                if i == htfMostRecentLowIndex
+                // Use savedLowIdx which was captured BEFORE main logic updated it
+                if i == savedLowIdx
                     // Bearish BOS (low broken) -> Create SUPPLY zone
                     [highPrice, highBar] = findHighestBetween(lowLevel.barIndex, bar_index)
                     if not na(highBar)
@@ -1060,7 +1061,16 @@ if htfEnabled and not htfInitialized and bar_index > 0 and htfNewCandle
 // HTF main logic (only on new HTF candles)
 // IMPORTANT: This must run BEFORE swing tracking updates, so we use the
 // swing values from the PREVIOUS HTF candle, not contaminated by current bar
+
+// Save the "most recent" indices BEFORE main logic runs, so checkBrokenLevelsHTF can use them
+var int htfMostRecentHighIndexForZones = -1
+var int htfMostRecentLowIndexForZones = -1
+
 if htfEnabled and htfInitialized and htfNewCandle
+    // Capture the indices before any updates
+    htfMostRecentHighIndexForZones := htfMostRecentHighIndex
+    htfMostRecentLowIndexForZones := htfMostRecentLowIndex
+
     // Reset HTF BOS flags
     htfBosBullish := false
     htfBosBearish := false
@@ -1220,7 +1230,7 @@ if htfEnabled and htfInitialized and htfNewCandle
 // Check HTF broken/swept levels - ONLY on new HTF candles
 // This now also creates zones for every broken level
 if htfEnabled and htfInitialized and htfNewCandle
-    [bullLabels, bearLabels, demandFromLabels, supplyFromLabels] = checkBrokenLevelsHTF(htfHigh, htfLow, htfClose)
+    [bullLabels, bearLabels, demandFromLabels, supplyFromLabels] = checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, htfMostRecentHighIndexForZones, htfMostRecentLowIndexForZones)
     htfBullishLabels := htfBullishLabels + bullLabels
     htfBearishLabels := htfBearishLabels + bearLabels
     demandZonesCreated := demandZonesCreated + demandFromLabels
