@@ -634,7 +634,7 @@ checkBrokenLevels() =>
 
     true
 
-// HTF version - checks for broken levels AND creates zones
+// HTF version - checks for broken/swept levels (zones are created in main BOS logic for immediate breaks only)
 // Returns [bullishLabelsCreated, bearishLabelsCreated, demandZonesCreated, supplyZonesCreated]
 checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
     int bullishLabels = 0
@@ -669,25 +669,7 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
                              size=size.tiny)
                     bullishLabels := bullishLabels + 1
 
-                // Bullish BOS (high broken) -> Create DEMAND zone
-                // The demand zone is at the swing low that formed AFTER the high and led to this breakout
-                // Find the lowest low between when this high was created and now
-                [lowPrice, lowBar] = findLowestBetween(highLevel.barIndex, bar_index)
-                if not na(lowBar)
-                    [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromLow(lowBar)
-                    if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
-                        // Check for duplicate zone at same location
-                        bool isDuplicate = false
-                        if array.size(demandZones) > 0
-                            for j = array.size(demandZones) - 1 to math.max(0, array.size(demandZones) - 20)
-                                existingZone = array.get(demandZones, j)
-                                if existingZone.leftTime == zoneLeftTime and existingZone.top == zoneTop and existingZone.bottom == zoneBottom
-                                    isDuplicate := true
-                                    break
-                        if not isDuplicate
-                            newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false)
-                            array.push(demandZones, newZone)
-                            demandCreated := demandCreated + 1
+                // NOTE: Zone creation removed - zones are only created for immediate BOS in main logic
 
     if array.size(htfLows) > 0
         for i = 0 to array.size(htfLows) - 1
@@ -716,25 +698,7 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose) =>
                              size=size.tiny)
                     bearishLabels := bearishLabels + 1
 
-                // Bearish BOS (low broken) -> Create SUPPLY zone
-                // The supply zone is at the swing high that formed AFTER the low and led to this breakdown
-                // Find the highest high between when this low was created and now
-                [highPrice, highBar] = findHighestBetween(lowLevel.barIndex, bar_index)
-                if not na(highBar)
-                    [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromHigh(highBar)
-                    if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
-                        // Check for duplicate zone at same location
-                        bool isDuplicate = false
-                        if array.size(supplyZones) > 0
-                            for j = array.size(supplyZones) - 1 to math.max(0, array.size(supplyZones) - 20)
-                                existingZone = array.get(supplyZones, j)
-                                if existingZone.leftTime == zoneLeftTime and existingZone.top == zoneTop and existingZone.bottom == zoneBottom
-                                    isDuplicate := true
-                                    break
-                        if not isDuplicate
-                            newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false)
-                            array.push(supplyZones, newZone)
-                            supplyCreated := supplyCreated + 1
+                // NOTE: Zone creation removed - zones are only created for immediate BOS in main logic
 
     [bullishLabels, bearishLabels, demandCreated, supplyCreated]
 
@@ -937,8 +901,7 @@ if htfEnabled and htfInitialized and htfNewCandle
     htfBosBullish := false
     htfBosBearish := false
 
-    // Check HTF BOS - zones are now created in checkBrokenLevelsHTF
-    // This section just updates state tracking for the market structure
+    // Check HTF BOS - zones are created here for IMMEDIATE breaks only
     // Use findLowestBetween/findHighestBetween for accurate swing detection
     if not na(htfCurrentValidHigh) and not na(htfCurrentValidLow) and htfClose > htfCurrentValidHigh and htfLookingForLow
         htfBosBullish := true
@@ -958,6 +921,22 @@ if htfEnabled and htfInitialized and htfNewCandle
 
             addLowHTF(foundLow, foundLowBar, "strong", htfLowColor)
             htfMostRecentLowIndex := array.size(htfLows) - 1
+
+            // Create DEMAND zone at this HTF low (immediate BOS)
+            [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromLow(foundLowBar)
+            if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
+                // Check for duplicate zone
+                bool isDuplicate = false
+                if array.size(demandZones) > 0
+                    for j = array.size(demandZones) - 1 to math.max(0, array.size(demandZones) - 20)
+                        existingZone = array.get(demandZones, j)
+                        if existingZone.leftTime == zoneLeftTime and existingZone.top == zoneTop and existingZone.bottom == zoneBottom
+                            isDuplicate := true
+                            break
+                if not isDuplicate
+                    newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false)
+                    array.push(demandZones, newZone)
+                    demandZonesCreated := demandZonesCreated + 1
 
         // CRITICAL: Always update direction flags after BOS
         htfLookingForHigh := true
@@ -985,6 +964,22 @@ if htfEnabled and htfInitialized and htfNewCandle
 
             addHighHTF(foundHigh, foundHighBar, "strong", htfHighColor)
             htfMostRecentHighIndex := array.size(htfHighs) - 1
+
+            // Create SUPPLY zone at this HTF high (immediate BOS)
+            [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromHigh(foundHighBar)
+            if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
+                // Check for duplicate zone
+                bool isDuplicate = false
+                if array.size(supplyZones) > 0
+                    for j = array.size(supplyZones) - 1 to math.max(0, array.size(supplyZones) - 20)
+                        existingZone = array.get(supplyZones, j)
+                        if existingZone.leftTime == zoneLeftTime and existingZone.top == zoneTop and existingZone.bottom == zoneBottom
+                            isDuplicate := true
+                            break
+                if not isDuplicate
+                    newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false)
+                    array.push(supplyZones, newZone)
+                    supplyZonesCreated := supplyZonesCreated + 1
 
         // CRITICAL: Always update direction flags after BOS
         htfLookingForLow := true
