@@ -324,18 +324,20 @@ calculateZoneFromLow(int lowBarIndex) =>
                     break
 
         // Use the LOWER of the two valid highs (creates smaller zone)
+        // But always use the leftTime from the "before" high to ensure HTF pivot is included
         if not na(highBeforePrice) and not na(highAfterPrice)
             if highBeforePrice <= highAfterPrice
                 zoneTop := highBeforePrice
-                leftTime := time[bar_index - highBeforeBar]
             else
                 zoneTop := highAfterPrice
-                leftTime := time[bar_index - highAfterBar]
+            // Always start zone from the earlier (before) high
+            leftTime := time[bar_index - highBeforeBar]
         else if not na(highBeforePrice)
             zoneTop := highBeforePrice
             leftTime := time[bar_index - highBeforeBar]
         else if not na(highAfterPrice)
             zoneTop := highAfterPrice
+            // No high before, use the after high's time
             leftTime := time[bar_index - highAfterBar]
         else
             // Fallback: use the high at the low bar
@@ -404,18 +406,20 @@ calculateZoneFromHigh(int highBarIndex) =>
                     break
 
         // Use the HIGHER of the two valid lows (creates smaller zone)
+        // But always use the leftTime from the "before" low to ensure HTF pivot is included
         if not na(lowBeforePrice) and not na(lowAfterPrice)
             if lowBeforePrice >= lowAfterPrice
                 zoneBottom := lowBeforePrice
-                leftTime := time[bar_index - lowBeforeBar]
             else
                 zoneBottom := lowAfterPrice
-                leftTime := time[bar_index - lowAfterBar]
+            // Always start zone from the earlier (before) low
+            leftTime := time[bar_index - lowBeforeBar]
         else if not na(lowBeforePrice)
             zoneBottom := lowBeforePrice
             leftTime := time[bar_index - lowBeforeBar]
         else if not na(lowAfterPrice)
             zoneBottom := lowAfterPrice
+            // No low before, use the after low's time
             leftTime := time[bar_index - lowAfterBar]
         else
             // Fallback: use the low at the high bar
