@@ -114,6 +114,12 @@ var float previousValidLow = na
 var int previousValidHighBar = na
 var int previousValidLowBar = na
 
+// Track nearest unbroken high/low (structure boundaries)
+var int nearestUnbrokenHighIndex = -1
+var int nearestUnbrokenLowIndex = -1
+var line nearestUnbrokenHighLine = na
+var line nearestUnbrokenLowLine = na
+
 // Higher Timeframe
 var float htfCurrentValidHigh = na
 var float htfCurrentValidLow = na
@@ -141,6 +147,12 @@ var float htfPreviousValidHigh = na
 var float htfPreviousValidLow = na
 var int htfPreviousValidHighBar = na
 var int htfPreviousValidLowBar = na
+
+// HTF Track nearest unbroken high/low (structure boundaries)
+var int htfNearestUnbrokenHighIndex = -1
+var int htfNearestUnbrokenLowIndex = -1
+var line htfNearestUnbrokenHighLine = na
+var line htfNearestUnbrokenLowLine = na
 
 // Trading Range Timeframe (HTF2) State Variables
 var float htf2CurrentValidHigh = na
@@ -170,6 +182,12 @@ var float htf2PreviousValidLow = na
 var int htf2PreviousValidHighBar = na
 var int htf2PreviousValidLowBar = na
 
+// HTF2 Track nearest unbroken high/low (structure boundaries)
+var int htf2NearestUnbrokenHighIndex = -1
+var int htf2NearestUnbrokenLowIndex = -1
+var line htf2NearestUnbrokenHighLine = na
+var line htf2NearestUnbrokenLowLine = na
+
 // Labels
 var label currentHighLabel = na
 var label currentLowLabel = na
@@ -177,6 +195,14 @@ var label htfCurrentHighLabel = na
 var label htfCurrentLowLabel = na
 var label htf2CurrentHighLabel = na
 var label htf2CurrentLowLabel = na
+
+// Labels for nearest unbroken levels (structure boundaries)
+var label nearestUnbrokenHighLabel = na
+var label nearestUnbrokenLowLabel = na
+var label htfNearestUnbrokenHighLabel = na
+var label htfNearestUnbrokenLowLabel = na
+var label htf2NearestUnbrokenHighLabel = na
+var label htf2NearestUnbrokenLowLabel = na
 
 var array<label> sweptHighLabels = array.new<label>()
 var array<label> sweptLowLabels = array.new<label>()
@@ -1019,6 +1045,34 @@ getLowLevelType(string bosDirection) =>
     bosDirection == "bearish" ? "weak" : "strong"
 
 // ============================================================================
+// NEAREST UNBROKEN LEVEL FUNCTIONS
+// ============================================================================
+
+// Find the nearest unbroken high in an array (searching from most recent backwards)
+// Returns the index of the nearest unbroken high, or -1 if none found
+findNearestUnbrokenHigh(array<HighLevel> highsArray) =>
+    int result = -1
+    if array.size(highsArray) > 0
+        for i = array.size(highsArray) - 1 to 0
+            highLevel = array.get(highsArray, i)
+            if highLevel.levelType != "broken"
+                result := i
+                break
+    result
+
+// Find the nearest unbroken low in an array (searching from most recent backwards)
+// Returns the index of the nearest unbroken low, or -1 if none found
+findNearestUnbrokenLow(array<LowLevel> lowsArray) =>
+    int result = -1
+    if array.size(lowsArray) > 0
+        for i = array.size(lowsArray) - 1 to 0
+            lowLevel = array.get(lowsArray, i)
+            if lowLevel.levelType != "broken"
+                result := i
+                break
+    result
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
@@ -1048,6 +1102,31 @@ if initialized
     // Check broken/swept levels and zones
     checkBrokenLevels()
     checkBrokenZones()
+
+    // Update nearest unbroken levels (structure boundaries) - CTF
+    int ctfNewHighIdx = findNearestUnbrokenHigh(highs)
+    if ctfNewHighIdx != nearestUnbrokenHighIndex or (ctfNewHighIdx >= 0 and na(nearestUnbrokenHighLine))
+        if not na(nearestUnbrokenHighLine)
+            line.delete(nearestUnbrokenHighLine)
+            nearestUnbrokenHighLine := na
+        nearestUnbrokenHighIndex := ctfNewHighIdx
+        if ctfNewHighIdx >= 0 and ctfNewHighIdx != mostRecentHighIndex
+            ctfHighLevel = array.get(highs, ctfNewHighIdx)
+            nearestUnbrokenHighLine := line.new(ctfHighLevel.barIndex, ctfHighLevel.price, bar_index + 1, ctfHighLevel.price, color=color.new(highColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
+    if not na(nearestUnbrokenHighLine)
+        line.set_x2(nearestUnbrokenHighLine, bar_index + 1)
+
+    int ctfNewLowIdx = findNearestUnbrokenLow(lows)
+    if ctfNewLowIdx != nearestUnbrokenLowIndex or (ctfNewLowIdx >= 0 and na(nearestUnbrokenLowLine))
+        if not na(nearestUnbrokenLowLine)
+            line.delete(nearestUnbrokenLowLine)
+            nearestUnbrokenLowLine := na
+        nearestUnbrokenLowIndex := ctfNewLowIdx
+        if ctfNewLowIdx >= 0 and ctfNewLowIdx != mostRecentLowIndex
+            ctfLowLevel = array.get(lows, ctfNewLowIdx)
+            nearestUnbrokenLowLine := line.new(ctfLowLevel.barIndex, ctfLowLevel.price, bar_index + 1, ctfLowLevel.price, color=color.new(lowColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
+    if not na(nearestUnbrokenLowLine)
+        line.set_x2(nearestUnbrokenLowLine, bar_index + 1)
 
     bool bosBullish = false
     bool bosBearish = false
@@ -1394,6 +1473,31 @@ if htfEnabled and htfInitialized
             htfSwingHigh := high
             htfSwingHighBar := bar_index
 
+    // Update nearest unbroken levels (structure boundaries) - HTF
+    int htfNewHighIdx = findNearestUnbrokenHigh(htfHighs)
+    if htfNewHighIdx != htfNearestUnbrokenHighIndex or (htfNewHighIdx >= 0 and na(htfNearestUnbrokenHighLine))
+        if not na(htfNearestUnbrokenHighLine)
+            line.delete(htfNearestUnbrokenHighLine)
+            htfNearestUnbrokenHighLine := na
+        htfNearestUnbrokenHighIndex := htfNewHighIdx
+        if htfNewHighIdx >= 0 and htfNewHighIdx != htfMostRecentHighIndex
+            htfHighLevel = array.get(htfHighs, htfNewHighIdx)
+            htfNearestUnbrokenHighLine := line.new(htfHighLevel.barIndex, htfHighLevel.price, bar_index + 1, htfHighLevel.price, color=color.new(htfHighColor, 50), width=lineWidth + 1, extend=extend.right, style=line.style_dashed)
+    if not na(htfNearestUnbrokenHighLine)
+        line.set_x2(htfNearestUnbrokenHighLine, bar_index + 1)
+
+    int htfNewLowIdx = findNearestUnbrokenLow(htfLows)
+    if htfNewLowIdx != htfNearestUnbrokenLowIndex or (htfNewLowIdx >= 0 and na(htfNearestUnbrokenLowLine))
+        if not na(htfNearestUnbrokenLowLine)
+            line.delete(htfNearestUnbrokenLowLine)
+            htfNearestUnbrokenLowLine := na
+        htfNearestUnbrokenLowIndex := htfNewLowIdx
+        if htfNewLowIdx >= 0 and htfNewLowIdx != htfMostRecentLowIndex
+            htfLowLevel = array.get(htfLows, htfNewLowIdx)
+            htfNearestUnbrokenLowLine := line.new(htfLowLevel.barIndex, htfLowLevel.price, bar_index + 1, htfLowLevel.price, color=color.new(htfLowColor, 50), width=lineWidth + 1, extend=extend.right, style=line.style_dashed)
+    if not na(htfNearestUnbrokenLowLine)
+        line.set_x2(htfNearestUnbrokenLowLine, bar_index + 1)
+
 // ============================================================================
 // HTF2 (TRADING RANGE) DATA AND LOGIC
 // ============================================================================
@@ -1539,6 +1643,31 @@ if htf2Enabled and htf2Initialized
         if na(htf2SwingHigh) or high > htf2SwingHigh
             htf2SwingHigh := high
             htf2SwingHighBar := bar_index
+
+    // Update nearest unbroken levels (structure boundaries) - HTF2
+    int htf2NewHighIdx = findNearestUnbrokenHigh(htf2Highs)
+    if htf2NewHighIdx != htf2NearestUnbrokenHighIndex or (htf2NewHighIdx >= 0 and na(htf2NearestUnbrokenHighLine))
+        if not na(htf2NearestUnbrokenHighLine)
+            line.delete(htf2NearestUnbrokenHighLine)
+            htf2NearestUnbrokenHighLine := na
+        htf2NearestUnbrokenHighIndex := htf2NewHighIdx
+        if htf2NewHighIdx >= 0 and htf2NewHighIdx != htf2MostRecentHighIndex
+            htf2HighLevel = array.get(htf2Highs, htf2NewHighIdx)
+            htf2NearestUnbrokenHighLine := line.new(htf2HighLevel.barIndex, htf2HighLevel.price, bar_index + 1, htf2HighLevel.price, color=color.new(color.black, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
+    if not na(htf2NearestUnbrokenHighLine)
+        line.set_x2(htf2NearestUnbrokenHighLine, bar_index + 1)
+
+    int htf2NewLowIdx = findNearestUnbrokenLow(htf2Lows)
+    if htf2NewLowIdx != htf2NearestUnbrokenLowIndex or (htf2NewLowIdx >= 0 and na(htf2NearestUnbrokenLowLine))
+        if not na(htf2NearestUnbrokenLowLine)
+            line.delete(htf2NearestUnbrokenLowLine)
+            htf2NearestUnbrokenLowLine := na
+        htf2NearestUnbrokenLowIndex := htf2NewLowIdx
+        if htf2NewLowIdx >= 0 and htf2NewLowIdx != htf2MostRecentLowIndex
+            htf2LowLevel = array.get(htf2Lows, htf2NewLowIdx)
+            htf2NearestUnbrokenLowLine := line.new(htf2LowLevel.barIndex, htf2LowLevel.price, bar_index + 1, htf2LowLevel.price, color=color.new(color.black, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
+    if not na(htf2NearestUnbrokenLowLine)
+        line.set_x2(htf2NearestUnbrokenLowLine, bar_index + 1)
 
 // ============================================================================
 // ALERT CONDITION CHECKING
@@ -1777,6 +1906,12 @@ if array.size(highs) > 30
     array.shift(highs)
     if mostRecentHighIndex >= 0
         mostRecentHighIndex := mostRecentHighIndex - 1
+    if nearestUnbrokenHighIndex >= 0
+        nearestUnbrokenHighIndex := nearestUnbrokenHighIndex - 1
+        if nearestUnbrokenHighIndex < 0
+            if not na(nearestUnbrokenHighLine)
+                line.delete(nearestUnbrokenHighLine)
+                nearestUnbrokenHighLine := na
 
 if array.size(lows) > 30
     oldLow = array.get(lows, 0)
@@ -1784,6 +1919,12 @@ if array.size(lows) > 30
     array.shift(lows)
     if mostRecentLowIndex >= 0
         mostRecentLowIndex := mostRecentLowIndex - 1
+    if nearestUnbrokenLowIndex >= 0
+        nearestUnbrokenLowIndex := nearestUnbrokenLowIndex - 1
+        if nearestUnbrokenLowIndex < 0
+            if not na(nearestUnbrokenLowLine)
+                line.delete(nearestUnbrokenLowLine)
+                nearestUnbrokenLowLine := na
 
 if array.size(htfHighs) > 30
     oldHigh = array.get(htfHighs, 0)
@@ -1791,6 +1932,12 @@ if array.size(htfHighs) > 30
     array.shift(htfHighs)
     if htfMostRecentHighIndex >= 0
         htfMostRecentHighIndex := htfMostRecentHighIndex - 1
+    if htfNearestUnbrokenHighIndex >= 0
+        htfNearestUnbrokenHighIndex := htfNearestUnbrokenHighIndex - 1
+        if htfNearestUnbrokenHighIndex < 0
+            if not na(htfNearestUnbrokenHighLine)
+                line.delete(htfNearestUnbrokenHighLine)
+                htfNearestUnbrokenHighLine := na
 
 if array.size(htfLows) > 30
     oldLow = array.get(htfLows, 0)
@@ -1798,6 +1945,12 @@ if array.size(htfLows) > 30
     array.shift(htfLows)
     if htfMostRecentLowIndex >= 0
         htfMostRecentLowIndex := htfMostRecentLowIndex - 1
+    if htfNearestUnbrokenLowIndex >= 0
+        htfNearestUnbrokenLowIndex := htfNearestUnbrokenLowIndex - 1
+        if htfNearestUnbrokenLowIndex < 0
+            if not na(htfNearestUnbrokenLowLine)
+                line.delete(htfNearestUnbrokenLowLine)
+                htfNearestUnbrokenLowLine := na
 
 if array.size(htf2Highs) > 30
     oldHigh = array.get(htf2Highs, 0)
@@ -1805,6 +1958,12 @@ if array.size(htf2Highs) > 30
     array.shift(htf2Highs)
     if htf2MostRecentHighIndex >= 0
         htf2MostRecentHighIndex := htf2MostRecentHighIndex - 1
+    if htf2NearestUnbrokenHighIndex >= 0
+        htf2NearestUnbrokenHighIndex := htf2NearestUnbrokenHighIndex - 1
+        if htf2NearestUnbrokenHighIndex < 0
+            if not na(htf2NearestUnbrokenHighLine)
+                line.delete(htf2NearestUnbrokenHighLine)
+                htf2NearestUnbrokenHighLine := na
 
 if array.size(htf2Lows) > 30
     oldLow = array.get(htf2Lows, 0)
@@ -1812,6 +1971,12 @@ if array.size(htf2Lows) > 30
     array.shift(htf2Lows)
     if htf2MostRecentLowIndex >= 0
         htf2MostRecentLowIndex := htf2MostRecentLowIndex - 1
+    if htf2NearestUnbrokenLowIndex >= 0
+        htf2NearestUnbrokenLowIndex := htf2NearestUnbrokenLowIndex - 1
+        if htf2NearestUnbrokenLowIndex < 0
+            if not na(htf2NearestUnbrokenLowLine)
+                line.delete(htf2NearestUnbrokenLowLine)
+                htf2NearestUnbrokenLowLine := na
 
 // Remove old broken zones to keep arrays clean
 // NOTE: Disabled automatic removal - let size limit handle cleanup
@@ -1998,6 +2163,133 @@ if htf2Enabled and htf2Initialized and not na(htf2CurrentValidLow) and htf2MostR
                                      color=color.black,
                                      textcolor=color.white,
                                      size=size.small)
+
+// Nearest unbroken level labels (structure boundaries)
+// CTF nearest unbroken high
+if nearestUnbrokenHighIndex >= 0 and nearestUnbrokenHighIndex < array.size(highs) and nearestUnbrokenHighIndex != mostRecentHighIndex
+    if not na(nearestUnbrokenHighLabel)
+        label.delete(nearestUnbrokenHighLabel)
+
+    highLevel = array.get(highs, nearestUnbrokenHighIndex)
+    string labelText = timeframe.period + " Unbroken High"
+    if highLevel.levelType == "swept"
+        labelText := timeframe.period + " Swept High (Unbroken)"
+
+    nearestUnbrokenHighLabel := label.new(bar_index + 5, highLevel.price,
+                                          text=labelText,
+                                          style=label.style_label_left,
+                                          color=color.new(highColor, 50),
+                                          textcolor=color.white,
+                                          size=size.small)
+else
+    if not na(nearestUnbrokenHighLabel)
+        label.delete(nearestUnbrokenHighLabel)
+        nearestUnbrokenHighLabel := na
+
+// CTF nearest unbroken low
+if nearestUnbrokenLowIndex >= 0 and nearestUnbrokenLowIndex < array.size(lows) and nearestUnbrokenLowIndex != mostRecentLowIndex
+    if not na(nearestUnbrokenLowLabel)
+        label.delete(nearestUnbrokenLowLabel)
+
+    lowLevel = array.get(lows, nearestUnbrokenLowIndex)
+    string labelText = timeframe.period + " Unbroken Low"
+    if lowLevel.levelType == "swept"
+        labelText := timeframe.period + " Swept Low (Unbroken)"
+
+    nearestUnbrokenLowLabel := label.new(bar_index + 5, lowLevel.price,
+                                         text=labelText,
+                                         style=label.style_label_left,
+                                         color=color.new(lowColor, 50),
+                                         textcolor=color.white,
+                                         size=size.small)
+else
+    if not na(nearestUnbrokenLowLabel)
+        label.delete(nearestUnbrokenLowLabel)
+        nearestUnbrokenLowLabel := na
+
+// HTF nearest unbroken high
+if htfEnabled and htfNearestUnbrokenHighIndex >= 0 and htfNearestUnbrokenHighIndex < array.size(htfHighs) and htfNearestUnbrokenHighIndex != htfMostRecentHighIndex
+    if not na(htfNearestUnbrokenHighLabel)
+        label.delete(htfNearestUnbrokenHighLabel)
+
+    highLevel = array.get(htfHighs, htfNearestUnbrokenHighIndex)
+    string labelText = htfTimeframe + " Unbroken High"
+    if highLevel.levelType == "swept"
+        labelText := htfTimeframe + " Swept High (Unbroken)"
+
+    htfNearestUnbrokenHighLabel := label.new(bar_index + 20, highLevel.price,
+                                              text=labelText,
+                                              style=label.style_label_left,
+                                              color=color.new(htfHighColor, 50),
+                                              textcolor=color.white,
+                                              size=size.small)
+else
+    if not na(htfNearestUnbrokenHighLabel)
+        label.delete(htfNearestUnbrokenHighLabel)
+        htfNearestUnbrokenHighLabel := na
+
+// HTF nearest unbroken low
+if htfEnabled and htfNearestUnbrokenLowIndex >= 0 and htfNearestUnbrokenLowIndex < array.size(htfLows) and htfNearestUnbrokenLowIndex != htfMostRecentLowIndex
+    if not na(htfNearestUnbrokenLowLabel)
+        label.delete(htfNearestUnbrokenLowLabel)
+
+    lowLevel = array.get(htfLows, htfNearestUnbrokenLowIndex)
+    string labelText = htfTimeframe + " Unbroken Low"
+    if lowLevel.levelType == "swept"
+        labelText := htfTimeframe + " Swept Low (Unbroken)"
+
+    htfNearestUnbrokenLowLabel := label.new(bar_index + 20, lowLevel.price,
+                                             text=labelText,
+                                             style=label.style_label_left,
+                                             color=color.new(htfLowColor, 50),
+                                             textcolor=color.white,
+                                             size=size.small)
+else
+    if not na(htfNearestUnbrokenLowLabel)
+        label.delete(htfNearestUnbrokenLowLabel)
+        htfNearestUnbrokenLowLabel := na
+
+// HTF2 nearest unbroken high
+if htf2Enabled and htf2NearestUnbrokenHighIndex >= 0 and htf2NearestUnbrokenHighIndex < array.size(htf2Highs) and htf2NearestUnbrokenHighIndex != htf2MostRecentHighIndex
+    if not na(htf2NearestUnbrokenHighLabel)
+        label.delete(htf2NearestUnbrokenHighLabel)
+
+    highLevel = array.get(htf2Highs, htf2NearestUnbrokenHighIndex)
+    string labelText = htf2Timeframe + " Unbroken High"
+    if highLevel.levelType == "swept"
+        labelText := htf2Timeframe + " Swept High (Unbroken)"
+
+    htf2NearestUnbrokenHighLabel := label.new(bar_index + 35, highLevel.price,
+                                               text=labelText,
+                                               style=label.style_label_left,
+                                               color=color.new(color.black, 50),
+                                               textcolor=color.white,
+                                               size=size.small)
+else
+    if not na(htf2NearestUnbrokenHighLabel)
+        label.delete(htf2NearestUnbrokenHighLabel)
+        htf2NearestUnbrokenHighLabel := na
+
+// HTF2 nearest unbroken low
+if htf2Enabled and htf2NearestUnbrokenLowIndex >= 0 and htf2NearestUnbrokenLowIndex < array.size(htf2Lows) and htf2NearestUnbrokenLowIndex != htf2MostRecentLowIndex
+    if not na(htf2NearestUnbrokenLowLabel)
+        label.delete(htf2NearestUnbrokenLowLabel)
+
+    lowLevel = array.get(htf2Lows, htf2NearestUnbrokenLowIndex)
+    string labelText = htf2Timeframe + " Unbroken Low"
+    if lowLevel.levelType == "swept"
+        labelText := htf2Timeframe + " Swept Low (Unbroken)"
+
+    htf2NearestUnbrokenLowLabel := label.new(bar_index + 35, lowLevel.price,
+                                              text=labelText,
+                                              style=label.style_label_left,
+                                              color=color.new(color.black, 50),
+                                              textcolor=color.white,
+                                              size=size.small)
+else
+    if not na(htf2NearestUnbrokenLowLabel)
+        label.delete(htf2NearestUnbrokenLowLabel)
+        htf2NearestUnbrokenLowLabel := na
 
 // Swept level labels (most recent only)
 if array.size(sweptHighLabels) > 0
