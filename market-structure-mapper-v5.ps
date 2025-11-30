@@ -207,6 +207,8 @@ isBullishBreakout() =>
     close > open and close > high[1]
 
 // Find lowest low between two bar indices
+// Note: Pine Script has a limited historical buffer (typically ~200-500 bars depending on plan)
+// We use a conservative limit of 200 to avoid runtime errors
 findLowestBetween(startBar, endBar) =>
     float lowestPrice = na
     int lowestBarIndex = na
@@ -223,12 +225,14 @@ findLowestBetween(startBar, endBar) =>
     int lookbackStart = currentBar - end
     int lookbackEnd = currentBar - start - 1
 
+    // Use conservative limit of 200 bars to stay well within historical buffer
+    int maxLookback = 200
     lookbackStart := math.max(lookbackStart, 0)
-    lookbackEnd := math.min(lookbackEnd, 5000)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
 
-    if lookbackStart <= lookbackEnd
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
         for i = lookbackStart to lookbackEnd
-            if not na(low[i])
+            if i >= 0 and not na(low[i])
                 if na(lowestPrice) or low[i] < lowestPrice
                     lowestPrice := low[i]
                     lowestBarIndex := currentBar - i
@@ -236,6 +240,8 @@ findLowestBetween(startBar, endBar) =>
     [lowestPrice, lowestBarIndex]
 
 // Find highest high between two bar indices
+// Note: Pine Script has a limited historical buffer (typically ~200-500 bars depending on plan)
+// We use a conservative limit of 200 to avoid runtime errors
 findHighestBetween(startBar, endBar) =>
     float highestPrice = na
     int highestBarIndex = na
@@ -252,12 +258,14 @@ findHighestBetween(startBar, endBar) =>
     int lookbackStart = currentBar - end
     int lookbackEnd = currentBar - start - 1
 
+    // Use conservative limit of 200 bars to stay well within historical buffer
+    int maxLookback = 200
     lookbackStart := math.max(lookbackStart, 0)
-    lookbackEnd := math.min(lookbackEnd, 5000)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
 
-    if lookbackStart <= lookbackEnd
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
         for i = lookbackStart to lookbackEnd
-            if not na(high[i])
+            if i >= 0 and not na(high[i])
                 if na(highestPrice) or high[i] > highestPrice
                     highestPrice := high[i]
                     highestBarIndex := currentBar - i
@@ -277,11 +285,12 @@ findSwingHighBefore(int startBarIndex, int maxBarsToScan) =>
     float swingPrice = na
     int swingBar = na
     int barsBack = bar_index - startBarIndex
+    int maxLookback = 198  // Conservative limit to stay within historical buffer
 
-    if barsBack >= 0 and barsBack < 5000
+    if barsBack >= 0 and barsBack < maxLookback
         // Scan backwards from startBarIndex to find a swing high
-        for i = barsBack + 1 to math.min(barsBack + maxBarsToScan, 4998)
-            if not na(high[i]) and not na(high[i-1]) and not na(high[i+1])
+        for i = barsBack + 1 to math.min(barsBack + maxBarsToScan, maxLookback - 1)
+            if i >= 1 and i < maxLookback and not na(high[i]) and not na(high[i-1]) and not na(high[i+1])
                 // Check if this is a swing high (higher than neighbors)
                 if high[i] > high[i-1] and high[i] > high[i+1]
                     swingPrice := high[i]
@@ -294,11 +303,12 @@ findSwingHighAfter(int startBarIndex, int maxBarsToScan) =>
     float swingPrice = na
     int swingBar = na
     int barsBack = bar_index - startBarIndex
+    int maxLookback = 198  // Conservative limit to stay within historical buffer
 
-    if barsBack > 1 and barsBack < 5000
+    if barsBack > 1 and barsBack < maxLookback
         // Scan forwards from startBarIndex to find a swing high
         for i = barsBack - 1 to math.max(1, barsBack - maxBarsToScan)
-            if not na(high[i]) and not na(high[i-1]) and not na(high[i+1])
+            if i >= 1 and i < maxLookback and not na(high[i]) and not na(high[i-1]) and not na(high[i+1])
                 // Check if this is a swing high (higher than neighbors)
                 if high[i] > high[i-1] and high[i] > high[i+1]
                     swingPrice := high[i]
@@ -311,11 +321,12 @@ findSwingLowBefore(int startBarIndex, int maxBarsToScan) =>
     float swingPrice = na
     int swingBar = na
     int barsBack = bar_index - startBarIndex
+    int maxLookback = 198  // Conservative limit to stay within historical buffer
 
-    if barsBack >= 0 and barsBack < 5000
+    if barsBack >= 0 and barsBack < maxLookback
         // Scan backwards from startBarIndex to find a swing low
-        for i = barsBack + 1 to math.min(barsBack + maxBarsToScan, 4998)
-            if not na(low[i]) and not na(low[i-1]) and not na(low[i+1])
+        for i = barsBack + 1 to math.min(barsBack + maxBarsToScan, maxLookback - 1)
+            if i >= 1 and i < maxLookback and not na(low[i]) and not na(low[i-1]) and not na(low[i+1])
                 // Check if this is a swing low (lower than neighbors)
                 if low[i] < low[i-1] and low[i] < low[i+1]
                     swingPrice := low[i]
@@ -328,11 +339,12 @@ findSwingLowAfter(int startBarIndex, int maxBarsToScan) =>
     float swingPrice = na
     int swingBar = na
     int barsBack = bar_index - startBarIndex
+    int maxLookback = 198  // Conservative limit to stay within historical buffer
 
-    if barsBack > 1 and barsBack < 5000
+    if barsBack > 1 and barsBack < maxLookback
         // Scan forwards from startBarIndex to find a swing low
         for i = barsBack - 1 to math.max(1, barsBack - maxBarsToScan)
-            if not na(low[i]) and not na(low[i-1]) and not na(low[i+1])
+            if i >= 1 and i < maxLookback and not na(low[i]) and not na(low[i-1]) and not na(low[i+1])
                 // Check if this is a swing low (lower than neighbors)
                 if low[i] < low[i-1] and low[i] < low[i+1]
                     swingPrice := low[i]
@@ -349,10 +361,11 @@ calculateZoneFromLow(int lowBarIndex) =>
     float zoneTop = na
     float zoneBottom = na
     int leftTime = na
+    int maxLookback = 198  // Conservative limit to stay within historical buffer
 
     int barsBack = bar_index - lowBarIndex
 
-    if barsBack >= 0 and barsBack < 5000
+    if barsBack >= 0 and barsBack < maxLookback
         // Zone bottom is the low at the given bar
         zoneBottom := low[barsBack]
 
@@ -401,19 +414,19 @@ calculateZoneFromLow(int lowBarIndex) =>
             // Always start zone from the earlier (before) high
             if not na(highBeforeBar)
                 int offset = bar_index - highBeforeBar
-                if offset >= 0 and offset < 5000
+                if offset >= 0 and offset < maxLookback
                     leftTime := time[offset]
         else if not na(highBeforePrice)
             zoneTop := highBeforePrice
             if not na(highBeforeBar)
                 int offset = bar_index - highBeforeBar
-                if offset >= 0 and offset < 5000
+                if offset >= 0 and offset < maxLookback
                     leftTime := time[offset]
         else if not na(highAfterPrice)
             zoneTop := highAfterPrice
             if not na(highAfterBar)
                 int offset = bar_index - highAfterBar
-                if offset >= 0 and offset < 5000
+                if offset >= 0 and offset < maxLookback
                     leftTime := time[offset]
         else
             // Last fallback: just use the high at the low bar
@@ -430,10 +443,11 @@ calculateZoneFromHigh(int highBarIndex) =>
     float zoneTop = na
     float zoneBottom = na
     int leftTime = na
+    int maxLookback = 198  // Conservative limit to stay within historical buffer
 
     int barsBack = bar_index - highBarIndex
 
-    if barsBack >= 0 and barsBack < 5000
+    if barsBack >= 0 and barsBack < maxLookback
         // Zone top is the high at the given bar
         zoneTop := high[barsBack]
 
@@ -482,19 +496,19 @@ calculateZoneFromHigh(int highBarIndex) =>
             // Always start zone from the earlier (before) low
             if not na(lowBeforeBar)
                 int offset = bar_index - lowBeforeBar
-                if offset >= 0 and offset < 5000
+                if offset >= 0 and offset < maxLookback
                     leftTime := time[offset]
         else if not na(lowBeforePrice)
             zoneBottom := lowBeforePrice
             if not na(lowBeforeBar)
                 int offset = bar_index - lowBeforeBar
-                if offset >= 0 and offset < 5000
+                if offset >= 0 and offset < maxLookback
                     leftTime := time[offset]
         else if not na(lowAfterPrice)
             zoneBottom := lowAfterPrice
             if not na(lowAfterBar)
                 int offset = bar_index - lowAfterBar
-                if offset >= 0 and offset < 5000
+                if offset >= 0 and offset < maxLookback
                     leftTime := time[offset]
         else
             // Last fallback: just use the low at the high bar
