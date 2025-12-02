@@ -14,6 +14,11 @@ tradeSupplyZones = input.bool(true, "Trade Supply Zones (Short)", group="Strateg
 maxActiveTrades = input.int(1, "Max Active Trades", minval=1, maxval=10, group="Strategy")
 onlyTradeUntestedZones = input.bool(true, "Only Trade Untested Zones", group="Strategy", tooltip="Only enter trades on zones that haven't been touched since creation")
 
+// Directional Bias Filter Settings
+useDirectionalBiasFilter = input.bool(true, "Use Directional Bias Filter", group="Directional Bias", tooltip="Only take trades in the direction of the weak high/low and in the appropriate half of the trading range")
+requireWeakLevel = input.bool(true, "Require Weak High/Low", group="Directional Bias", tooltip="Longs require weak high (bullish BOS), shorts require weak low (bearish BOS)")
+requireRangePosition = input.bool(true, "Require Range Position", group="Directional Bias", tooltip="Longs only in lower half of HTF2 range, shorts only in upper half")
+
 // Risk Settings
 riskRewardRatio = input.float(1.0, "Risk/Reward Ratio", minval=0.5, maxval=5.0, step=0.1, group="Risk Management")
 
@@ -1705,6 +1710,70 @@ if htf2Enabled and htf2Initialized
         line.set_x2(htf2NearestUnbrokenLowLine, bar_index + 1)
 
 // ============================================================================
+// DIRECTIONAL BIAS CALCULATION
+// ============================================================================
+
+// Determine if we have a bullish or bearish bias based on HTF weak high/low
+// Weak high = created after bullish BOS = bullish bias (looking for longs)
+// Weak low = created after bearish BOS = bearish bias (looking for shorts)
+bool hasBullishBias = false
+bool hasBearishBias = false
+
+// Check HTF (middle timeframe) for weak levels to determine bias
+if htfEnabled and htfInitialized
+    // Check most recent high - if it's weak, we have bearish bias (high is vulnerable)
+    if htfMostRecentHighIndex >= 0 and htfMostRecentHighIndex < array.size(htfHighs)
+        htfHighLevel = array.get(htfHighs, htfMostRecentHighIndex)
+        if htfHighLevel.levelType == "weak"
+            hasBullishBias := true  // Weak high means bullish structure, look for longs
+
+    // Check most recent low - if it's weak, we have bullish bias (low is vulnerable)
+    if htfMostRecentLowIndex >= 0 and htfMostRecentLowIndex < array.size(htfLows)
+        htfLowLevel = array.get(htfLows, htfMostRecentLowIndex)
+        if htfLowLevel.levelType == "weak"
+            hasBearishBias := true  // Weak low means bearish structure, look for shorts
+
+// Determine position within HTF2 trading range (upper half vs lower half)
+bool inLowerHalfOfRange = false
+bool inUpperHalfOfRange = false
+float htf2RangeMidpoint = na
+
+if htf2Enabled and htf2Initialized
+    // Get the nearest unbroken high and low for HTF2 to define the trading range
+    float rangeHigh = na
+    float rangeLow = na
+
+    // Use the most recent HTF2 high/low as range boundaries
+    if htf2MostRecentHighIndex >= 0 and htf2MostRecentHighIndex < array.size(htf2Highs)
+        htf2HighLevel = array.get(htf2Highs, htf2MostRecentHighIndex)
+        rangeHigh := htf2HighLevel.price
+
+    if htf2MostRecentLowIndex >= 0 and htf2MostRecentLowIndex < array.size(htf2Lows)
+        htf2LowLevel = array.get(htf2Lows, htf2MostRecentLowIndex)
+        rangeLow := htf2LowLevel.price
+
+    // Calculate midpoint and determine position
+    if not na(rangeHigh) and not na(rangeLow)
+        htf2RangeMidpoint := (rangeHigh + rangeLow) / 2
+        inLowerHalfOfRange := close < htf2RangeMidpoint
+        inUpperHalfOfRange := close > htf2RangeMidpoint
+
+// Final bias check combining weak level direction and range position
+bool longBiasValid = true
+bool shortBiasValid = true
+
+if useDirectionalBiasFilter
+    // Check weak level requirement
+    if requireWeakLevel
+        longBiasValid := longBiasValid and hasBullishBias
+        shortBiasValid := shortBiasValid and hasBearishBias
+
+    // Check range position requirement (requires HTF2 to be enabled)
+    if requireRangePosition and htf2Enabled and htf2Initialized
+        longBiasValid := longBiasValid and inLowerHalfOfRange
+        shortBiasValid := shortBiasValid and inUpperHalfOfRange
+
+// ============================================================================
 // STRATEGY TRADING LOGIC
 // ============================================================================
 
@@ -1725,9 +1794,9 @@ if pendingSupplyZoneIdx >= 0 and pendingSupplyZoneIdx < array.size(supplyZones)
         strategy.cancel("SupplyEntry")
         pendingSupplyZoneIdx := -1
 
-// Check if we can open new trades
-bool canOpenLong = strategy.position_size == 0 and tradeDemandZones
-bool canOpenShort = strategy.position_size == 0 and tradeSupplyZones
+// Check if we can open new trades (including directional bias filter)
+bool canOpenLong = strategy.position_size == 0 and tradeDemandZones and longBiasValid
+bool canOpenShort = strategy.position_size == 0 and tradeSupplyZones and shortBiasValid
 
 // Look for demand zones to trade (LONG)
 if canOpenLong and array.size(demandZones) > 0
