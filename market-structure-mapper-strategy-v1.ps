@@ -599,6 +599,9 @@ calculateZoneFromHigh(int highBarIndex) =>
 // LEVEL MANAGEMENT FUNCTIONS
 // ============================================================================
 
+// Maximum lookback for line drawing (TradingView limit)
+var int MAX_LINE_LOOKBACK = 500
+
 // Add a new high level
 addHigh(float price, int barIdx, string levelType, color lineColor) =>
     // Delete previous most recent high line if it's not broken or swept
@@ -607,8 +610,10 @@ addHigh(float price, int barIdx, string levelType, color lineColor) =>
         if prevHigh.levelType != "broken" and prevHigh.levelType != "swept"
             line.delete(prevHigh.levelLine)
 
-    // Create new line
-    newLine = line.new(barIdx, price, barIdx + 1, price,
+    // Create new line only if bar index is within allowed range
+    line newLine = na
+    int safeBarIdx = math.max(barIdx, bar_index - MAX_LINE_LOOKBACK)
+    newLine := line.new(safeBarIdx, price, safeBarIdx + 1, price,
                        color=lineColor,
                        width=lineWidth,
                        extend=extend.right,
@@ -636,8 +641,10 @@ addLow(float price, int barIdx, string levelType, color lineColor) =>
         if prevLow.levelType != "broken" and prevLow.levelType != "swept"
             line.delete(prevLow.levelLine)
 
-    // Create new line
-    newLine = line.new(barIdx, price, barIdx + 1, price,
+    // Create new line only if bar index is within allowed range
+    line newLine = na
+    int safeBarIdx = math.max(barIdx, bar_index - MAX_LINE_LOOKBACK)
+    newLine := line.new(safeBarIdx, price, safeBarIdx + 1, price,
                        color=lineColor,
                        width=lineWidth,
                        extend=extend.right,
@@ -664,7 +671,9 @@ addHighHTF(float price, int barIdx, string levelType, color lineColor) =>
         if prevHigh.levelType != "broken" and prevHigh.levelType != "swept"
             line.delete(prevHigh.levelLine)
 
-    newLine = line.new(barIdx, price, barIdx + 1, price,
+    line newLine = na
+    int safeBarIdx = math.max(barIdx, bar_index - MAX_LINE_LOOKBACK)
+    newLine := line.new(safeBarIdx, price, safeBarIdx + 1, price,
                        color=lineColor,
                        width=lineWidth + 1,  // Thicker for HTF
                        extend=extend.right,
@@ -688,7 +697,9 @@ addLowHTF(float price, int barIdx, string levelType, color lineColor) =>
         if prevLow.levelType != "broken" and prevLow.levelType != "swept"
             line.delete(prevLow.levelLine)
 
-    newLine = line.new(barIdx, price, barIdx + 1, price,
+    line newLine = na
+    int safeBarIdx = math.max(barIdx, bar_index - MAX_LINE_LOOKBACK)
+    newLine := line.new(safeBarIdx, price, safeBarIdx + 1, price,
                        color=lineColor,
                        width=lineWidth + 1,  // Thicker for HTF
                        extend=extend.right,
@@ -713,7 +724,9 @@ addHighHTF2(float price, int barIdx, string levelType) =>
         if prevHigh.levelType != "broken" and prevHigh.levelType != "swept"
             line.delete(prevHigh.levelLine)
 
-    newLine = line.new(barIdx, price, barIdx + 1, price,
+    line newLine = na
+    int safeBarIdx = math.max(barIdx, bar_index - MAX_LINE_LOOKBACK)
+    newLine := line.new(safeBarIdx, price, safeBarIdx + 1, price,
                        color=color.black,
                        width=lineWidth + 2,  // Thickest for HTF2
                        extend=extend.right,
@@ -730,7 +743,9 @@ addLowHTF2(float price, int barIdx, string levelType) =>
         if prevLow.levelType != "broken" and prevLow.levelType != "swept"
             line.delete(prevLow.levelLine)
 
-    newLine = line.new(barIdx, price, barIdx + 1, price,
+    line newLine = na
+    int safeBarIdx = math.max(barIdx, bar_index - MAX_LINE_LOOKBACK)
+    newLine := line.new(safeBarIdx, price, safeBarIdx + 1, price,
                        color=color.black,
                        width=lineWidth + 2,  // Thickest for HTF2
                        extend=extend.right,
@@ -1126,7 +1141,8 @@ if initialized
         nearestUnbrokenHighIndex := ctfNewHighIdx
         if ctfNewHighIdx >= 0 and ctfNewHighIdx != mostRecentHighIndex
             ctfHighLevel = array.get(highs, ctfNewHighIdx)
-            nearestUnbrokenHighLine := line.new(ctfHighLevel.barIndex, ctfHighLevel.price, bar_index + 1, ctfHighLevel.price, color=color.new(highColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
+            int safeBarIdx = math.max(ctfHighLevel.barIndex, bar_index - MAX_LINE_LOOKBACK)
+            nearestUnbrokenHighLine := line.new(safeBarIdx, ctfHighLevel.price, bar_index + 1, ctfHighLevel.price, color=color.new(highColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
     if not na(nearestUnbrokenHighLine)
         line.set_x2(nearestUnbrokenHighLine, bar_index + 1)
 
@@ -1138,7 +1154,8 @@ if initialized
         nearestUnbrokenLowIndex := ctfNewLowIdx
         if ctfNewLowIdx >= 0 and ctfNewLowIdx != mostRecentLowIndex
             ctfLowLevel = array.get(lows, ctfNewLowIdx)
-            nearestUnbrokenLowLine := line.new(ctfLowLevel.barIndex, ctfLowLevel.price, bar_index + 1, ctfLowLevel.price, color=color.new(lowColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
+            int safeBarIdx = math.max(ctfLowLevel.barIndex, bar_index - MAX_LINE_LOOKBACK)
+            nearestUnbrokenLowLine := line.new(safeBarIdx, ctfLowLevel.price, bar_index + 1, ctfLowLevel.price, color=color.new(lowColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
     if not na(nearestUnbrokenLowLine)
         line.set_x2(nearestUnbrokenLowLine, bar_index + 1)
 
@@ -1496,7 +1513,8 @@ if htfEnabled and htfInitialized
         htfNearestUnbrokenHighIndex := htfNewHighIdx
         if htfNewHighIdx >= 0 and htfNewHighIdx != htfMostRecentHighIndex
             htfHighLevel = array.get(htfHighs, htfNewHighIdx)
-            htfNearestUnbrokenHighLine := line.new(htfHighLevel.barIndex, htfHighLevel.price, bar_index + 1, htfHighLevel.price, color=color.new(htfHighColor, 50), width=lineWidth + 1, extend=extend.right, style=line.style_dashed)
+            int safeBarIdx = math.max(htfHighLevel.barIndex, bar_index - MAX_LINE_LOOKBACK)
+            htfNearestUnbrokenHighLine := line.new(safeBarIdx, htfHighLevel.price, bar_index + 1, htfHighLevel.price, color=color.new(htfHighColor, 50), width=lineWidth + 1, extend=extend.right, style=line.style_dashed)
     if not na(htfNearestUnbrokenHighLine)
         line.set_x2(htfNearestUnbrokenHighLine, bar_index + 1)
 
@@ -1508,7 +1526,8 @@ if htfEnabled and htfInitialized
         htfNearestUnbrokenLowIndex := htfNewLowIdx
         if htfNewLowIdx >= 0 and htfNewLowIdx != htfMostRecentLowIndex
             htfLowLevel = array.get(htfLows, htfNewLowIdx)
-            htfNearestUnbrokenLowLine := line.new(htfLowLevel.barIndex, htfLowLevel.price, bar_index + 1, htfLowLevel.price, color=color.new(htfLowColor, 50), width=lineWidth + 1, extend=extend.right, style=line.style_dashed)
+            int safeBarIdx = math.max(htfLowLevel.barIndex, bar_index - MAX_LINE_LOOKBACK)
+            htfNearestUnbrokenLowLine := line.new(safeBarIdx, htfLowLevel.price, bar_index + 1, htfLowLevel.price, color=color.new(htfLowColor, 50), width=lineWidth + 1, extend=extend.right, style=line.style_dashed)
     if not na(htfNearestUnbrokenLowLine)
         line.set_x2(htfNearestUnbrokenLowLine, bar_index + 1)
 
@@ -1667,7 +1686,8 @@ if htf2Enabled and htf2Initialized
         htf2NearestUnbrokenHighIndex := htf2NewHighIdx
         if htf2NewHighIdx >= 0 and htf2NewHighIdx != htf2MostRecentHighIndex
             htf2HighLevel = array.get(htf2Highs, htf2NewHighIdx)
-            htf2NearestUnbrokenHighLine := line.new(htf2HighLevel.barIndex, htf2HighLevel.price, bar_index + 1, htf2HighLevel.price, color=color.new(color.black, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
+            int safeBarIdx = math.max(htf2HighLevel.barIndex, bar_index - MAX_LINE_LOOKBACK)
+            htf2NearestUnbrokenHighLine := line.new(safeBarIdx, htf2HighLevel.price, bar_index + 1, htf2HighLevel.price, color=color.new(color.black, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
     if not na(htf2NearestUnbrokenHighLine)
         line.set_x2(htf2NearestUnbrokenHighLine, bar_index + 1)
 
@@ -1679,7 +1699,8 @@ if htf2Enabled and htf2Initialized
         htf2NearestUnbrokenLowIndex := htf2NewLowIdx
         if htf2NewLowIdx >= 0 and htf2NewLowIdx != htf2MostRecentLowIndex
             htf2LowLevel = array.get(htf2Lows, htf2NewLowIdx)
-            htf2NearestUnbrokenLowLine := line.new(htf2LowLevel.barIndex, htf2LowLevel.price, bar_index + 1, htf2LowLevel.price, color=color.new(color.black, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
+            int safeBarIdx = math.max(htf2LowLevel.barIndex, bar_index - MAX_LINE_LOOKBACK)
+            htf2NearestUnbrokenLowLine := line.new(safeBarIdx, htf2LowLevel.price, bar_index + 1, htf2LowLevel.price, color=color.new(color.black, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
     if not na(htf2NearestUnbrokenLowLine)
         line.set_x2(htf2NearestUnbrokenLowLine, bar_index + 1)
 
