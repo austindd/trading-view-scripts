@@ -12,6 +12,7 @@ showCtfPeaksValleys = input.bool(true, "Show CTF Peaks/Valleys (Lines)", group="
 showCtfLabels = input.bool(false, "Show CTF Labels", group="Current Timeframe")
 showCtfBosLabels = input.bool(true, "Show CTF BOS Labels", group="Current Timeframe")
 showCtfZones = input.bool(true, "Show CTF Zones", group="Current Timeframe")
+ctfZonesUseFullSwings = input.bool(false, "CTF Zones: Use Full Swings", group="Current Timeframe")
 
 // CTF Colors
 highColor = input.color(color.new(color.red, 0), "CTF High Color", group="Current Timeframe")
@@ -933,14 +934,53 @@ checkBrokenLevels() =>
                     if showCtfZones
                         int barsBack = bar_index - highLevel.barIndex
                         if barsBack >= 0 and barsBack < 5000
-                            // Find the low between this high and current bar
+                            // Find the low between this high and current bar (zone bottom)
                             float zoneBottom = low
+                            int zoneBottomIdx = 0
                             for j = 0 to math.min(barsBack, 200)
                                 if low[j] < zoneBottom
                                     zoneBottom := low[j]
-                            float zoneTop = highLevel.price
-                            int zoneLeftTime = time[barsBack]
-                            if zoneTop > zoneBottom
+                                    zoneBottomIdx := j
+
+                            float zoneTop = na
+                            int zoneLeftIdx = zoneBottomIdx
+
+                            if ctfZonesUseFullSwings
+                                // Use full swing: zone top = the broken high's price
+                                zoneTop := highLevel.price
+                                zoneLeftIdx := barsBack
+                            else
+                                // Walk-back algorithm: find bearish candles before the low
+                                // Step 1: Walk back from low until we find at least one bearish candle
+                                // Step 2: Continue walking back through bearish candles until we hit a bullish one
+                                // Step 3: Zone top = highest high of those bearish candles
+                                bool foundBearish = false
+                                float highestBearishHigh = na
+                                int maxWalk = math.min(zoneBottomIdx + 50, 200)  // Don't walk too far
+
+                                for j = zoneBottomIdx to maxWalk
+                                    bool isBearish = close[j] < open[j]
+                                    bool isBullish = close[j] > open[j]
+
+                                    if not foundBearish
+                                        // Still looking for first bearish candle
+                                        if isBearish
+                                            foundBearish := true
+                                            highestBearishHigh := high[j]
+                                            zoneLeftIdx := j
+                                    else
+                                        // We've found bearish, keep going until bullish
+                                        if isBullish
+                                            break
+                                        else if isBearish
+                                            if high[j] > highestBearishHigh
+                                                highestBearishHigh := high[j]
+                                            zoneLeftIdx := j
+
+                                zoneTop := foundBearish ? highestBearishHigh : highLevel.price
+
+                            int zoneLeftTime = time[zoneLeftIdx]
+                            if not na(zoneTop) and zoneTop > zoneBottom
                                 newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index)
                                 array.push(ctfDemandZones, newZone)
 
@@ -990,14 +1030,53 @@ checkBrokenLevels() =>
                     if showCtfZones
                         int barsBack = bar_index - lowLevel.barIndex
                         if barsBack >= 0 and barsBack < 5000
-                            // Find the high between this low and current bar
+                            // Find the high between this low and current bar (zone top)
                             float zoneTop = high
+                            int zoneTopIdx = 0
                             for j = 0 to math.min(barsBack, 200)
                                 if high[j] > zoneTop
                                     zoneTop := high[j]
-                            float zoneBottom = lowLevel.price
-                            int zoneLeftTime = time[barsBack]
-                            if zoneTop > zoneBottom
+                                    zoneTopIdx := j
+
+                            float zoneBottom = na
+                            int zoneLeftIdx = zoneTopIdx
+
+                            if ctfZonesUseFullSwings
+                                // Use full swing: zone bottom = the broken low's price
+                                zoneBottom := lowLevel.price
+                                zoneLeftIdx := barsBack
+                            else
+                                // Walk-back algorithm: find bullish candles before the high
+                                // Step 1: Walk back from high until we find at least one bullish candle
+                                // Step 2: Continue walking back through bullish candles until we hit a bearish one
+                                // Step 3: Zone bottom = lowest low of those bullish candles
+                                bool foundBullish = false
+                                float lowestBullishLow = na
+                                int maxWalk = math.min(zoneTopIdx + 50, 200)  // Don't walk too far
+
+                                for j = zoneTopIdx to maxWalk
+                                    bool isBearish = close[j] < open[j]
+                                    bool isBullish = close[j] > open[j]
+
+                                    if not foundBullish
+                                        // Still looking for first bullish candle
+                                        if isBullish
+                                            foundBullish := true
+                                            lowestBullishLow := low[j]
+                                            zoneLeftIdx := j
+                                    else
+                                        // We've found bullish, keep going until bearish
+                                        if isBearish
+                                            break
+                                        else if isBullish
+                                            if low[j] < lowestBullishLow
+                                                lowestBullishLow := low[j]
+                                            zoneLeftIdx := j
+
+                                zoneBottom := foundBullish ? lowestBullishLow : lowLevel.price
+
+                            int zoneLeftTime = time[zoneLeftIdx]
+                            if not na(zoneBottom) and zoneTop > zoneBottom
                                 newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index)
                                 array.push(ctfSupplyZones, newZone)
 
