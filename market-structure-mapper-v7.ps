@@ -60,7 +60,11 @@ htf2SupplyZoneBorderColor = input.color(color.new(color.purple, 50), "HTF2 Suppl
 // ============================================================================
 // ZONE SETTINGS
 // ============================================================================
-showBrokenZones = input.bool(false, "Show Broken Zones", group="Zone Settings")
+showBrokenCtfZones = input.bool(false, "Show Broken CTF Zones", group="Zone Settings")
+showBrokenHtfZones = input.bool(false, "Show Broken HTF Zones", group="Zone Settings")
+showBrokenHtf2Zones = input.bool(false, "Show Broken HTF2 Zones", group="Zone Settings")
+extendBrokenZones = input.bool(false, "Extend Broken Zones to Current Bar", group="Zone Settings")
+minZoneHeightAtr = input.float(0.5, "Min Zone Height (ATR multiplier)", minval=0.1, maxval=5.0, step=0.1, group="Zone Settings")
 maxZonesPerSide = input.int(20, "Max Zones Per Side", minval=10, maxval=250, group="Zone Settings")
 zoneBreakOnWick = input.bool(false, "Break Zones on Wick (not just close)", group="Zone Settings")
 zoneBreakOnFirstTouch = input.bool(false, "Break Zones on First Touch", group="Zone Settings")
@@ -82,6 +86,7 @@ type HighLevel
     int barIndex
     line levelLine
     string levelType  // "strong", "weak", "broken", "swept"
+    bool zoneCreated  // Has a zone been created for this level?
 
 // Type for tracking low levels
 type LowLevel
@@ -89,6 +94,7 @@ type LowLevel
     int barIndex
     line levelLine
     string levelType  // "strong", "weak", "broken", "swept"
+    bool zoneCreated  // Has a zone been created for this level?
 
 // Type for tracking supply/demand zones
 type Zone
@@ -260,6 +266,12 @@ var int demandZonesCreated = 0
 var int supplyZonesCreated = 0
 var int demandZonesBlocked = 0
 var int supplyZonesBlocked = 0
+var int ctfDemandZonesCreated = 0
+var int ctfSupplyZonesCreated = 0
+var int ctfDemandSkippedNa = 0
+var int ctfDemandSkippedDupe = 0
+var int lastDemandBarsWalked = 0
+var float lastDemandHighFound = 0.0
 var int swingNaCount = 0
 var int calcNaCount = 0
 
@@ -626,90 +638,38 @@ calculateZoneFromHigh(int highBarIndex) =>
 // ============================================================================
 
 // Calculate CTF demand zone from a valid low
-// Walk back from lowBarIndex until we find at least one bearish candle,
-// then continue until we find a bullish candle.
-// Zone top = high of leftmost bearish candle, zone bottom = low price at lowBarIndex
-// Returns [zoneTop, zoneBottom, leftTime]
+// SIMPLIFIED: Zone top = most recent valid high price, Zone bottom = valid low price
+// Returns [zoneTop, zoneBottom, leftTime, barsWalked]
 calculateCtfDemandZone(int lowBarIndex, float lowPrice) =>
     float zoneTop = na
     float zoneBottom = lowPrice
     int leftTime = na
-    int maxLookback = 198
+    int barsWalked = 0
 
     int barsBack = bar_index - lowBarIndex
 
-    if barsBack >= 0 and barsBack < maxLookback
-        // Start walking back from the bar before the low
-        bool foundBearish = false
-        int leftmostBearishBar = -1
-        float leftmostBearishHigh = na
+    // Use the current valid high as zone top (this is the high that just got broken)
+    if not na(currentValidHigh)
+        zoneTop := currentValidHigh
+        leftTime := time[barsBack]
+        barsWalked := 1
 
-        // Walk back looking for bearish candles, stop when we hit a bullish candle after finding bearish
-        for i = barsBack + 1 to math.min(barsBack + 50, maxLookback - 1)
-            if i >= 0 and not na(close[i]) and not na(open[i])
-                bool isBearish = close[i] < open[i]
-                bool isBullish = close[i] > open[i]
-
-                if isBearish
-                    foundBearish := true
-                    leftmostBearishBar := i
-                    leftmostBearishHigh := high[i]
-                else if isBullish and foundBearish
-                    // Found bullish after bearish - stop here
-                    break
-
-        // If we found bearish candles, use the leftmost one
-        if foundBearish and leftmostBearishBar >= 0
-            zoneTop := leftmostBearishHigh
-            leftTime := time[leftmostBearishBar]
-        else
-            // Fallback: use high at the low bar
-            zoneTop := high[barsBack]
-            leftTime := time[barsBack]
-
-    [zoneTop, zoneBottom, leftTime]
+    [zoneTop, zoneBottom, leftTime, barsWalked]
 
 // Calculate CTF supply zone from a valid high
-// Walk back from highBarIndex until we find at least one bullish candle,
-// then continue until we find a bearish candle.
-// Zone top = high price at highBarIndex, zone bottom = low of leftmost bullish candle
+// SIMPLIFIED: Zone top = valid high price, Zone bottom = most recent valid low price
 // Returns [zoneTop, zoneBottom, leftTime]
 calculateCtfSupplyZone(int highBarIndex, float highPrice) =>
     float zoneTop = highPrice
     float zoneBottom = na
     int leftTime = na
-    int maxLookback = 198
 
     int barsBack = bar_index - highBarIndex
 
-    if barsBack >= 0 and barsBack < maxLookback
-        // Start walking back from the bar before the high
-        bool foundBullish = false
-        int leftmostBullishBar = -1
-        float leftmostBullishLow = na
-
-        // Walk back looking for bullish candles, stop when we hit a bearish candle after finding bullish
-        for i = barsBack + 1 to math.min(barsBack + 50, maxLookback - 1)
-            if i >= 0 and not na(close[i]) and not na(open[i])
-                bool isBearish = close[i] < open[i]
-                bool isBullish = close[i] > open[i]
-
-                if isBullish
-                    foundBullish := true
-                    leftmostBullishBar := i
-                    leftmostBullishLow := low[i]
-                else if isBearish and foundBullish
-                    // Found bearish after bullish - stop here
-                    break
-
-        // If we found bullish candles, use the leftmost one
-        if foundBullish and leftmostBullishBar >= 0
-            zoneBottom := leftmostBullishLow
-            leftTime := time[leftmostBullishBar]
-        else
-            // Fallback: use low at the high bar
-            zoneBottom := low[barsBack]
-            leftTime := time[barsBack]
+    // Use the current valid low as zone bottom (this is the low that just got broken)
+    if not na(currentValidLow)
+        zoneBottom := currentValidLow
+        leftTime := time[barsBack]
 
     [zoneTop, zoneBottom, leftTime]
 
@@ -735,7 +695,7 @@ addHigh(float price, int barIdx, string levelType, color lineColor) =>
                            style=line.style_solid)
 
     // Create new HighLevel object
-    newHigh = HighLevel.new(price, barIdx, newLine, levelType)
+    newHigh = HighLevel.new(price, barIdx, newLine, levelType, false)
     array.push(highs, newHigh)
 
     // Create label if enabled
@@ -766,7 +726,7 @@ addLow(float price, int barIdx, string levelType, color lineColor) =>
                            style=line.style_solid)
 
     // Create new LowLevel object
-    newLow = LowLevel.new(price, barIdx, newLine, levelType)
+    newLow = LowLevel.new(price, barIdx, newLine, levelType, false)
     array.push(lows, newLow)
 
     // Create label if enabled
@@ -795,7 +755,7 @@ addHighHTF(float price, int barIdx, string levelType, color lineColor) =>
                            extend=extend.right,
                            style=line.style_solid)
 
-    newHigh = HighLevel.new(price, barIdx, newLine, levelType)
+    newHigh = HighLevel.new(price, barIdx, newLine, levelType, false)
     array.push(htfHighs, newHigh)
 
     if showHtfLabels
@@ -822,7 +782,7 @@ addLowHTF(float price, int barIdx, string levelType, color lineColor) =>
                            extend=extend.right,
                            style=line.style_solid)
 
-    newLow = LowLevel.new(price, barIdx, newLine, levelType)
+    newLow = LowLevel.new(price, barIdx, newLine, levelType, false)
     array.push(htfLows, newLow)
 
     if showHtfLabels
@@ -858,7 +818,7 @@ addHighHTF2(float price, int barIdx, string levelType) =>
                   textcolor=color.white,
                   size=size.small)
 
-    newHigh = HighLevel.new(price, barIdx, newLine, levelType)
+    newHigh = HighLevel.new(price, barIdx, newLine, levelType, false)
     array.push(htf2Highs, newHigh)
 
     true
@@ -886,7 +846,7 @@ addLowHTF2(float price, int barIdx, string levelType) =>
                   textcolor=color.white,
                   size=size.small)
 
-    newLow = LowLevel.new(price, barIdx, newLine, levelType)
+    newLow = LowLevel.new(price, barIdx, newLine, levelType, false)
     array.push(htf2Lows, newLow)
 
     true
@@ -964,6 +924,23 @@ checkBrokenLevels() =>
             else if highLevel.levelType != "broken" and close > highLevel.price
                 highLevel.levelType := "broken"
 
+                // Create demand zone for this bullish BOS (high broken = bullish)
+                // Only create one zone per high level
+                if showCtfZones and not highLevel.zoneCreated
+                    int barsBack = bar_index - highLevel.barIndex
+                    if barsBack >= 0 and barsBack < 5000
+                        // Find the low between this high and current bar
+                        float zoneBottom = low
+                        for j = 0 to math.min(barsBack, 200)
+                            if low[j] < zoneBottom
+                                zoneBottom := low[j]
+                        float zoneTop = highLevel.price
+                        int zoneLeftTime = time[barsBack]
+                        if zoneTop > zoneBottom
+                            newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index)
+                            array.push(ctfDemandZones, newZone)
+                            highLevel.zoneCreated := true
+
                 // Only keep line visible if this is most recent high (valid BOS)
                 if i == mostRecentHighIndex
                     if not na(highLevel.levelLine)
@@ -997,6 +974,23 @@ checkBrokenLevels() =>
             // Check for break
             else if lowLevel.levelType != "broken" and close < lowLevel.price
                 lowLevel.levelType := "broken"
+
+                // Create supply zone for this bearish BOS (low broken = bearish)
+                // Only create one zone per low level
+                if showCtfZones and not lowLevel.zoneCreated
+                    int barsBack = bar_index - lowLevel.barIndex
+                    if barsBack >= 0 and barsBack < 5000
+                        // Find the high between this low and current bar
+                        float zoneTop = high
+                        for j = 0 to math.min(barsBack, 200)
+                            if high[j] > zoneTop
+                                zoneTop := high[j]
+                        float zoneBottom = lowLevel.price
+                        int zoneLeftTime = time[barsBack]
+                        if zoneTop > zoneBottom
+                            newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index)
+                            array.push(ctfSupplyZones, newZone)
+                            lowLevel.zoneCreated := true
 
                 if i == mostRecentLowIndex
                     if not na(lowLevel.levelLine)
@@ -1337,7 +1331,9 @@ if initialized
         if not na(newLow) and not na(newLowBar)
             // Create CTF demand zone on bullish BOS
             if showCtfZones
-                [zoneTop, zoneBottom, zoneLeftTime] = calculateCtfDemandZone(newLowBar, newLow)
+                [zoneTop, zoneBottom, zoneLeftTime, barsWalked] = calculateCtfDemandZone(newLowBar, newLow)
+                lastDemandBarsWalked := barsWalked
+                lastDemandHighFound := zoneTop
                 if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
                     // Check for duplicate zones
                     bool isDuplicate = false
@@ -1350,6 +1346,11 @@ if initialized
                     if not isDuplicate
                         newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index)
                         array.push(ctfDemandZones, newZone)
+                        ctfDemandZonesCreated := ctfDemandZonesCreated + 1
+                    else
+                        ctfDemandSkippedDupe := ctfDemandSkippedDupe + 1
+                else
+                    ctfDemandSkippedNa := ctfDemandSkippedNa + 1
 
             // Store previous low before updating
             previousValidLow := currentValidLow
@@ -1389,6 +1390,7 @@ if initialized
                     if not isDuplicate
                         newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index)
                         array.push(ctfSupplyZones, newZone)
+                        ctfSupplyZonesCreated := ctfSupplyZonesCreated + 1
 
             // Store previous high before updating
             previousValidHigh := currentValidHigh
@@ -2638,20 +2640,26 @@ var array<int> supplyZoneTimes = array.new<int>()
 // Use user-configured max zones per side
 
 // Helper function to render zones from an array
-renderZones(array<Zone> zones, color bgColor, color borderColor, int borderWidth, int maxZones) =>
+// Returns [rendered, iterations, arraySize]
+renderZones(array<Zone> zones, color bgColor, color borderColor, int borderWidth, int maxZones, bool showBroken) =>
     int rendered = 0
-    if array.size(zones) > 0
-        for i = array.size(zones) - 1 to 0
+    int iterations = 0
+    int arrSize = array.size(zones)
+    if arrSize > 0
+        for i = arrSize - 1 to 0
+            iterations := iterations + 1
             if rendered >= maxZones
                 break
             zone = array.get(zones, i)
-            if zone.broken and not showBrokenZones
+            if zone.broken and not showBroken
                 continue
             if not na(zone.leftTime) and not na(zone.top) and not na(zone.bottom)
-                zoneEndTime = zone.broken ? zone.rightTime : time
+                // If extendBrokenZones is true, always extend to current time
+                // Otherwise, broken zones stop at their rightTime
+                zoneEndTime = (zone.broken and not extendBrokenZones) ? zone.rightTime : time
                 box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom, bgcolor=bgColor, border_color=borderColor, border_width=borderWidth, xloc=xloc.bar_time)
                 rendered := rendered + 1
-    rendered
+    [rendered, iterations, arrSize]
 
 if barstate.islast
     // Delete all existing boxes
@@ -2659,54 +2667,96 @@ if barstate.islast
         bx.delete()
 
     // Render all zone types
+    int ctfDemandRendered = 0
+    int ctfSupplyRendered = 0
+    int ctfDemandIter = 0
+    int ctfSupplyIter = 0
     if showCtfZones
-        renderZones(ctfDemandZones, ctfDemandZoneColor, ctfDemandZoneBorderColor, 1, maxZonesPerSide)
-        renderZones(ctfSupplyZones, ctfSupplyZoneColor, ctfSupplyZoneBorderColor, 1, maxZonesPerSide)
+        [r1, i1, s1] = renderZones(ctfDemandZones, ctfDemandZoneColor, ctfDemandZoneBorderColor, 1, maxZonesPerSide, showBrokenCtfZones)
+        ctfDemandRendered := r1
+        ctfDemandIter := i1
+        [r2, i2, s2] = renderZones(ctfSupplyZones, ctfSupplyZoneColor, ctfSupplyZoneBorderColor, 1, maxZonesPerSide, showBrokenCtfZones)
+        ctfSupplyRendered := r2
+        ctfSupplyIter := i2
     if showHtfZones
-        demandZonesRendered := renderZones(demandZones, demandZoneColor, demandZoneBorderColorInput, 1, maxZonesPerSide)
-        supplyZonesRendered := renderZones(supplyZones, supplyZoneColor, supplyZoneBorderColorInput, 1, maxZonesPerSide)
+        [r3, i3, s3] = renderZones(demandZones, demandZoneColor, demandZoneBorderColorInput, 1, maxZonesPerSide, showBrokenHtfZones)
+        demandZonesRendered := r3
+        [r4, i4, s4] = renderZones(supplyZones, supplyZoneColor, supplyZoneBorderColorInput, 1, maxZonesPerSide, showBrokenHtfZones)
+        supplyZonesRendered := r4
     if showHtf2Zones and htf2Enabled
-        renderZones(htf2DemandZones, htf2DemandZoneColor, htf2DemandZoneBorderColor, 2, maxZonesPerSide)
-        renderZones(htf2SupplyZones, htf2SupplyZoneColor, htf2SupplyZoneBorderColor, 2, maxZonesPerSide)
+        renderZones(htf2DemandZones, htf2DemandZoneColor, htf2DemandZoneBorderColor, 2, maxZonesPerSide, showBrokenHtf2Zones)
+        renderZones(htf2SupplyZones, htf2SupplyZoneColor, htf2SupplyZoneBorderColor, 2, maxZonesPerSide, showBrokenHtf2Zones)
 
-// Debug labels showing zone counts and BOS events
-if barstate.islast and showDebugLabel
-    var label debugLabel = na
-    label.delete(debugLabel)
+    // Debug labels showing zone counts and BOS events
+    if showDebugLabel
+        var label debugLabel = na
+        label.delete(debugLabel)
 
-    // Count broken zones
-    int brokenDemand = 0
-    int brokenSupply = 0
-    if array.size(demandZones) > 0
-        for i = 0 to array.size(demandZones) - 1
-            if array.get(demandZones, i).broken
-                brokenDemand := brokenDemand + 1
-    if array.size(supplyZones) > 0
-        for i = 0 to array.size(supplyZones) - 1
-            if array.get(supplyZones, i).broken
-                brokenSupply := brokenSupply + 1
+        // Count broken zones
+        int brokenDemand = 0
+        int brokenSupply = 0
+        if array.size(demandZones) > 0
+            for i = 0 to array.size(demandZones) - 1
+                if array.get(demandZones, i).broken
+                    brokenDemand := brokenDemand + 1
+        if array.size(supplyZones) > 0
+            for i = 0 to array.size(supplyZones) - 1
+                if array.get(supplyZones, i).broken
+                    brokenSupply := brokenSupply + 1
 
-    // Calculate time spans of rendered zones
-    int demandOldest = array.size(demandZoneTimes) > 0 ? array.get(demandZoneTimes, array.size(demandZoneTimes) - 1) : na
-    int demandNewest = array.size(demandZoneTimes) > 0 ? array.get(demandZoneTimes, 0) : na
-    int supplyOldest = array.size(supplyZoneTimes) > 0 ? array.get(supplyZoneTimes, array.size(supplyZoneTimes) - 1) : na
-    int supplyNewest = array.size(supplyZoneTimes) > 0 ? array.get(supplyZoneTimes, 0) : na
+        // Count CTF zones with valid data
+        int ctfDemandValid = 0
+        int ctfSupplyValid = 0
+        if array.size(ctfDemandZones) > 0
+            for i = 0 to array.size(ctfDemandZones) - 1
+                z = array.get(ctfDemandZones, i)
+                if not na(z.leftTime) and not na(z.top) and not na(z.bottom)
+                    ctfDemandValid := ctfDemandValid + 1
+        if array.size(ctfSupplyZones) > 0
+            for i = 0 to array.size(ctfSupplyZones) - 1
+                z = array.get(ctfSupplyZones, i)
+                if not na(z.leftTime) and not na(z.top) and not na(z.bottom)
+                    ctfSupplyValid := ctfSupplyValid + 1
 
-    // Calculate bars ago
-    int demandOldestBarsAgo = not na(demandOldest) ? math.round((time - demandOldest) / (time - time[1])) : na
-    int demandNewestBarsAgo = not na(demandNewest) ? math.round((time - demandNewest) / (time - time[1])) : na
-    int supplyOldestBarsAgo = not na(supplyOldest) ? math.round((time - supplyOldest) / (time - time[1])) : na
-    int supplyNewestBarsAgo = not na(supplyNewest) ? math.round((time - supplyNewest) / (time - time[1])) : na
+        // Count CTF broken zones
+        int ctfDemandBroken = 0
+        int ctfSupplyBroken = 0
+        if array.size(ctfDemandZones) > 0
+            for i = 0 to array.size(ctfDemandZones) - 1
+                if array.get(ctfDemandZones, i).broken
+                    ctfDemandBroken := ctfDemandBroken + 1
+        if array.size(ctfSupplyZones) > 0
+            for i = 0 to array.size(ctfSupplyZones) - 1
+                if array.get(ctfSupplyZones, i).broken
+                    ctfSupplyBroken := ctfSupplyBroken + 1
 
-    string debugText = "ZONE DEBUG v4:\n"
-    debugText := debugText + "HTF Labels: " + str.tostring(htfBullishLabels) + " bull / " + str.tostring(htfBearishLabels) + " bear\n"
-    debugText := debugText + "Zones created: " + str.tostring(demandZonesCreated) + " D / " + str.tostring(supplyZonesCreated) + " S\n"
-    debugText := debugText + "In array: " + str.tostring(array.size(demandZones)) + " D / " + str.tostring(array.size(supplyZones)) + " S\n"
-    debugText := debugText + "Rendered: " + str.tostring(demandZonesRendered) + " D / " + str.tostring(supplyZonesRendered) + " S\n"
-    debugText := debugText + "Total boxes: " + str.tostring(array.size(box.all))
+        // Get info about CTF demand zones - check multiple recent ones
+        string newestZoneInfo = "none"
+        int zeroHeightCount = 0
+        float avgHeight = 0.0
+        if array.size(ctfDemandZones) > 0
+            float totalHeight = 0.0
+            for i = 0 to array.size(ctfDemandZones) - 1
+                Zone z = array.get(ctfDemandZones, i)
+                float h = z.top - z.bottom
+                totalHeight := totalHeight + h
+                if h < 0.0001
+                    zeroHeightCount := zeroHeightCount + 1
+            avgHeight := totalHeight / array.size(ctfDemandZones)
+            // Show last 3 zones
+            int lastIdx = array.size(ctfDemandZones) - 1
+            Zone z1 = array.get(ctfDemandZones, lastIdx)
+            newestZoneInfo := str.tostring(z1.top, "#.#####") + "/" + str.tostring(z1.bottom, "#.#####")
 
-    debugLabel := label.new(bar_index, high, debugText,
-                           style=label.style_label_down,
-                           color=color.yellow,
-                           textcolor=color.black,
-                           size=size.small)
+        string debugText = "ZONE DEBUG v15:\n"
+        debugText := debugText + "Highs: " + str.tostring(array.size(highs)) + ", Lows: " + str.tostring(array.size(lows)) + "\n"
+        debugText := debugText + "CTF BOS: " + str.tostring(ctfBullishBOS) + " bull / " + str.tostring(ctfBearishBOS) + " bear\n"
+        debugText := debugText + "CTF D created: " + str.tostring(ctfDemandZonesCreated) + ", NA: " + str.tostring(ctfDemandSkippedNa) + ", dupe: " + str.tostring(ctfDemandSkippedDupe) + "\n"
+        debugText := debugText + "CTF D in array: " + str.tostring(array.size(ctfDemandZones)) + ", S: " + str.tostring(array.size(ctfSupplyZones)) + "\n"
+        debugText := debugText + "Rendered: " + str.tostring(ctfDemandRendered) + " D / " + str.tostring(ctfSupplyRendered) + " S"
+
+        debugLabel := label.new(bar_index, high, debugText,
+                               style=label.style_label_down,
+                               color=color.yellow,
+                               textcolor=color.black,
+                               size=size.small)
