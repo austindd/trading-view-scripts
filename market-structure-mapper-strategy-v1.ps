@@ -27,6 +27,7 @@ showHighLowLabels = input.bool(false, "Show High/Low Labels", group="Display")
 showBosLabels = input.bool(false, "Show BOS Labels", group="Display")
 lineWidth = input.int(2, "Line Width", minval=1, maxval=5, group="Display")
 showDebugLabel = input.bool(false, "Show Debug Info", group="Display")
+showStatsTable = input.bool(true, "Show Zone Intersection Stats", group="Display")
 
 // Higher Timeframe Settings (Middle TF for zones)
 htfEnabled = input.bool(true, "Enable HTF Structure", group="Higher Timeframe")
@@ -86,6 +87,9 @@ type Zone
     bool touched        // Has the zone been touched since creation?
     int creationBar     // Bar index when zone was created (for "after creation" logic)
     bool traded         // Has this zone been traded already?
+    int firstTouchBar   // Bar index when zone was first touched (for intersection counting)
+    int intersectionCount  // Number of candles that intersected the zone after first touch
+    bool tradeResolved  // Has the trade on this zone been resolved (win/loss)?
 
 // ============================================================================
 // ARRAYS TO STORE LEVELS AND ZONES
@@ -106,6 +110,14 @@ var array<LowLevel> htf2Lows = array.new<LowLevel>()
 // Zones
 var array<Zone> demandZones = array.new<Zone>()
 var array<Zone> supplyZones = array.new<Zone>()
+
+// ============================================================================
+// ZONE INTERSECTION STATS TRACKING
+// ============================================================================
+
+// Arrays to store completed zone intersection counts
+var array<int> completedDemandIntersections = array.new<int>()
+var array<int> completedSupplyIntersections = array.new<int>()
 
 // ============================================================================
 // MARKET STRUCTURE STATE VARIABLES
@@ -767,6 +779,7 @@ addLowHTF2(float price, int barIdx, string levelType) =>
 
 
 // Check and update broken zones - just mark as broken, don't delete yet
+// Also track intersection counts for zones that have been touched
 checkBrokenZones() =>
     // Check demand zones (broken when price goes below zone bottom)
     if array.size(demandZones) > 0
@@ -776,9 +789,14 @@ checkBrokenZones() =>
                 // Check if price is touching the zone (between bottom and top)
                 bool isTouching = low <= zone.top and high >= zone.bottom
 
-                // Track if zone has been touched
+                // Track if zone has been touched and record first touch bar
                 if isTouching and not zone.touched
                     zone.touched := true
+                    zone.firstTouchBar := bar_index
+
+                // Count intersections after first touch (only for traded zones that aren't resolved)
+                if zone.touched and zone.traded and not zone.tradeResolved and isTouching
+                    zone.intersectionCount := zone.intersectionCount + 1
 
                 // Determine if zone should be broken based on settings
                 bool shouldBreak = false
@@ -811,9 +829,14 @@ checkBrokenZones() =>
                 // Check if price is touching the zone (between bottom and top)
                 bool isTouching = low <= zone.top and high >= zone.bottom
 
-                // Track if zone has been touched
+                // Track if zone has been touched and record first touch bar
                 if isTouching and not zone.touched
                     zone.touched := true
+                    zone.firstTouchBar := bar_index
+
+                // Count intersections after first touch (only for traded zones that aren't resolved)
+                if zone.touched and zone.traded and not zone.tradeResolved and isTouching
+                    zone.intersectionCount := zone.intersectionCount + 1
 
                 // Determine if zone should be broken based on settings
                 bool shouldBreak = false
@@ -961,7 +984,7 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowId
                                         isDuplicate := true
                                         break
                             if not isDuplicate
-                                newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index, false)
+                                newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index, false, na, 0, false)
                                 array.push(demandZones, newZone)
                                 demandCreated := demandCreated + 1
 
@@ -1008,7 +1031,7 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowId
                                         isDuplicate := true
                                         break
                             if not isDuplicate
-                                newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index, false)
+                                newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index, false, na, 0, false)
                                 array.push(supplyZones, newZone)
                                 supplyCreated := supplyCreated + 1
 
@@ -1377,7 +1400,7 @@ if htfEnabled and htfInitialized and htfNewCandle
                             isDuplicate := true
                             break
                 if not isDuplicate
-                    newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index, false)
+                    newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index, false, na, 0, false)
                     array.push(demandZones, newZone)
                     demandZonesCreated := demandZonesCreated + 1
                     if showDebugLabel
@@ -1432,7 +1455,7 @@ if htfEnabled and htfInitialized and htfNewCandle
                             isDuplicate := true
                             break
                 if not isDuplicate
-                    newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index, false)
+                    newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index, false, na, 0, false)
                     array.push(supplyZones, newZone)
                     supplyZonesCreated := supplyZonesCreated + 1
                     if showDebugLabel
@@ -1854,8 +1877,22 @@ if canOpenShort and array.size(supplyZones) > 0
             pendingSupplyZoneIdx := i
             break
 
-// Reset pending zone tracking when position closes
+// Track trade resolution and record intersection stats when position closes
 if strategy.position_size == 0 and strategy.position_size[1] != 0
+    // Record intersection count for demand zone trade
+    if pendingDemandZoneIdx >= 0 and pendingDemandZoneIdx < array.size(demandZones)
+        resolvedZone = array.get(demandZones, pendingDemandZoneIdx)
+        if not resolvedZone.tradeResolved
+            resolvedZone.tradeResolved := true
+            array.push(completedDemandIntersections, resolvedZone.intersectionCount)
+
+    // Record intersection count for supply zone trade
+    if pendingSupplyZoneIdx >= 0 and pendingSupplyZoneIdx < array.size(supplyZones)
+        resolvedZone = array.get(supplyZones, pendingSupplyZoneIdx)
+        if not resolvedZone.tradeResolved
+            resolvedZone.tradeResolved := true
+            array.push(completedSupplyIntersections, resolvedZone.intersectionCount)
+
     pendingDemandZoneIdx := -1
     pendingSupplyZoneIdx := -1
 
@@ -2700,3 +2737,100 @@ if barstate.islast and showDebugLabel
                            color=color.yellow,
                            textcolor=color.black,
                            size=size.small)
+
+// ============================================================================
+// ZONE INTERSECTION STATS TABLE
+// ============================================================================
+
+// Create the table once at initialization
+var table zoneStatsTable = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80), border_width=1)
+
+// Update table on every bar (will show on chart)
+if showStatsTable
+    // Combine both arrays for total calculations
+    int totalZones = array.size(completedDemandIntersections) + array.size(completedSupplyIntersections)
+    int totalDemandZones = array.size(completedDemandIntersections)
+    int totalSupplyZones = array.size(completedSupplyIntersections)
+
+    // Calculate averages
+    float avgAllZones = 0.0
+    float avgDemandZones = 0.0
+    float avgSupplyZones = 0.0
+
+    int sumAll = 0
+    int sumDemand = 0
+    int sumSupply = 0
+
+    // Sum demand intersections
+    if totalDemandZones > 0
+        for i = 0 to totalDemandZones - 1
+            sumDemand := sumDemand + array.get(completedDemandIntersections, i)
+        avgDemandZones := sumDemand / totalDemandZones
+
+    // Sum supply intersections
+    if totalSupplyZones > 0
+        for i = 0 to totalSupplyZones - 1
+            sumSupply := sumSupply + array.get(completedSupplyIntersections, i)
+        avgSupplyZones := sumSupply / totalSupplyZones
+
+    // Calculate total average
+    sumAll := sumDemand + sumSupply
+    if totalZones > 0
+        avgAllZones := sumAll / totalZones
+
+    // Count zones with more than X intersections
+    int zonesMoreThan1 = 0
+    int zonesMoreThan2 = 0
+    int zonesMoreThan5 = 0
+
+    if totalDemandZones > 0
+        for i = 0 to totalDemandZones - 1
+            int count = array.get(completedDemandIntersections, i)
+            if count > 1
+                zonesMoreThan1 := zonesMoreThan1 + 1
+            if count > 2
+                zonesMoreThan2 := zonesMoreThan2 + 1
+            if count > 5
+                zonesMoreThan5 := zonesMoreThan5 + 1
+
+    if totalSupplyZones > 0
+        for i = 0 to totalSupplyZones - 1
+            int count = array.get(completedSupplyIntersections, i)
+            if count > 1
+                zonesMoreThan1 := zonesMoreThan1 + 1
+            if count > 2
+                zonesMoreThan2 := zonesMoreThan2 + 1
+            if count > 5
+                zonesMoreThan5 := zonesMoreThan5 + 1
+
+    // Header
+    table.cell(zoneStatsTable, 0, 0, "Zone Intersection Stats", text_color=color.white, text_size=size.small, bgcolor=color.new(color.blue, 70))
+    table.cell(zoneStatsTable, 1, 0, "Value", text_color=color.white, text_size=size.small, bgcolor=color.new(color.blue, 70))
+
+    // Row 1: Total completed trades
+    table.cell(zoneStatsTable, 0, 1, "Total Completed Trades", text_color=color.white, text_size=size.tiny)
+    table.cell(zoneStatsTable, 1, 1, str.tostring(totalZones), text_color=color.white, text_size=size.tiny)
+
+    // Row 2: Avg intersections (all zones)
+    table.cell(zoneStatsTable, 0, 2, "Avg Intersections (All)", text_color=color.white, text_size=size.tiny)
+    table.cell(zoneStatsTable, 1, 2, str.tostring(avgAllZones, "#.##"), text_color=color.white, text_size=size.tiny)
+
+    // Row 3: Avg intersections (demand zones)
+    table.cell(zoneStatsTable, 0, 3, "Avg Intersections (Demand)", text_color=color.green, text_size=size.tiny)
+    table.cell(zoneStatsTable, 1, 3, str.tostring(avgDemandZones, "#.##") + " (" + str.tostring(totalDemandZones) + " trades)", text_color=color.green, text_size=size.tiny)
+
+    // Row 4: Avg intersections (supply zones)
+    table.cell(zoneStatsTable, 0, 4, "Avg Intersections (Supply)", text_color=color.red, text_size=size.tiny)
+    table.cell(zoneStatsTable, 1, 4, str.tostring(avgSupplyZones, "#.##") + " (" + str.tostring(totalSupplyZones) + " trades)", text_color=color.red, text_size=size.tiny)
+
+    // Row 5: Zones with >1 intersection
+    table.cell(zoneStatsTable, 0, 5, "Zones with >1 Intersection", text_color=color.white, text_size=size.tiny)
+    table.cell(zoneStatsTable, 1, 5, str.tostring(zonesMoreThan1) + " (" + str.tostring(totalZones > 0 ? math.round(zonesMoreThan1 / totalZones * 100) : 0) + "%)", text_color=color.white, text_size=size.tiny)
+
+    // Row 6: Zones with >2 intersections
+    table.cell(zoneStatsTable, 0, 6, "Zones with >2 Intersections", text_color=color.white, text_size=size.tiny)
+    table.cell(zoneStatsTable, 1, 6, str.tostring(zonesMoreThan2) + " (" + str.tostring(totalZones > 0 ? math.round(zonesMoreThan2 / totalZones * 100) : 0) + "%)", text_color=color.white, text_size=size.tiny)
+
+    // Row 7: Zones with >5 intersections
+    table.cell(zoneStatsTable, 0, 7, "Zones with >5 Intersections", text_color=color.white, text_size=size.tiny)
+    table.cell(zoneStatsTable, 1, 7, str.tostring(zonesMoreThan5) + " (" + str.tostring(totalZones > 0 ? math.round(zonesMoreThan5 / totalZones * 100) : 0) + "%)", text_color=color.white, text_size=size.tiny)
