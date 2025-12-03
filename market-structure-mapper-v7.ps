@@ -19,7 +19,8 @@ htf2Enabled = input.bool(true, "Show Trading Range", group="Trading Range TF")
 htf2Timeframe = input.timeframe("D", "Trading Range Timeframe", group="Trading Range TF")
 
 // Zone Settings
-showCtfZones = input.bool(true, "Show Zones", group="Zones")
+showHtfZones = input.bool(true, "Show HTF Zones", group="Zones")
+showHtf2Zones = input.bool(true, "Show HTF2 (Trading Range) Zones", group="Zones")
 showBrokenZones = input.bool(false, "Show Broken Zones", group="Zones")
 maxZonesPerSide = input.int(20, "Max Zones Per Side", minval=10, maxval=250, group="Zones")
 zoneBreakOnWick = input.bool(false, "Break Zones on Wick (not just close)", group="Zones")
@@ -39,6 +40,12 @@ supplyZoneBorderColorInput = input.color(color.new(color.red, 50), "Supply Zone 
 htfHighColor = input.color(color.new(color.orange, 0), "HTF Valid High Color", group="HTF Colors")
 htfLowColor = input.color(color.new(color.blue, 0), "HTF Valid Low Color", group="HTF Colors")
 htfBosColor = input.color(color.new(color.black, 0), "HTF BOS Color", group="HTF Colors")
+
+// HTF2 Zone Colors
+htf2DemandZoneColor = input.color(color.new(color.teal, 85), "HTF2 Demand Zone Color", group="HTF2 Colors")
+htf2DemandZoneBorderColor = input.color(color.new(color.teal, 50), "HTF2 Demand Zone Border", group="HTF2 Colors")
+htf2SupplyZoneColor = input.color(color.new(color.purple, 85), "HTF2 Supply Zone Color", group="HTF2 Colors")
+htf2SupplyZoneBorderColor = input.color(color.new(color.purple, 50), "HTF2 Supply Zone Border", group="HTF2 Colors")
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -84,9 +91,13 @@ var array<LowLevel> htfLows = array.new<LowLevel>()
 var array<HighLevel> htf2Highs = array.new<HighLevel>()
 var array<LowLevel> htf2Lows = array.new<LowLevel>()
 
-// Zones
+// HTF Zones
 var array<Zone> demandZones = array.new<Zone>()
 var array<Zone> supplyZones = array.new<Zone>()
+
+// HTF2 Zones
+var array<Zone> htf2DemandZones = array.new<Zone>()
+var array<Zone> htf2SupplyZones = array.new<Zone>()
 
 // ============================================================================
 // MARKET STRUCTURE STATE VARIABLES
@@ -820,6 +831,56 @@ checkBrokenZones() =>
 
     true
 
+// Check and update broken HTF2 zones
+checkBrokenZonesHTF2() =>
+    // Check HTF2 demand zones (broken when price goes below zone bottom)
+    if array.size(htf2DemandZones) > 0
+        for i = 0 to array.size(htf2DemandZones) - 1
+            zone = array.get(htf2DemandZones, i)
+            if not zone.broken
+                bool isTouching = low <= zone.top and high >= zone.bottom
+                if isTouching and not zone.touched
+                    zone.touched := true
+
+                bool shouldBreak = false
+                if close < zone.bottom
+                    shouldBreak := true
+                if zoneBreakOnWick and low < zone.bottom
+                    shouldBreak := true
+                if zoneBreakOnFirstTouch and isTouching and bar_index > zone.creationBar
+                    shouldBreak := true
+                if zoneBreakOnTouchAfterCreation and isTouching and bar_index > zone.creationBar
+                    shouldBreak := true
+
+                if shouldBreak
+                    zone.broken := true
+                    zone.rightTime := time
+
+    // Check HTF2 supply zones (broken when price goes above zone top)
+    if array.size(htf2SupplyZones) > 0
+        for i = 0 to array.size(htf2SupplyZones) - 1
+            zone = array.get(htf2SupplyZones, i)
+            if not zone.broken
+                bool isTouching = low <= zone.top and high >= zone.bottom
+                if isTouching and not zone.touched
+                    zone.touched := true
+
+                bool shouldBreak = false
+                if close > zone.top
+                    shouldBreak := true
+                if zoneBreakOnWick and high > zone.top
+                    shouldBreak := true
+                if zoneBreakOnFirstTouch and isTouching and bar_index > zone.creationBar
+                    shouldBreak := true
+                if zoneBreakOnTouchAfterCreation and isTouching and bar_index > zone.creationBar
+                    shouldBreak := true
+
+                if shouldBreak
+                    zone.broken := true
+                    zone.rightTime := time
+
+    true
+
 // ============================================================================
 // CHECK FOR BROKEN AND SWEPT LEVELS
 // ============================================================================
@@ -994,9 +1055,12 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowId
 
     [bullishLabels, bearishLabels, demandCreated, supplyCreated]
 
-// HTF2 (Trading Range) version - checks for broken/swept levels
-// No zone creation - just tracks the trading range boundaries
-checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close) =>
+// HTF2 (Trading Range) version - checks for broken/swept levels and creates zones
+// Returns [demandCreated, supplyCreated]
+checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, int savedHighIdx, int savedLowIdx) =>
+    int demandCreated = 0
+    int supplyCreated = 0
+
     if array.size(htf2Highs) > 0
         for i = 0 to array.size(htf2Highs) - 1
             highLevel = array.get(htf2Highs, i)
@@ -1022,6 +1086,24 @@ checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close) =>
                              color=color.white,
                              textcolor=color.black,
                              size=size.tiny)
+
+                // Create HTF2 demand zone if this is the most recent high
+                if i == savedHighIdx
+                    [lowPrice, lowBar] = findLowestBetween(highLevel.barIndex, bar_index)
+                    if not na(lowBar)
+                        [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromLow(lowBar)
+                        if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
+                            bool isDuplicate = false
+                            if array.size(htf2DemandZones) > 0
+                                for j = array.size(htf2DemandZones) - 1 to math.max(0, array.size(htf2DemandZones) - 20)
+                                    existingZone = array.get(htf2DemandZones, j)
+                                    if existingZone.leftTime == zoneLeftTime and existingZone.top == zoneTop and existingZone.bottom == zoneBottom
+                                        isDuplicate := true
+                                        break
+                            if not isDuplicate
+                                newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index)
+                                array.push(htf2DemandZones, newZone)
+                                demandCreated := demandCreated + 1
 
     if array.size(htf2Lows) > 0
         for i = 0 to array.size(htf2Lows) - 1
@@ -1049,7 +1131,25 @@ checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close) =>
                              textcolor=color.black,
                              size=size.tiny)
 
-    true
+                // Create HTF2 supply zone if this is the most recent low
+                if i == savedLowIdx
+                    [highPrice, highBar] = findHighestBetween(lowLevel.barIndex, bar_index)
+                    if not na(highBar)
+                        [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromHigh(highBar)
+                        if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
+                            bool isDuplicate = false
+                            if array.size(htf2SupplyZones) > 0
+                                for j = array.size(htf2SupplyZones) - 1 to math.max(0, array.size(htf2SupplyZones) - 20)
+                                    existingZone = array.get(htf2SupplyZones, j)
+                                    if existingZone.leftTime == zoneLeftTime and existingZone.top == zoneTop and existingZone.bottom == zoneBottom
+                                        isDuplicate := true
+                                        break
+                            if not isDuplicate
+                                newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index)
+                                array.push(htf2SupplyZones, newZone)
+                                supplyCreated := supplyCreated + 1
+
+    [demandCreated, supplyCreated]
 
 // Determine level type based on BOS direction
 getHighLevelType(string bosDirection) =>
@@ -1116,6 +1216,7 @@ if initialized
     // Check broken/swept levels and zones
     checkBrokenLevels()
     checkBrokenZones()
+    checkBrokenZonesHTF2()
 
     // Update nearest unbroken levels (structure boundaries) - CTF
     int ctfNewHighIdx = findNearestUnbrokenHigh(highs)
@@ -1651,7 +1752,7 @@ if htf2Enabled and htf2Initialized and htf2NewCandle
 
 // Check HTF2 broken/swept levels - ONLY on new HTF2 candles
 if htf2Enabled and htf2Initialized and htf2NewCandle
-    checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close)
+    checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, htf2MostRecentHighIndex, htf2MostRecentLowIndex)
 
 // HTF2 swing tracking
 if htf2Enabled and htf2Initialized
@@ -2437,7 +2538,8 @@ if barstate.islast
     for bx in box.all
         bx.delete()
 
-if barstate.islast and showCtfZones
+// Render HTF zones
+if barstate.islast and showHtfZones
     demandZonesRendered := 0
     supplyZonesRendered := 0
     demandSkipped := 0
@@ -2445,7 +2547,7 @@ if barstate.islast and showCtfZones
     array.clear(demandZoneTimes)
     array.clear(supplyZoneTimes)
 
-    // Render demand zones (newest first, up to limit)
+    // Render HTF demand zones (newest first, up to limit)
     if array.size(demandZones) > 0
         for i = array.size(demandZones) - 1 to 0
             if demandZonesRendered >= maxZonesPerSide
@@ -2466,7 +2568,7 @@ if barstate.islast and showCtfZones
             else
                 demandSkipped := demandSkipped + 1
 
-    // Render supply zones (newest first, up to limit)
+    // Render HTF supply zones (newest first, up to limit)
     if array.size(supplyZones) > 0
         for i = array.size(supplyZones) - 1 to 0
             if supplyZonesRendered >= maxZonesPerSide
@@ -2487,8 +2589,49 @@ if barstate.islast and showCtfZones
             else
                 supplySkipped := supplySkipped + 1
 
-// NOTE: HTF zones are now stored in the main demandZones/supplyZones arrays
-// No separate HTF rendering needed
+// Render HTF2 zones
+var int htf2DemandZonesRendered = 0
+var int htf2SupplyZonesRendered = 0
+
+if barstate.islast and showHtf2Zones and htf2Enabled
+    htf2DemandZonesRendered := 0
+    htf2SupplyZonesRendered := 0
+
+    // Render HTF2 demand zones (newest first, up to limit)
+    if array.size(htf2DemandZones) > 0
+        for i = array.size(htf2DemandZones) - 1 to 0
+            if htf2DemandZonesRendered >= maxZonesPerSide
+                break
+            zone = array.get(htf2DemandZones, i)
+            // Skip broken zones unless showBrokenZones is enabled
+            if zone.broken and not showBrokenZones
+                continue
+            if not na(zone.leftTime) and not na(zone.top) and not na(zone.bottom)
+                zoneEndTime = zone.broken ? zone.rightTime : time
+                box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
+                       bgcolor=htf2DemandZoneColor,
+                       border_color=htf2DemandZoneBorderColor,
+                       border_width=2,
+                       xloc=xloc.bar_time)
+                htf2DemandZonesRendered := htf2DemandZonesRendered + 1
+
+    // Render HTF2 supply zones (newest first, up to limit)
+    if array.size(htf2SupplyZones) > 0
+        for i = array.size(htf2SupplyZones) - 1 to 0
+            if htf2SupplyZonesRendered >= maxZonesPerSide
+                break
+            zone = array.get(htf2SupplyZones, i)
+            // Skip broken zones unless showBrokenZones is enabled
+            if zone.broken and not showBrokenZones
+                continue
+            if not na(zone.leftTime) and not na(zone.top) and not na(zone.bottom)
+                zoneEndTime = zone.broken ? zone.rightTime : time
+                box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom,
+                       bgcolor=htf2SupplyZoneColor,
+                       border_color=htf2SupplyZoneBorderColor,
+                       border_width=2,
+                       xloc=xloc.bar_time)
+                htf2SupplyZonesRendered := htf2SupplyZonesRendered + 1
 
 // Debug labels showing zone counts and BOS events
 if barstate.islast and showDebugLabel
