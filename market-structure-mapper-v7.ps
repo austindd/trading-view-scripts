@@ -692,7 +692,7 @@ addLowHTF(float price, int barIdx, string levelType, color lineColor) =>
 
     true
 
-// HTF2 (Trading Range) versions - always black lines
+// HTF2 (Trading Range) versions - always black lines with peak/valley labels
 addHighHTF2(float price, int barIdx, string levelType) =>
     if htf2MostRecentHighIndex >= 0
         prevHigh = array.get(htf2Highs, htf2MostRecentHighIndex)
@@ -704,6 +704,13 @@ addHighHTF2(float price, int barIdx, string levelType) =>
                        width=lineWidth + 2,  // Thickest for HTF2
                        extend=extend.right,
                        style=line.style_solid)
+
+    // Create label at the peak (top label pointing down)
+    label.new(barIdx, price, levelType == "weak" ? "W" : "S",
+              style=label.style_label_down,
+              color=color.black,
+              textcolor=color.white,
+              size=size.small)
 
     newHigh = HighLevel.new(price, barIdx, newLine, levelType)
     array.push(htf2Highs, newHigh)
@@ -721,6 +728,13 @@ addLowHTF2(float price, int barIdx, string levelType) =>
                        width=lineWidth + 2,  // Thickest for HTF2
                        extend=extend.right,
                        style=line.style_solid)
+
+    // Create label at the valley (bottom label pointing up)
+    label.new(barIdx, price, levelType == "weak" ? "W" : "S",
+              style=label.style_label_up,
+              color=color.black,
+              textcolor=color.white,
+              size=size.small)
 
     newLow = LowLevel.new(price, barIdx, newLine, levelType)
     array.push(htf2Lows, newLow)
@@ -1513,36 +1527,43 @@ htf2IsBearishBreakdown() =>
 htf2IsBullishBreakout() =>
     htf2Close > htf2Open and htf2Close > htf2High[1]
 
-// HTF2 Initialization
-if htf2Enabled and not htf2Initialized and bar_index > 0 and htf2NewCandle
-    if htf2IsBearishBreakdown()
-        // Find the highest high in the lookback period for initial valid high
-        float initHigh = high
-        int initHighBar = bar_index
-        for i = 1 to math.min(bar_index, 200)
-            if high[i] > initHigh
-                initHigh := high[i]
-                initHighBar := bar_index - i
+// HTF2 Initialization - simplified to initialize on first HTF2 candle with enough history
+if htf2Enabled and not htf2Initialized and bar_index > 200
+    // Find the highest high in the lookback period for initial valid high
+    float initHigh = high
+    int initHighBar = bar_index
+    for i = 1 to 200
+        if high[i] > initHigh
+            initHigh := high[i]
+            initHighBar := bar_index - i
 
-        htf2CurrentValidHigh := initHigh
-        htf2CurrentValidHighBar := initHighBar
+    // Find the lowest low in the lookback period for initial valid low
+    float initLow = low
+    int initLowBar = bar_index
+    for i = 1 to 200
+        if low[i] < initLow
+            initLow := low[i]
+            initLowBar := bar_index - i
 
-        // Also set an initial valid low to current bar
-        htf2CurrentValidLow := low
-        htf2CurrentValidLowBar := bar_index
+    htf2CurrentValidHigh := initHigh
+    htf2CurrentValidHighBar := initHighBar
+    htf2CurrentValidLow := initLow
+    htf2CurrentValidLowBar := initLowBar
 
-        htf2Initialized := true
-        htf2LookingForLow := true
+    htf2Initialized := true
+    htf2LookingForLow := true
 
-        // Initialize swing tracking
-        htf2SwingLow := low
-        htf2SwingLowBar := bar_index
+    // Initialize swing tracking
+    htf2SwingLow := initLow
+    htf2SwingLowBar := initLowBar
+    htf2SwingHigh := initHigh
+    htf2SwingHighBar := initHighBar
 
-        addHighHTF2(initHigh, initHighBar, "strong")
-        htf2MostRecentHighIndex := array.size(htf2Highs) - 1
+    addHighHTF2(initHigh, initHighBar, "strong")
+    htf2MostRecentHighIndex := array.size(htf2Highs) - 1
 
-        addLowHTF2(low, bar_index, "strong")
-        htf2MostRecentLowIndex := array.size(htf2Lows) - 1
+    addLowHTF2(initLow, initLowBar, "strong")
+    htf2MostRecentLowIndex := array.size(htf2Lows) - 1
 
 // HTF2 main logic (only on new HTF2 candles)
 if htf2Enabled and htf2Initialized and htf2NewCandle
@@ -2118,9 +2139,9 @@ if htfEnabled and htfInitialized and not na(htfCurrentValidLow) and htfMostRecen
                                      size=size.small)
 
 // HTF2 (Trading Range) labels - black with white text
-if htf2Enabled and htf2Initialized and not na(htf2CurrentValidHigh) and htf2MostRecentHighIndex >= 0
-    if not na(htf2CurrentHighLabel)
-        label.delete(htf2CurrentHighLabel)
+if htf2Enabled and htf2Initialized and not na(htf2CurrentValidHigh) and htf2MostRecentHighIndex >= 0 and htf2MostRecentHighIndex < array.size(htf2Highs)
+    // Delete old label
+    label.delete(htf2CurrentHighLabel)
 
     highLevel = array.get(htf2Highs, htf2MostRecentHighIndex)
     string labelText = na
@@ -2134,16 +2155,16 @@ if htf2Enabled and htf2Initialized and not na(htf2CurrentValidHigh) and htf2Most
     else
         labelText := htf2Timeframe + " Strong High"
 
-    htf2CurrentHighLabel := label.new(bar_index + 35, htf2CurrentValidHigh,
+    htf2CurrentHighLabel := label.new(bar_index + 5, htf2CurrentValidHigh,
                                       text=labelText,
-                                      style=label.style_label_left,
+                                      style=label.style_label_down,
                                       color=color.black,
                                       textcolor=color.white,
-                                      size=size.small)
+                                      size=size.normal)
 
-if htf2Enabled and htf2Initialized and not na(htf2CurrentValidLow) and htf2MostRecentLowIndex >= 0
-    if not na(htf2CurrentLowLabel)
-        label.delete(htf2CurrentLowLabel)
+if htf2Enabled and htf2Initialized and not na(htf2CurrentValidLow) and htf2MostRecentLowIndex >= 0 and htf2MostRecentLowIndex < array.size(htf2Lows)
+    // Delete old label
+    label.delete(htf2CurrentLowLabel)
 
     lowLevel = array.get(htf2Lows, htf2MostRecentLowIndex)
     string labelText = na
@@ -2157,12 +2178,12 @@ if htf2Enabled and htf2Initialized and not na(htf2CurrentValidLow) and htf2MostR
     else
         labelText := htf2Timeframe + " Strong Low"
 
-    htf2CurrentLowLabel := label.new(bar_index + 35, htf2CurrentValidLow,
+    htf2CurrentLowLabel := label.new(bar_index + 5, htf2CurrentValidLow,
                                      text=labelText,
-                                     style=label.style_label_left,
+                                     style=label.style_label_up,
                                      color=color.black,
                                      textcolor=color.white,
-                                     size=size.small)
+                                     size=size.normal)
 
 // Nearest unbroken level labels (structure boundaries)
 // CTF nearest unbroken high
@@ -2261,7 +2282,7 @@ if htf2Enabled and htf2NearestUnbrokenHighIndex >= 0 and htf2NearestUnbrokenHigh
 
     htf2NearestUnbrokenHighLabel := label.new(bar_index + 35, highLevel.price,
                                                text=labelText,
-                                               style=label.style_label_left,
+                                               style=label.style_label_down,
                                                color=color.new(color.black, 50),
                                                textcolor=color.white,
                                                size=size.small)
@@ -2282,7 +2303,7 @@ if htf2Enabled and htf2NearestUnbrokenLowIndex >= 0 and htf2NearestUnbrokenLowIn
 
     htf2NearestUnbrokenLowLabel := label.new(bar_index + 35, lowLevel.price,
                                               text=labelText,
-                                              style=label.style_label_left,
+                                              style=label.style_label_up,
                                               color=color.new(color.black, 50),
                                               textcolor=color.white,
                                               size=size.small)
