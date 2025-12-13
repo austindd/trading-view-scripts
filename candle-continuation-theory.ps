@@ -43,12 +43,12 @@ htfLow_2 = request.security(syminfo.tickerid, htfTimeframe, low[2], lookahead=ba
 bool htfNewCandle = ta.change(htfTime) != 0
 
 // ============================================================================
-// HTF CANDLE TRACKING (for drawing boxes)
+// HTF CANDLE TRACKING (for drawing boxes and BOS lines)
 // ============================================================================
 // Track the current HTF candle's bar range on the CTF chart
 var int currentHtfStartBar = na
 
-// Store completed HTF candle data (for drawing the completed box)
+// Store completed HTF candle data (N-1) for drawing the completed box
 var float completedHtfOpen = na
 var float completedHtfHigh = na
 var float completedHtfLow = na
@@ -56,8 +56,16 @@ var float completedHtfClose = na
 var int completedHtfStartBar = na
 var int completedHtfEndBar = na
 
+// Store prior HTF candle positions (N-2) for BOS line drawing
+var int priorHtfStartBar = na
+var int priorHtfEndBar = na
+
 // When new HTF candle starts, save the completed one for box drawing
 if htfNewCandle
+    // Shift: N-1 becomes N-2
+    priorHtfStartBar := completedHtfStartBar
+    priorHtfEndBar := completedHtfEndBar
+
     // The candle that just completed (use the security [1] values)
     completedHtfOpen := htfOpen_1
     completedHtfHigh := htfHigh_1
@@ -117,20 +125,30 @@ if htfNewCandle and not na(htfClose_1) and not na(htfHigh_2) and not na(htfLow_2
         bullishBosDetected := true
         bearishBosDetected := false
 
-        // Mark BOS on the last CTF candle of the HTF candle that broke structure
-        if showDebugLabels
-            label.new(bar_index - 1, htfHigh_1, "BOS↑\nClose(N-1): " + str.tostring(htfClose_1, "#.##") + "\nHigh(N-2): " + str.tostring(htfHigh_2, "#.##"),
-                 style=label.style_label_down, color=bosColor, textcolor=color.white, size=size.small)
+        // Draw BOS line across the broken HTF candle (N-2) at its high
+        if showDebugLabels and not na(priorHtfStartBar) and not na(priorHtfEndBar)
+            // Line spans the entire HTF candle whose high was broken
+            line.new(priorHtfStartBar, htfHigh_2, priorHtfEndBar, htfHigh_2,
+                 color=bosColor, width=2, style=line.style_solid)
+            // Label in the center of the line
+            int centerBar = math.round((priorHtfStartBar + priorHtfEndBar) / 2)
+            label.new(centerBar, htfHigh_2, "BOS",
+                 style=label.style_label_center, color=bosColor, textcolor=color.white, size=size.small)
 
     // Check if the just-completed HTF candle closed below the prior HTF candle's low
     else if htfClose_1 < htfLow_2
         bearishBosDetected := true
         bullishBosDetected := false
 
-        // Mark BOS on the last CTF candle of the HTF candle that broke structure
-        if showDebugLabels
-            label.new(bar_index - 1, htfLow_1, "BOS↓\nClose(N-1): " + str.tostring(htfClose_1, "#.##") + "\nLow(N-2): " + str.tostring(htfLow_2, "#.##"),
-                 style=label.style_label_up, color=bosColor, textcolor=color.white, size=size.small)
+        // Draw BOS line across the broken HTF candle (N-2) at its low
+        if showDebugLabels and not na(priorHtfStartBar) and not na(priorHtfEndBar)
+            // Line spans the entire HTF candle whose low was broken
+            line.new(priorHtfStartBar, htfLow_2, priorHtfEndBar, htfLow_2,
+                 color=bosColor, width=2, style=line.style_solid)
+            // Label in the center of the line
+            int centerBar = math.round((priorHtfStartBar + priorHtfEndBar) / 2)
+            label.new(centerBar, htfLow_2, "BOS",
+                 style=label.style_label_center, color=bosColor, textcolor=color.white, size=size.small)
 
     else
         bullishBosDetected := false
