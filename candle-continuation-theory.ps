@@ -117,9 +117,9 @@ if htfNewCandle and not na(htfClose_1) and not na(htfHigh_2) and not na(htfLow_2
         bullishBosDetected := true
         bearishBosDetected := false
 
-        // Mark BOS on the chart at the start of the new candle
+        // Mark BOS on the last CTF candle of the HTF candle that broke structure
         if showDebugLabels
-            label.new(bar_index, htfHigh_1, "BOS↑\nClose(N-1): " + str.tostring(htfClose_1, "#.##") + "\nHigh(N-2): " + str.tostring(htfHigh_2, "#.##"),
+            label.new(bar_index - 1, htfHigh_1, "BOS↑\nClose(N-1): " + str.tostring(htfClose_1, "#.##") + "\nHigh(N-2): " + str.tostring(htfHigh_2, "#.##"),
                  style=label.style_label_down, color=bosColor, textcolor=color.white, size=size.small)
 
     // Check if the just-completed HTF candle closed below the prior HTF candle's low
@@ -127,9 +127,9 @@ if htfNewCandle and not na(htfClose_1) and not na(htfHigh_2) and not na(htfLow_2
         bearishBosDetected := true
         bullishBosDetected := false
 
-        // Mark BOS on the chart at the start of the new candle
+        // Mark BOS on the last CTF candle of the HTF candle that broke structure
         if showDebugLabels
-            label.new(bar_index, htfLow_1, "BOS↓\nClose(N-1): " + str.tostring(htfClose_1, "#.##") + "\nLow(N-2): " + str.tostring(htfLow_2, "#.##"),
+            label.new(bar_index - 1, htfLow_1, "BOS↓\nClose(N-1): " + str.tostring(htfClose_1, "#.##") + "\nLow(N-2): " + str.tostring(htfLow_2, "#.##"),
                  style=label.style_label_up, color=bosColor, textcolor=color.white, size=size.small)
 
     else
