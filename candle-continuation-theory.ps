@@ -80,26 +80,43 @@ if htfNewCandle
 // ============================================================================
 // DEBUG: DRAW HTF CANDLE BOXES
 // ============================================================================
-var box currentHtfBox = na
+var box currentHtfBox = na      // Wick box (high to low)
+var box currentHtfBodyBox = na  // Body box (open to close)
 
 // Draw/update box for current developing HTF candle
 if showHtfBoxes and not na(currentHtfStartBar)
-    // Delete and recreate current box each bar to update it
+    // Delete and recreate current boxes each bar to update them
     if not na(currentHtfBox)
         box.delete(currentHtfBox)
+    if not na(currentHtfBodyBox)
+        box.delete(currentHtfBodyBox)
 
     bool isBullish = htfClose >= htfOpen
     color boxColor = isBullish ? bullishBoxColor : bearishBoxColor
 
+    // Wick box (full range: high to low)
     currentHtfBox := box.new(currentHtfStartBar, htfHigh, bar_index, htfLow,
          bgcolor=boxColor, border_color=color.new(isBullish ? color.green : color.red, 50), border_width=1)
 
-// Draw box for completed HTF candle when it finishes
+    // Body box (open to close) - overlaid to make body appear darker
+    float bodyTop = math.max(htfOpen, htfClose)
+    float bodyBottom = math.min(htfOpen, htfClose)
+    currentHtfBodyBox := box.new(currentHtfStartBar, bodyTop, bar_index, bodyBottom,
+         bgcolor=boxColor, border_color=color.new(isBullish ? color.green : color.red, 50), border_width=1)
+
+// Draw boxes for completed HTF candle when it finishes
 if htfNewCandle and showHtfBoxes and not na(completedHtfStartBar) and not na(completedHtfEndBar)
     bool wasHtfBullish = completedHtfClose >= completedHtfOpen
     color completedBoxColor = wasHtfBullish ? bullishBoxColor : bearishBoxColor
 
+    // Wick box (full range: high to low)
     box.new(completedHtfStartBar, completedHtfHigh, completedHtfEndBar, completedHtfLow,
+         bgcolor=completedBoxColor, border_color=color.new(wasHtfBullish ? color.green : color.red, 30), border_width=2)
+
+    // Body box (open to close) - overlaid to make body appear darker
+    float completedBodyTop = math.max(completedHtfOpen, completedHtfClose)
+    float completedBodyBottom = math.min(completedHtfOpen, completedHtfClose)
+    box.new(completedHtfStartBar, completedBodyTop, completedHtfEndBar, completedBodyBottom,
          bgcolor=completedBoxColor, border_color=color.new(wasHtfBullish ? color.green : color.red, 30), border_width=2)
 
 // ============================================================================
