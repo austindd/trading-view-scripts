@@ -2,194 +2,145 @@
 // © scientificbest
 
 //@version=5
-indicator("Candle Continuation Theory [SB]", "CCT [SB]", overlay=true, max_lines_count=100, max_labels_count=100)
+indicator("Candle Continuation Theory [SB]", "CCT [SB]", overlay=true, max_lines_count=100, max_labels_count=100, max_boxes_count=200)
 
 // ============================================================================
 // INPUTS
 // ============================================================================
 htfTimeframe = input.timeframe("60", "HTF Timeframe", group="Settings")
-showRangeLines = input.bool(true, "Show HTF Range Lines", group="Display")
-showRangeLabels = input.bool(true, "Show HTF Range Labels", group="Display")
-showBosLabels = input.bool(true, "Show BOS Labels", group="Display")
-showRetestLabels = input.bool(true, "Show Retest Labels", group="Display")
-showContinuationLabels = input.bool(true, "Show Continuation Labels", group="Display")
-lineWidth = input.int(2, "Line Width", minval=1, maxval=5, group="Display")
+
+// Debug
+showHtfBoxes = input.bool(true, "Show HTF Candle Boxes (Debug)", group="Debug")
+showDebugLabels = input.bool(true, "Show Debug Labels", group="Debug")
 
 // Colors
-highColor = input.color(color.new(color.red, 0), "HTF High Color", group="Colors")
-lowColor = input.color(color.new(color.green, 0), "HTF Low Color", group="Colors")
+bullishBoxColor = input.color(color.new(color.green, 80), "Bullish HTF Box", group="Colors")
+bearishBoxColor = input.color(color.new(color.red, 80), "Bearish HTF Box", group="Colors")
 bosColor = input.color(color.new(color.blue, 0), "BOS Color", group="Colors")
-retestColor = input.color(color.new(color.orange, 0), "Retest Color", group="Colors")
-continuationColor = input.color(color.new(color.purple, 0), "Continuation Color", group="Colors")
 
 // ============================================================================
-// HTF DATA
+// HTF DATA - Using confirmed candle data
 // ============================================================================
-[htfHigh, htfLow, htfOpen, htfClose] = request.security(syminfo.tickerid, htfTimeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
-htfTime = request.security(syminfo.tickerid, htfTimeframe, time, lookahead=barmerge.lookahead_off)
+// Get the CURRENT HTF candle's developing values
+htfOpen = request.security(syminfo.tickerid, htfTimeframe, open, lookahead=barmerge.lookahead_on)
+htfHigh = request.security(syminfo.tickerid, htfTimeframe, high, lookahead=barmerge.lookahead_on)
+htfLow = request.security(syminfo.tickerid, htfTimeframe, low, lookahead=barmerge.lookahead_on)
+htfClose = request.security(syminfo.tickerid, htfTimeframe, close, lookahead=barmerge.lookahead_on)
+htfTime = request.security(syminfo.tickerid, htfTimeframe, time, lookahead=barmerge.lookahead_on)
+
+// Detect when a new HTF candle starts
 bool htfNewCandle = ta.change(htfTime) != 0
 
-// Get previous HTF candle's high and low (the one before the current HTF candle)
-var float prevHtfHigh = na
-var float prevHtfLow = na
-var float prevPrevHtfHigh = na  // For tracking the range that was broken
-var float prevPrevHtfLow = na
+// ============================================================================
+// HTF CANDLE TRACKING
+// ============================================================================
+// Track the current HTF candle's bar range on the CTF chart
+var int currentHtfStartBar = na
 
-// Update previous HTF values when new HTF candle forms
+// Store completed HTF candle data
+var float completedHtfOpen = na
+var float completedHtfHigh = na
+var float completedHtfLow = na
+var float completedHtfClose = na
+var int completedHtfStartBar = na
+var int completedHtfEndBar = na
+
+// Store the previous completed HTF candle (for BOS comparison)
+var float prevCompletedHtfHigh = na
+var float prevCompletedHtfLow = na
+
+// When new HTF candle starts, save the completed one
 if htfNewCandle
-    prevPrevHtfHigh := prevHtfHigh
-    prevPrevHtfLow := prevHtfLow
-    prevHtfHigh := htfHigh[1]
-    prevHtfLow := htfLow[1]
+    // Save previous completed candle's high/low for BOS comparison
+    prevCompletedHtfHigh := completedHtfHigh
+    prevCompletedHtfLow := completedHtfLow
+
+    // The candle that just completed
+    completedHtfOpen := htfOpen[1]
+    completedHtfHigh := htfHigh[1]
+    completedHtfLow := htfLow[1]
+    completedHtfClose := htfClose[1]
+    completedHtfStartBar := currentHtfStartBar
+    completedHtfEndBar := bar_index - 1
+
+    // New candle starts now
+    currentHtfStartBar := bar_index
 
 // ============================================================================
-// STATE TRACKING
+// DEBUG: DRAW HTF CANDLE BOXES
 // ============================================================================
-var string currentState = "neutral"  // "neutral", "bullish_bos", "bearish_bos", "bullish_retest", "bearish_retest"
-var int bosBarIndex = na
-var float bosLevel = na
+var box currentHtfBox = na
 
-// Track if we've already labeled the current state transition
-var bool bosLabeled = false
-var bool retestLabeled = false
-var bool continuationLabeled = false
+// Draw/update box for current developing HTF candle
+if showHtfBoxes and not na(currentHtfStartBar)
+    // Delete and recreate current box each bar to update it
+    if not na(currentHtfBox)
+        box.delete(currentHtfBox)
 
-// ============================================================================
-// LINE AND LABEL MANAGEMENT
-// ============================================================================
-var line htfHighLine = na
-var line htfLowLine = na
-var label htfHighLabel = na
-var label htfLowLabel = na
+    bool isBullish = htfClose >= htfOpen
+    color boxColor = isBullish ? bullishBoxColor : bearishBoxColor
 
-// Delete and recreate lines when HTF candle changes
-if htfNewCandle and not na(prevHtfHigh) and not na(prevHtfLow)
-    // Delete old lines and labels
-    if not na(htfHighLine)
-        line.delete(htfHighLine)
-    if not na(htfLowLine)
-        line.delete(htfLowLine)
-    if not na(htfHighLabel)
-        label.delete(htfHighLabel)
-    if not na(htfLowLabel)
-        label.delete(htfLowLabel)
+    currentHtfBox := box.new(currentHtfStartBar, htfHigh, bar_index, htfLow,
+         bgcolor=boxColor, border_color=color.new(isBullish ? color.green : color.red, 50), border_width=1)
 
-    // Create new lines for previous HTF candle range
-    if showRangeLines
-        htfHighLine := line.new(bar_index, prevHtfHigh, bar_index + 1, prevHtfHigh,
-             color=highColor, width=lineWidth, extend=extend.right, style=line.style_solid)
-        htfLowLine := line.new(bar_index, prevHtfLow, bar_index + 1, prevHtfLow,
-             color=lowColor, width=lineWidth, extend=extend.right, style=line.style_solid)
+// Draw box for completed HTF candle when it finishes
+if htfNewCandle and showHtfBoxes and not na(completedHtfStartBar) and not na(completedHtfEndBar)
+    bool wasHtfBullish = completedHtfClose >= completedHtfOpen
+    color completedBoxColor = wasHtfBullish ? bullishBoxColor : bearishBoxColor
 
-    // Create labels
-    if showRangeLabels
-        htfHighLabel := label.new(bar_index, prevHtfHigh, htfTimeframe + " High",
-             style=label.style_label_left, color=color.new(highColor, 80), textcolor=highColor, size=size.small)
-        htfLowLabel := label.new(bar_index, prevHtfLow, htfTimeframe + " Low",
-             style=label.style_label_left, color=color.new(lowColor, 80), textcolor=lowColor, size=size.small)
-
-    // Reset state tracking for new HTF candle
-    currentState := "neutral"
-    bosLabeled := false
-    retestLabeled := false
-    continuationLabeled := false
-    bosBarIndex := na
-    bosLevel := na
+    box.new(completedHtfStartBar, completedHtfHigh, completedHtfEndBar, completedHtfLow,
+         bgcolor=completedBoxColor, border_color=color.new(wasHtfBullish ? color.green : color.red, 30), border_width=2)
 
 // ============================================================================
-// BOS DETECTION (on HTF candle close)
+// BOS DETECTION
 // ============================================================================
-// Detect when the current HTF candle closes outside the previous HTF range
-if htfNewCandle and not na(prevPrevHtfHigh) and not na(prevPrevHtfLow)
-    // Check if the just-closed HTF candle broke above previous range
-    // htfClose[1] is the close of the candle that just finished
-    if htfClose[1] > prevPrevHtfHigh and currentState == "neutral"
-        currentState := "bullish_bos"
-        bosBarIndex := bar_index
-        bosLevel := prevPrevHtfHigh
-        bosLabeled := false
-        retestLabeled := false
-        continuationLabeled := false
+// BOS occurs when an HTF candle CLOSES above the previous HTF candle's HIGH
+// or CLOSES below the previous HTF candle's LOW
 
-    // Check if the just-closed HTF candle broke below previous range
-    else if htfClose[1] < prevPrevHtfLow and currentState == "neutral"
-        currentState := "bearish_bos"
-        bosBarIndex := bar_index
-        bosLevel := prevPrevHtfLow
-        bosLabeled := false
-        retestLabeled := false
-        continuationLabeled := false
+var bool bullishBosDetected = false
+var bool bearishBosDetected = false
 
-// ============================================================================
-// BOS LABELS
-// ============================================================================
-if showBosLabels and not bosLabeled
-    if currentState == "bullish_bos" and htfNewCandle
-        label.new(bar_index - 1, high[1], "BOS↑",
-             style=label.style_label_down, color=bosColor, textcolor=color.white, size=size.small)
-        bosLabeled := true
+if htfNewCandle and not na(prevCompletedHtfHigh) and not na(prevCompletedHtfLow) and not na(completedHtfClose)
+    // Check if the just-completed HTF candle closed above previous HTF high
+    if completedHtfClose > prevCompletedHtfHigh
+        bullishBosDetected := true
+        bearishBosDetected := false
 
-    else if currentState == "bearish_bos" and htfNewCandle
-        label.new(bar_index - 1, low[1], "BOS↓",
-             style=label.style_label_up, color=bosColor, textcolor=color.white, size=size.small)
-        bosLabeled := true
+        // Mark BOS on the chart
+        if showDebugLabels
+            label.new(bar_index, completedHtfHigh, "BOS↑\nClose: " + str.tostring(completedHtfClose, "#.##") + "\nPrev High: " + str.tostring(prevCompletedHtfHigh, "#.##"),
+                 style=label.style_label_down, color=bosColor, textcolor=color.white, size=size.small)
+
+    // Check if the just-completed HTF candle closed below previous HTF low
+    else if completedHtfClose < prevCompletedHtfLow
+        bearishBosDetected := true
+        bullishBosDetected := false
+
+        // Mark BOS on the chart
+        if showDebugLabels
+            label.new(bar_index, completedHtfLow, "BOS↓\nClose: " + str.tostring(completedHtfClose, "#.##") + "\nPrev Low: " + str.tostring(prevCompletedHtfLow, "#.##"),
+                 style=label.style_label_up, color=bosColor, textcolor=color.white, size=size.small)
+
+    else
+        bullishBosDetected := false
+        bearishBosDetected := false
 
 // ============================================================================
-// RETEST DETECTION (CTF candle closes back inside the range)
+// DEBUG: Show current values
 // ============================================================================
-// For bullish BOS: price was above range, now CTF closes back below the broken high (inside range)
-// For bearish BOS: price was below range, now CTF closes back above the broken low (inside range)
+var label debugLabel = na
+if showDebugLabels
+    if not na(debugLabel)
+        label.delete(debugLabel)
 
-if currentState == "bullish_bos" and not na(prevHtfHigh) and not na(prevHtfLow)
-    // CTF candle closes back inside the range (below the high that was broken)
-    if close < prevHtfHigh and close >= prevHtfLow and not retestLabeled
-        if showRetestLabels
-            label.new(bar_index, low, "Retest",
-                 style=label.style_label_up, color=retestColor, textcolor=color.white, size=size.small)
-        currentState := "bullish_retest"
-        retestLabeled := true
-        continuationLabeled := false
+    string debugText = "HTF: " + htfTimeframe +
+         "\nCurrent HTF O: " + str.tostring(htfOpen, "#.##") +
+         "\nCurrent HTF H: " + str.tostring(htfHigh, "#.##") +
+         "\nCurrent HTF L: " + str.tostring(htfLow, "#.##") +
+         "\nCurrent HTF C: " + str.tostring(htfClose, "#.##") +
+         "\n---" +
+         "\nPrev HTF High: " + str.tostring(prevCompletedHtfHigh, "#.##") +
+         "\nPrev HTF Low: " + str.tostring(prevCompletedHtfLow, "#.##")
 
-else if currentState == "bearish_bos" and not na(prevHtfHigh) and not na(prevHtfLow)
-    // CTF candle closes back inside the range (above the low that was broken)
-    if close > prevHtfLow and close <= prevHtfHigh and not retestLabeled
-        if showRetestLabels
-            label.new(bar_index, high, "Retest",
-                 style=label.style_label_down, color=retestColor, textcolor=color.white, size=size.small)
-        currentState := "bearish_retest"
-        retestLabeled := true
-        continuationLabeled := false
-
-// ============================================================================
-// CONTINUATION DETECTION (CTF candle closes back outside the range after retest)
-// ============================================================================
-if currentState == "bullish_retest" and not na(prevHtfHigh)
-    // CTF candle closes back above the range (continuation of bullish move)
-    if close > prevHtfHigh and not continuationLabeled
-        if showContinuationLabels
-            label.new(bar_index, high, "Cont↑",
-                 style=label.style_label_down, color=continuationColor, textcolor=color.white, size=size.small)
-        currentState := "bullish_bos"  // Back to BOS state, can retest again
-        continuationLabeled := true
-        retestLabeled := false  // Allow another retest
-
-else if currentState == "bearish_retest" and not na(prevHtfLow)
-    // CTF candle closes back below the range (continuation of bearish move)
-    if close < prevHtfLow and not continuationLabeled
-        if showContinuationLabels
-            label.new(bar_index, low, "Cont↓",
-                 style=label.style_label_up, color=continuationColor, textcolor=color.white, size=size.small)
-        currentState := "bearish_bos"  // Back to BOS state, can retest again
-        continuationLabeled := true
-        retestLabeled := false  // Allow another retest
-
-// ============================================================================
-// DEBUG INFO (optional)
-// ============================================================================
-// Uncomment below to see state information
-// var label debugLabel = na
-// if not na(debugLabel)
-//     label.delete(debugLabel)
-// debugLabel := label.new(bar_index, high * 1.001,
-//      "State: " + currentState + "\nPrevHigh: " + str.tostring(prevHtfHigh) + "\nPrevLow: " + str.tostring(prevHtfLow),
-//      style=label.style_label_down, color=color.gray, textcolor=color.white, size=size.tiny)
+    debugLabel := label.new(bar_index + 5, high, debugText,
+         style=label.style_label_left, color=color.new(color.gray, 50), textcolor=color.white, size=size.small)
