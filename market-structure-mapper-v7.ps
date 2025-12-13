@@ -18,10 +18,10 @@ ctfZonesUseFullSwings = input.bool(false, "CTF Zones: Use Full Swings", group="C
 highColor = input.color(color.new(color.red, 0), "CTF High Color", group="Current Timeframe")
 lowColor = input.color(color.new(color.green, 0), "CTF Low Color", group="Current Timeframe")
 bosColor = input.color(color.new(color.black, 0), "CTF BOS Color", group="Current Timeframe")
-ctfDemandZoneColor = input.color(color.new(color.lime, 85), "CTF Demand Zone Color", group="Current Timeframe")
-ctfDemandZoneBorderColor = input.color(color.new(color.lime, 50), "CTF Demand Zone Border", group="Current Timeframe")
-ctfSupplyZoneColor = input.color(color.new(color.maroon, 85), "CTF Supply Zone Color", group="Current Timeframe")
-ctfSupplyZoneBorderColor = input.color(color.new(color.maroon, 50), "CTF Supply Zone Border", group="Current Timeframe")
+ctfDemandZoneColor = input.color(color.new(color.green, 85), "CTF Demand Zone Color", group="Current Timeframe")
+ctfDemandZoneBorderColor = input.color(color.new(color.green, 50), "CTF Demand Zone Border", group="Current Timeframe")
+ctfSupplyZoneColor = input.color(color.new(color.red, 85), "CTF Supply Zone Color", group="Current Timeframe")
+ctfSupplyZoneBorderColor = input.color(color.new(color.red, 50), "CTF Supply Zone Border", group="Current Timeframe")
 
 // ============================================================================
 // HIGHER TIMEFRAME (HTF) SETTINGS
@@ -37,10 +37,10 @@ showHtfZones = input.bool(true, "Show HTF Zones", group="Higher Timeframe")
 htfHighColor = input.color(color.new(color.orange, 0), "HTF High Color", group="Higher Timeframe")
 htfLowColor = input.color(color.new(color.blue, 0), "HTF Low Color", group="Higher Timeframe")
 htfBosColor = input.color(color.new(color.black, 0), "HTF BOS Color", group="Higher Timeframe")
-demandZoneColor = input.color(color.new(color.green, 85), "HTF Demand Zone Color", group="Higher Timeframe")
-demandZoneBorderColorInput = input.color(color.new(color.green, 50), "HTF Demand Zone Border", group="Higher Timeframe")
-supplyZoneColor = input.color(color.new(color.red, 85), "HTF Supply Zone Color", group="Higher Timeframe")
-supplyZoneBorderColorInput = input.color(color.new(color.red, 50), "HTF Supply Zone Border", group="Higher Timeframe")
+demandZoneColor = input.color(color.new(color.blue, 85), "HTF Demand Zone Color", group="Higher Timeframe")
+demandZoneBorderColorInput = input.color(color.new(color.blue, 50), "HTF Demand Zone Border", group="Higher Timeframe")
+supplyZoneColor = input.color(color.new(color.orange, 85), "HTF Supply Zone Color", group="Higher Timeframe")
+supplyZoneBorderColorInput = input.color(color.new(color.orange, 50), "HTF Supply Zone Border", group="Higher Timeframe")
 
 // ============================================================================
 // TRADING RANGE TIMEFRAME (HTF2) SETTINGS
@@ -53,6 +53,8 @@ showHtf2BosLabels = input.bool(true, "Show HTF2 BOS Labels", group="Trading Rang
 showHtf2Zones = input.bool(true, "Show HTF2 Zones", group="Trading Range TF")
 
 // HTF2 Colors
+htf2HighColor = input.color(color.new(color.purple, 0), "HTF2 High Color", group="Trading Range TF")
+htf2LowColor = input.color(color.new(color.teal, 0), "HTF2 Low Color", group="Trading Range TF")
 htf2DemandZoneColor = input.color(color.new(color.teal, 85), "HTF2 Demand Zone Color", group="Trading Range TF")
 htf2DemandZoneBorderColor = input.color(color.new(color.teal, 50), "HTF2 Demand Zone Border", group="Trading Range TF")
 htf2SupplyZoneColor = input.color(color.new(color.purple, 85), "HTF2 Supply Zone Color", group="Trading Range TF")
@@ -292,6 +294,57 @@ var bool ltfBosFlag = false
 var bool ltfSweptFlag = false
 var bool ltfBosAtExtremeFlag = false
 var bool pullback25Flag = false
+
+// CTF BOS alert flags
+var bool ctfBullishBosFlag = false
+var bool ctfBearishBosFlag = false
+
+// HTF BOS direction-specific flags
+var bool htfBullishBosFlag = false
+var bool htfBearishBosFlag = false
+
+// HTF2 BOS alert flags
+var bool htf2BullishBosFlag = false
+var bool htf2BearishBosFlag = false
+
+// Zone entry alert flags
+var bool ctfDemandEntryFlag = false
+var bool ctfSupplyEntryFlag = false
+var bool htfDemandEntryFlag = false
+var bool htfSupplyEntryFlag = false
+var bool htf2DemandEntryFlag = false
+var bool htf2SupplyEntryFlag = false
+
+// State tracking for "BOS after entering zone" alerts
+var bool inHtfDemandZone = false
+var bool inHtfSupplyZone = false
+var bool inHtf2DemandZone = false
+var bool inHtf2SupplyZone = false
+var int activeHtfDemandZoneIdx = -1   // Index of the HTF demand zone we entered
+var int activeHtfSupplyZoneIdx = -1   // Index of the HTF supply zone we entered
+var int activeHtf2DemandZoneIdx = -1  // Index of the HTF2 demand zone we entered
+var int activeHtf2SupplyZoneIdx = -1  // Index of the HTF2 supply zone we entered
+var int ctfBullishBosCountSinceHtfDemand = 0
+var int ctfBearishBosCountSinceHtfSupply = 0
+var int ctfBullishBosCountSinceHtf2Demand = 0
+var int ctfBearishBosCountSinceHtf2Supply = 0
+var int htfBullishBosCountSinceHtf2Demand = 0
+var int htfBearishBosCountSinceHtf2Supply = 0
+
+// Flags for "BOS after zone entry" alerts
+// CTF BOS after HTF zone entry
+var bool firstCtfBullishBosAfterHtfDemandFlag = false
+var bool firstCtfBearishBosAfterHtfSupplyFlag = false
+var bool secondCtfBullishBosAfterHtfDemandFlag = false
+var bool secondCtfBearishBosAfterHtfSupplyFlag = false
+// CTF BOS after HTF2 zone entry
+var bool firstCtfBullishBosAfterHtf2DemandFlag = false
+var bool firstCtfBearishBosAfterHtf2SupplyFlag = false
+var bool secondCtfBullishBosAfterHtf2DemandFlag = false
+var bool secondCtfBearishBosAfterHtf2SupplyFlag = false
+// HTF BOS after HTF2 zone entry
+var bool firstHtfBullishBosAfterHtf2DemandFlag = false
+var bool firstHtfBearishBosAfterHtf2SupplyFlag = false
 
 // State tracking for alert conditions
 var bool ltfBosBullishSinceLastHTF = false
@@ -795,7 +848,7 @@ addLowHTF(float price, int barIdx, string levelType, color lineColor) =>
 
     true
 
-// HTF2 (Trading Range) versions - always black lines with peak/valley labels
+// HTF2 (Trading Range) versions - uses htf2HighColor/htf2LowColor with peak/valley labels
 addHighHTF2(float price, int barIdx, string levelType) =>
     if htf2MostRecentHighIndex >= 0
         prevHigh = array.get(htf2Highs, htf2MostRecentHighIndex)
@@ -806,7 +859,7 @@ addHighHTF2(float price, int barIdx, string levelType) =>
     line newLine = na
     if showHtf2PeaksValleys
         newLine := line.new(barIdx, price, barIdx + 1, price,
-                           color=color.black,
+                           color=htf2HighColor,
                            width=lineWidth + 2,  // Thickest for HTF2
                            extend=extend.right,
                            style=line.style_solid)
@@ -815,7 +868,7 @@ addHighHTF2(float price, int barIdx, string levelType) =>
     if showHtf2Labels
         label.new(barIdx, price, levelType == "weak" ? "W" : "S",
                   style=label.style_label_down,
-                  color=color.black,
+                  color=htf2HighColor,
                   textcolor=color.white,
                   size=size.small)
 
@@ -834,7 +887,7 @@ addLowHTF2(float price, int barIdx, string levelType) =>
     line newLine = na
     if showHtf2PeaksValleys
         newLine := line.new(barIdx, price, barIdx + 1, price,
-                           color=color.black,
+                           color=htf2LowColor,
                            width=lineWidth + 2,  // Thickest for HTF2
                            extend=extend.right,
                            style=line.style_solid)
@@ -843,7 +896,7 @@ addLowHTF2(float price, int barIdx, string levelType) =>
     if showHtf2Labels
         label.new(barIdx, price, levelType == "weak" ? "W" : "S",
                   style=label.style_label_up,
-                  color=color.black,
+                  color=htf2LowColor,
                   textcolor=color.white,
                   size=size.small)
 
@@ -909,7 +962,11 @@ checkAllBrokenZones() =>
 // CHECK FOR BROKEN AND SWEPT LEVELS
 // ============================================================================
 
+// Returns [bullishBos, bearishBos]
 checkBrokenLevels() =>
+    bool bullishBos = false
+    bool bearishBos = false
+
     // Check highs for sweeps and breaks
     if array.size(highs) > 0
         // Iterate from most recent to oldest
@@ -994,6 +1051,9 @@ checkBrokenLevels() =>
                         line.set_extend(highLevel.levelLine, extend.none)
                         line.set_style(highLevel.levelLine, line.style_dotted)
                         line.set_color(highLevel.levelLine, color.new(bosColor, 30))
+
+                    // Set alert flag for bullish CTF BOS
+                    bullishBos := true
 
                     if showCtfBosLabels
                         centerBar = math.round((highLevel.barIndex + bar_index) / 2)
@@ -1090,6 +1150,9 @@ checkBrokenLevels() =>
                         line.set_style(lowLevel.levelLine, line.style_dotted)
                         line.set_color(lowLevel.levelLine, color.new(bosColor, 30))
 
+                    // Set alert flag for bearish CTF BOS
+                    bearishBos := true
+
                     if showCtfBosLabels
                         centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
                         label.new(centerBar, lowLevel.price, "BOS↓",
@@ -1101,17 +1164,19 @@ checkBrokenLevels() =>
                     if not na(lowLevel.levelLine)
                         line.delete(lowLevel.levelLine)
 
-    true
+    [bullishBos, bearishBos]
 
 // HTF version - checks for broken/swept levels
 // Creates zones for immediate BOS (when most recent level is broken, including after sweep)
 // Uses savedHighIdx/savedLowIdx which are captured BEFORE main BOS logic updates them
-// Returns [bullishLabelsCreated, bearishLabelsCreated, demandZonesCreated, supplyZonesCreated]
+// Returns [bullishLabelsCreated, bearishLabelsCreated, demandZonesCreated, supplyZonesCreated, bullishBos, bearishBos]
 checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowIdx) =>
     int bullishLabels = 0
     int bearishLabels = 0
     int demandCreated = 0
     int supplyCreated = 0
+    bool bullishBos = false
+    bool bearishBos = false
 
     if array.size(htfHighs) > 0
         for i = 0 to array.size(htfHighs) - 1
@@ -1131,6 +1196,9 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowId
                     line.set_extend(highLevel.levelLine, extend.none)
                     line.set_style(highLevel.levelLine, line.style_dotted)
                     line.set_color(highLevel.levelLine, color.new(htfBosColor, 30))
+
+                // Set BOS flag
+                bullishBos := true
 
                 // Create BOS label
                 if showHtfBosLabels
@@ -1181,6 +1249,9 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowId
                     line.set_style(lowLevel.levelLine, line.style_dotted)
                     line.set_color(lowLevel.levelLine, color.new(htfBosColor, 30))
 
+                // Set BOS flag
+                bearishBos := true
+
                 // Create BOS label
                 if showHtfBosLabels
                     centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
@@ -1211,13 +1282,15 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowId
                                 array.push(supplyZones, newZone)
                                 supplyCreated := supplyCreated + 1
 
-    [bullishLabels, bearishLabels, demandCreated, supplyCreated]
+    [bullishLabels, bearishLabels, demandCreated, supplyCreated, bullishBos, bearishBos]
 
 // HTF2 (Trading Range) version - checks for broken/swept levels and creates zones
-// Returns [demandCreated, supplyCreated]
+// Returns [demandCreated, supplyCreated, bullishBos, bearishBos]
 checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, int savedHighIdx, int savedLowIdx) =>
     int demandCreated = 0
     int supplyCreated = 0
+    bool bullishBos = false
+    bool bearishBos = false
 
     if array.size(htf2Highs) > 0
         for i = 0 to array.size(htf2Highs) - 1
@@ -1236,7 +1309,10 @@ checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, int savedHighIdx, int savedL
                     line.set_x2(highLevel.levelLine, bar_index)
                     line.set_extend(highLevel.levelLine, extend.none)
                     line.set_style(highLevel.levelLine, line.style_dotted)
-                    line.set_color(highLevel.levelLine, color.new(color.black, 50))
+                    line.set_color(highLevel.levelLine, color.new(htf2HighColor, 50))
+
+                // Set BOS flag
+                bullishBos := true
 
                 // Create BOS label
                 if showHtf2BosLabels
@@ -1244,7 +1320,7 @@ checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, int savedHighIdx, int savedL
                     label.new(centerBar, highLevel.price, htf2Timeframe + " BOS↑",
                              style=label.style_label_center,
                              color=color.white,
-                             textcolor=color.black,
+                             textcolor=htf2LowColor,
                              size=size.tiny)
 
                 // Create HTF2 demand zone if this is the most recent high
@@ -1282,7 +1358,10 @@ checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, int savedHighIdx, int savedL
                     line.set_x2(lowLevel.levelLine, bar_index)
                     line.set_extend(lowLevel.levelLine, extend.none)
                     line.set_style(lowLevel.levelLine, line.style_dotted)
-                    line.set_color(lowLevel.levelLine, color.new(color.black, 50))
+                    line.set_color(lowLevel.levelLine, color.new(htf2LowColor, 50))
+
+                // Set BOS flag
+                bearishBos := true
 
                 // Create BOS label
                 if showHtf2BosLabels
@@ -1290,7 +1369,7 @@ checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, int savedHighIdx, int savedL
                     label.new(centerBar, lowLevel.price, htf2Timeframe + " BOS↓",
                              style=label.style_label_center,
                              color=color.white,
-                             textcolor=color.black,
+                             textcolor=htf2HighColor,
                              size=size.tiny)
 
                 // Create HTF2 supply zone if this is the most recent low
@@ -1311,7 +1390,7 @@ checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, int savedHighIdx, int savedL
                                 array.push(htf2SupplyZones, newZone)
                                 supplyCreated := supplyCreated + 1
 
-    [demandCreated, supplyCreated]
+    [demandCreated, supplyCreated, bullishBos, bearishBos]
 
 // Determine level type based on BOS direction
 getHighLevelType(string bosDirection) =>
@@ -1376,7 +1455,12 @@ if not initialized and bar_index > 0
 
 if initialized
     // Check broken/swept levels and zones
-    checkBrokenLevels()
+    [ctfBullBos, ctfBearBos] = checkBrokenLevels()
+    // Set CTF BOS alert flags
+    if ctfBullBos
+        ctfBullishBosFlag := true
+    if ctfBearBos
+        ctfBearishBosFlag := true
     checkAllBrokenZones()
 
     // Update nearest unbroken levels (structure boundaries) - CTF
@@ -1733,11 +1817,16 @@ if htfEnabled and htfInitialized and htfNewCandle
 // Check HTF broken/swept levels - ONLY on new HTF candles
 // This now also creates zones for every broken level
 if htfEnabled and htfInitialized and htfNewCandle
-    [bullLabels, bearLabels, demandFromLabels, supplyFromLabels] = checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, htfMostRecentHighIndexForZones, htfMostRecentLowIndexForZones)
+    [bullLabels, bearLabels, demandFromLabels, supplyFromLabels, htfBullBos, htfBearBos] = checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, htfMostRecentHighIndexForZones, htfMostRecentLowIndexForZones)
     htfBullishLabels := htfBullishLabels + bullLabels
     htfBearishLabels := htfBearishLabels + bearLabels
     demandZonesCreated := demandZonesCreated + demandFromLabels
     supplyZonesCreated := supplyZonesCreated + supplyFromLabels
+    // Set HTF BOS alert flags
+    if htfBullBos
+        htfBullishBosFlag := true
+    if htfBearBos
+        htfBearishBosFlag := true
 
 // HTF swing tracking - track actual LTF bars where HTF extremes occur
 // IMPORTANT: This runs AFTER the htfNewCandle logic so the swing values
@@ -1919,7 +2008,12 @@ if htf2Enabled and htf2Initialized and htf2NewCandle
 
 // Check HTF2 broken/swept levels - ONLY on new HTF2 candles
 if htf2Enabled and htf2Initialized and htf2NewCandle
-    checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, htf2MostRecentHighIndex, htf2MostRecentLowIndex)
+    [htf2DemandCreated, htf2SupplyCreated, htf2BullBos, htf2BearBos] = checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, htf2MostRecentHighIndex, htf2MostRecentLowIndex)
+    // Set HTF2 BOS alert flags
+    if htf2BullBos
+        htf2BullishBosFlag := true
+    if htf2BearBos
+        htf2BearishBosFlag := true
 
 // HTF2 swing tracking
 if htf2Enabled and htf2Initialized
@@ -1943,7 +2037,7 @@ if htf2Enabled and htf2Initialized
         if htf2NewHighIdx >= 0 and htf2NewHighIdx != htf2MostRecentHighIndex
             htf2HighLevel = array.get(htf2Highs, htf2NewHighIdx)
             // Use bar_index instead of stored barIndex to avoid "too far" error
-            htf2NearestUnbrokenHighLine := line.new(bar_index, htf2HighLevel.price, bar_index + 1, htf2HighLevel.price, color=color.new(color.black, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
+            htf2NearestUnbrokenHighLine := line.new(bar_index, htf2HighLevel.price, bar_index + 1, htf2HighLevel.price, color=color.new(htf2HighColor, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
     if not na(htf2NearestUnbrokenHighLine)
         line.set_x2(htf2NearestUnbrokenHighLine, bar_index + 1)
 
@@ -1956,7 +2050,7 @@ if htf2Enabled and htf2Initialized
         if htf2NewLowIdx >= 0 and htf2NewLowIdx != htf2MostRecentLowIndex
             htf2LowLevel = array.get(htf2Lows, htf2NewLowIdx)
             // Use bar_index instead of stored barIndex to avoid "too far" error
-            htf2NearestUnbrokenLowLine := line.new(bar_index, htf2LowLevel.price, bar_index + 1, htf2LowLevel.price, color=color.new(color.black, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
+            htf2NearestUnbrokenLowLine := line.new(bar_index, htf2LowLevel.price, bar_index + 1, htf2LowLevel.price, color=color.new(htf2LowColor, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
     if not na(htf2NearestUnbrokenLowLine)
         line.set_x2(htf2NearestUnbrokenLowLine, bar_index + 1)
 
@@ -2547,7 +2641,7 @@ if htf2Enabled and htf2NearestUnbrokenHighIndex >= 0 and htf2NearestUnbrokenHigh
     htf2NearestUnbrokenHighLabel := label.new(bar_index + 35, highLevel.price,
                                                text=labelText,
                                                style=label.style_label_down,
-                                               color=color.new(color.black, 50),
+                                               color=color.new(htf2HighColor, 50),
                                                textcolor=color.white,
                                                size=size.small)
 else
@@ -2568,7 +2662,7 @@ if htf2Enabled and htf2NearestUnbrokenLowIndex >= 0 and htf2NearestUnbrokenLowIn
     htf2NearestUnbrokenLowLabel := label.new(bar_index + 35, lowLevel.price,
                                               text=labelText,
                                               style=label.style_label_up,
-                                              color=color.new(color.black, 50),
+                                              color=color.new(htf2LowColor, 50),
                                               textcolor=color.white,
                                               size=size.small)
 else
@@ -2576,85 +2670,124 @@ else
         label.delete(htf2NearestUnbrokenLowLabel)
         htf2NearestUnbrokenLowLabel := na
 
-// Swept level labels (most recent only)
-if array.size(sweptHighLabels) > 0
-    for i = 0 to array.size(sweptHighLabels) - 1
-        label.delete(array.get(sweptHighLabels, i))
-    array.clear(sweptHighLabels)
+// Swept level labels - clear all
+for lbl in sweptHighLabels
+    label.delete(lbl)
+array.clear(sweptHighLabels)
+for lbl in sweptLowLabels
+    label.delete(lbl)
+array.clear(sweptLowLabels)
+for lbl in htfSweptHighLabels
+    label.delete(lbl)
+array.clear(htfSweptHighLabels)
+for lbl in htfSweptLowLabels
+    label.delete(lbl)
+array.clear(htfSweptLowLabels)
 
-if array.size(sweptLowLabels) > 0
-    for i = 0 to array.size(sweptLowLabels) - 1
-        label.delete(array.get(sweptLowLabels, i))
-    array.clear(sweptLowLabels)
+// ============================================================================
+// ZONE ENTRY DETECTION AND BOS COUNTING FOR ALERTS
+// ============================================================================
 
-if array.size(htfSweptHighLabels) > 0
-    for i = 0 to array.size(htfSweptHighLabels) - 1
-        label.delete(array.get(htfSweptHighLabels, i))
-    array.clear(htfSweptHighLabels)
+// Helper: find index of unbroken zone containing price, or -1 if none
+findZoneContainingPrice(array<Zone> zones) =>
+    int result = -1
+    if array.size(zones) > 0
+        for i = array.size(zones) - 1 to 0
+            zone = array.get(zones, i)
+            if not zone.broken and close >= zone.bottom and close <= zone.top
+                result := i
+                break
+    result
 
-if array.size(htfSweptLowLabels) > 0
-    for i = 0 to array.size(htfSweptLowLabels) - 1
-        label.delete(array.get(htfSweptLowLabels, i))
-    array.clear(htfSweptLowLabels)
+// Check zone entries and set flags (HTF and HTF2 only - CTF zones less useful for alerts)
+int htfDemandIdx = htfEnabled ? findZoneContainingPrice(demandZones) : -1
+int htfSupplyIdx = htfEnabled ? findZoneContainingPrice(supplyZones) : -1
+int htf2DemandIdx = htf2Enabled ? findZoneContainingPrice(htf2DemandZones) : -1
+int htf2SupplyIdx = htf2Enabled ? findZoneContainingPrice(htf2SupplyZones) : -1
 
-// Find and display most recent swept levels
-if array.size(highs) > 1
-    for i = array.size(highs) - 2 to 0
-        highLevel = array.get(highs, i)
-        if highLevel.levelType == "swept"
-            sweptLabel = label.new(bar_index + 5, highLevel.price,
-                                   text=timeframe.period + " Swept High",
-                                   style=label.style_label_left,
-                                   color=color.new(highColor, 50),
-                                   textcolor=color.white,
-                                   size=size.small)
-            array.push(sweptHighLabels, sweptLabel)
-            break
+// Zone entry tracking - HTF demand
+if htfDemandIdx >= 0 and not inHtfDemandZone
+    inHtfDemandZone := true
+    activeHtfDemandZoneIdx := htfDemandIdx
+    ctfBullishBosCountSinceHtfDemand := 0
+    htfDemandEntryFlag := true
 
-if array.size(lows) > 1
-    for i = array.size(lows) - 2 to 0
-        lowLevel = array.get(lows, i)
-        if lowLevel.levelType == "swept"
-            sweptLabel = label.new(bar_index + 5, lowLevel.price,
-                                   text=timeframe.period + " Swept Low",
-                                   style=label.style_label_left,
-                                   color=color.new(lowColor, 50),
-                                   textcolor=color.white,
-                                   size=size.small)
-            array.push(sweptLowLabels, sweptLabel)
-            break
+// Zone entry tracking - HTF supply
+if htfSupplyIdx >= 0 and not inHtfSupplyZone
+    inHtfSupplyZone := true
+    activeHtfSupplyZoneIdx := htfSupplyIdx
+    ctfBearishBosCountSinceHtfSupply := 0
+    htfSupplyEntryFlag := true
 
-if htfEnabled and array.size(htfHighs) > 1
-    for i = array.size(htfHighs) - 2 to 0
-        highLevel = array.get(htfHighs, i)
-        if highLevel.levelType == "swept"
-            sweptLabel = label.new(bar_index + 20, highLevel.price,
-                                   text=htfTimeframe + " Swept High",
-                                   style=label.style_label_left,
-                                   color=color.new(htfHighColor, 50),
-                                   textcolor=color.white,
-                                   size=size.small)
-            array.push(htfSweptHighLabels, sweptLabel)
-            break
+// Zone entry tracking - HTF2 demand
+if htf2DemandIdx >= 0 and not inHtf2DemandZone
+    inHtf2DemandZone := true
+    activeHtf2DemandZoneIdx := htf2DemandIdx
+    ctfBullishBosCountSinceHtf2Demand := 0
+    htfBullishBosCountSinceHtf2Demand := 0
+    htf2DemandEntryFlag := true
 
-if htfEnabled and array.size(htfLows) > 1
-    for i = array.size(htfLows) - 2 to 0
-        lowLevel = array.get(htfLows, i)
-        if lowLevel.levelType == "swept"
-            sweptLabel = label.new(bar_index + 20, lowLevel.price,
-                                   text=htfTimeframe + " Swept Low",
-                                   style=label.style_label_left,
-                                   color=color.new(htfLowColor, 50),
-                                   textcolor=color.white,
-                                   size=size.small)
-            array.push(htfSweptLowLabels, sweptLabel)
-            break
+// Zone entry tracking - HTF2 supply
+if htf2SupplyIdx >= 0 and not inHtf2SupplyZone
+    inHtf2SupplyZone := true
+    activeHtf2SupplyZoneIdx := htf2SupplyIdx
+    ctfBearishBosCountSinceHtf2Supply := 0
+    htfBearishBosCountSinceHtf2Supply := 0
+    htf2SupplyEntryFlag := true
+
+// Check if active zones got broken - reset tracking
+if inHtfDemandZone and activeHtfDemandZoneIdx >= 0 and activeHtfDemandZoneIdx < array.size(demandZones)
+    if array.get(demandZones, activeHtfDemandZoneIdx).broken
+        inHtfDemandZone := false
+        activeHtfDemandZoneIdx := -1
+        ctfBullishBosCountSinceHtfDemand := 0
+if inHtfSupplyZone and activeHtfSupplyZoneIdx >= 0 and activeHtfSupplyZoneIdx < array.size(supplyZones)
+    if array.get(supplyZones, activeHtfSupplyZoneIdx).broken
+        inHtfSupplyZone := false
+        activeHtfSupplyZoneIdx := -1
+        ctfBearishBosCountSinceHtfSupply := 0
+if inHtf2DemandZone and activeHtf2DemandZoneIdx >= 0 and activeHtf2DemandZoneIdx < array.size(htf2DemandZones)
+    if array.get(htf2DemandZones, activeHtf2DemandZoneIdx).broken
+        inHtf2DemandZone := false
+        activeHtf2DemandZoneIdx := -1
+        ctfBullishBosCountSinceHtf2Demand := 0
+        htfBullishBosCountSinceHtf2Demand := 0
+if inHtf2SupplyZone and activeHtf2SupplyZoneIdx >= 0 and activeHtf2SupplyZoneIdx < array.size(htf2SupplyZones)
+    if array.get(htf2SupplyZones, activeHtf2SupplyZoneIdx).broken
+        inHtf2SupplyZone := false
+        activeHtf2SupplyZoneIdx := -1
+        ctfBearishBosCountSinceHtf2Supply := 0
+        htfBearishBosCountSinceHtf2Supply := 0
+
+// Count BOS events after zone entry
+if inHtfDemandZone and ctfBullishBosFlag
+    ctfBullishBosCountSinceHtfDemand += 1
+    firstCtfBullishBosAfterHtfDemandFlag := ctfBullishBosCountSinceHtfDemand == 1
+    secondCtfBullishBosAfterHtfDemandFlag := ctfBullishBosCountSinceHtfDemand == 2
+if inHtfSupplyZone and ctfBearishBosFlag
+    ctfBearishBosCountSinceHtfSupply += 1
+    firstCtfBearishBosAfterHtfSupplyFlag := ctfBearishBosCountSinceHtfSupply == 1
+    secondCtfBearishBosAfterHtfSupplyFlag := ctfBearishBosCountSinceHtfSupply == 2
+if inHtf2DemandZone and ctfBullishBosFlag
+    ctfBullishBosCountSinceHtf2Demand += 1
+    firstCtfBullishBosAfterHtf2DemandFlag := ctfBullishBosCountSinceHtf2Demand == 1
+    secondCtfBullishBosAfterHtf2DemandFlag := ctfBullishBosCountSinceHtf2Demand == 2
+if inHtf2SupplyZone and ctfBearishBosFlag
+    ctfBearishBosCountSinceHtf2Supply += 1
+    firstCtfBearishBosAfterHtf2SupplyFlag := ctfBearishBosCountSinceHtf2Supply == 1
+    secondCtfBearishBosAfterHtf2SupplyFlag := ctfBearishBosCountSinceHtf2Supply == 2
+if inHtf2DemandZone and htfBullishBosFlag
+    htfBullishBosCountSinceHtf2Demand += 1
+    firstHtfBullishBosAfterHtf2DemandFlag := htfBullishBosCountSinceHtf2Demand == 1
+if inHtf2SupplyZone and htfBearishBosFlag
+    htfBearishBosCountSinceHtf2Supply += 1
+    firstHtfBearishBosAfterHtf2SupplyFlag := htfBearishBosCountSinceHtf2Supply == 1
 
 // ============================================================================
 // ALERT CONDITIONS
 // ============================================================================
 
-// HTF Alert Conditions
+// HTF Alert Conditions (legacy)
 alertcondition(htfBosFlag, title="HTF BOS", message="HTF Break of Structure occurred on {{ticker}}")
 alertcondition(htfBosLtfBosFlag, title="HTF BOS + LTF BOS Same Direction", message="HTF and LTF both broke structure in same direction on {{ticker}}")
 alertcondition(htfSweptFlag, title="HTF Swept", message="HTF level swept on {{ticker}}")
@@ -2664,10 +2797,58 @@ alertcondition(htfSweptLtfBosFlag, title="HTF Swept + LTF BOS Reversal", message
 alertcondition(pullback50Flag, title="50% Pullback", message="Price touched 50% level on {{ticker}}")
 alertcondition(pullback25Flag, title="25% Pullback (Low 50% Mark)", message="Price touched 25% level (low 50% mark) on {{ticker}}")
 
-// LTF Alert Conditions
+// LTF Alert Conditions (legacy)
 alertcondition(ltfBosFlag, title="LTF BOS", message="LTF Break of Structure occurred on {{ticker}}")
 alertcondition(ltfSweptFlag, title="LTF Swept", message="LTF level swept on {{ticker}}")
 alertcondition(ltfBosAtExtremeFlag, title="LTF BOS at HTF Extreme", message="LTF BOS occurred at HTF extreme (bullish below 50% or bearish above 50%) on {{ticker}}")
+
+// ============================================================================
+// NEW ALERT CONDITIONS - BOS Events by Timeframe
+// ============================================================================
+
+// CTF BOS Alerts
+alertcondition(ctfBullishBosFlag, title="CTF Bullish BOS", message="CTF Bullish Break of Structure occurred on {{ticker}}")
+alertcondition(ctfBearishBosFlag, title="CTF Bearish BOS", message="CTF Bearish Break of Structure occurred on {{ticker}}")
+
+// HTF BOS Direction-Specific Alerts
+alertcondition(htfBullishBosFlag, title="HTF Bullish BOS", message="HTF Bullish Break of Structure occurred on {{ticker}}")
+alertcondition(htfBearishBosFlag, title="HTF Bearish BOS", message="HTF Bearish Break of Structure occurred on {{ticker}}")
+
+// HTF2 BOS Alerts
+alertcondition(htf2BullishBosFlag, title="HTF2 Bullish BOS", message="HTF2 Bullish Break of Structure occurred on {{ticker}}")
+alertcondition(htf2BearishBosFlag, title="HTF2 Bearish BOS", message="HTF2 Bearish Break of Structure occurred on {{ticker}}")
+
+// ============================================================================
+// NEW ALERT CONDITIONS - Zone Entry (HTF and HTF2 only)
+// ============================================================================
+
+// HTF Zone Entry Alerts
+alertcondition(htfDemandEntryFlag, title="HTF Demand Zone Entry", message="Price entered HTF Demand Zone on {{ticker}}")
+alertcondition(htfSupplyEntryFlag, title="HTF Supply Zone Entry", message="Price entered HTF Supply Zone on {{ticker}}")
+
+// HTF2 Zone Entry Alerts
+alertcondition(htf2DemandEntryFlag, title="HTF2 Demand Zone Entry", message="Price entered HTF2 Demand Zone on {{ticker}}")
+alertcondition(htf2SupplyEntryFlag, title="HTF2 Supply Zone Entry", message="Price entered HTF2 Supply Zone on {{ticker}}")
+
+// ============================================================================
+// NEW ALERT CONDITIONS - BOS After Zone Entry
+// ============================================================================
+
+// CTF BOS after entering HTF zone (bullish for demand, bearish for supply)
+alertcondition(firstCtfBullishBosAfterHtfDemandFlag, title="1st CTF Bull BOS in HTF Demand", message="First CTF Bullish BOS after entering HTF Demand Zone on {{ticker}}")
+alertcondition(secondCtfBullishBosAfterHtfDemandFlag, title="2nd CTF Bull BOS in HTF Demand", message="Second CTF Bullish BOS after entering HTF Demand Zone on {{ticker}}")
+alertcondition(firstCtfBearishBosAfterHtfSupplyFlag, title="1st CTF Bear BOS in HTF Supply", message="First CTF Bearish BOS after entering HTF Supply Zone on {{ticker}}")
+alertcondition(secondCtfBearishBosAfterHtfSupplyFlag, title="2nd CTF Bear BOS in HTF Supply", message="Second CTF Bearish BOS after entering HTF Supply Zone on {{ticker}}")
+
+// CTF BOS after entering HTF2 zone
+alertcondition(firstCtfBullishBosAfterHtf2DemandFlag, title="1st CTF Bull BOS in HTF2 Demand", message="First CTF Bullish BOS after entering HTF2 Demand Zone on {{ticker}}")
+alertcondition(secondCtfBullishBosAfterHtf2DemandFlag, title="2nd CTF Bull BOS in HTF2 Demand", message="Second CTF Bullish BOS after entering HTF2 Demand Zone on {{ticker}}")
+alertcondition(firstCtfBearishBosAfterHtf2SupplyFlag, title="1st CTF Bear BOS in HTF2 Supply", message="First CTF Bearish BOS after entering HTF2 Supply Zone on {{ticker}}")
+alertcondition(secondCtfBearishBosAfterHtf2SupplyFlag, title="2nd CTF Bear BOS in HTF2 Supply", message="Second CTF Bearish BOS after entering HTF2 Supply Zone on {{ticker}}")
+
+// HTF BOS after entering HTF2 zone
+alertcondition(firstHtfBullishBosAfterHtf2DemandFlag, title="1st HTF Bull BOS in HTF2 Demand", message="First HTF Bullish BOS after entering HTF2 Demand Zone on {{ticker}}")
+alertcondition(firstHtfBearishBosAfterHtf2SupplyFlag, title="1st HTF Bear BOS in HTF2 Supply", message="First HTF Bearish BOS after entering HTF2 Supply Zone on {{ticker}}")
 
 // Reset all alert flags at end of bar
 htfBosFlag := false
@@ -2679,6 +2860,35 @@ pullback25Flag := false
 ltfBosFlag := false
 ltfSweptFlag := false
 ltfBosAtExtremeFlag := false
+
+// Reset new BOS alert flags
+ctfBullishBosFlag := false
+ctfBearishBosFlag := false
+htfBullishBosFlag := false
+htfBearishBosFlag := false
+htf2BullishBosFlag := false
+htf2BearishBosFlag := false
+
+// Reset zone entry alert flags (HTF and HTF2 only)
+htfDemandEntryFlag := false
+htfSupplyEntryFlag := false
+htf2DemandEntryFlag := false
+htf2SupplyEntryFlag := false
+
+// Reset BOS after zone entry alert flags
+// CTF BOS after HTF zone entry
+firstCtfBullishBosAfterHtfDemandFlag := false
+firstCtfBearishBosAfterHtfSupplyFlag := false
+secondCtfBullishBosAfterHtfDemandFlag := false
+secondCtfBearishBosAfterHtfSupplyFlag := false
+// CTF BOS after HTF2 zone entry
+firstCtfBullishBosAfterHtf2DemandFlag := false
+firstCtfBearishBosAfterHtf2SupplyFlag := false
+secondCtfBullishBosAfterHtf2DemandFlag := false
+secondCtfBearishBosAfterHtf2SupplyFlag := false
+// HTF BOS after HTF2 zone entry
+firstHtfBullishBosAfterHtf2DemandFlag := false
+firstHtfBearishBosAfterHtf2SupplyFlag := false
 
 // ============================================================================
 // ZONE RENDERING - Only on last bar for performance
