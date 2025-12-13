@@ -21,23 +21,34 @@ bosColor = input.color(color.new(color.blue, 0), "BOS Color", group="Colors")
 // ============================================================================
 // HTF DATA - Using confirmed candle data
 // ============================================================================
-// Get the CURRENT HTF candle's developing values
+// Get the CURRENT HTF candle's developing values (candle N)
 htfOpen = request.security(syminfo.tickerid, htfTimeframe, open, lookahead=barmerge.lookahead_on)
 htfHigh = request.security(syminfo.tickerid, htfTimeframe, high, lookahead=barmerge.lookahead_on)
 htfLow = request.security(syminfo.tickerid, htfTimeframe, low, lookahead=barmerge.lookahead_on)
 htfClose = request.security(syminfo.tickerid, htfTimeframe, close, lookahead=barmerge.lookahead_on)
 htfTime = request.security(syminfo.tickerid, htfTimeframe, time, lookahead=barmerge.lookahead_on)
 
+// Get PREVIOUS HTF candle's values (candle N-1) - the one that just completed
+// The [1] inside security refers to HTF bars, not CTF bars
+htfOpen_1 = request.security(syminfo.tickerid, htfTimeframe, open[1], lookahead=barmerge.lookahead_on)
+htfHigh_1 = request.security(syminfo.tickerid, htfTimeframe, high[1], lookahead=barmerge.lookahead_on)
+htfLow_1 = request.security(syminfo.tickerid, htfTimeframe, low[1], lookahead=barmerge.lookahead_on)
+htfClose_1 = request.security(syminfo.tickerid, htfTimeframe, close[1], lookahead=barmerge.lookahead_on)
+
+// Get the HTF candle BEFORE the previous one (candle N-2) - for BOS comparison
+htfHigh_2 = request.security(syminfo.tickerid, htfTimeframe, high[2], lookahead=barmerge.lookahead_on)
+htfLow_2 = request.security(syminfo.tickerid, htfTimeframe, low[2], lookahead=barmerge.lookahead_on)
+
 // Detect when a new HTF candle starts
 bool htfNewCandle = ta.change(htfTime) != 0
 
 // ============================================================================
-// HTF CANDLE TRACKING
+// HTF CANDLE TRACKING (for drawing boxes)
 // ============================================================================
 // Track the current HTF candle's bar range on the CTF chart
 var int currentHtfStartBar = na
 
-// Store completed HTF candle data
+// Store completed HTF candle data (for drawing the completed box)
 var float completedHtfOpen = na
 var float completedHtfHigh = na
 var float completedHtfLow = na
@@ -45,21 +56,13 @@ var float completedHtfClose = na
 var int completedHtfStartBar = na
 var int completedHtfEndBar = na
 
-// Store the previous completed HTF candle (for BOS comparison)
-var float prevCompletedHtfHigh = na
-var float prevCompletedHtfLow = na
-
-// When new HTF candle starts, save the completed one
+// When new HTF candle starts, save the completed one for box drawing
 if htfNewCandle
-    // Save previous completed candle's high/low for BOS comparison
-    prevCompletedHtfHigh := completedHtfHigh
-    prevCompletedHtfLow := completedHtfLow
-
-    // The candle that just completed
-    completedHtfOpen := htfOpen[1]
-    completedHtfHigh := htfHigh[1]
-    completedHtfLow := htfLow[1]
-    completedHtfClose := htfClose[1]
+    // The candle that just completed (use the security [1] values)
+    completedHtfOpen := htfOpen_1
+    completedHtfHigh := htfHigh_1
+    completedHtfLow := htfLow_1
+    completedHtfClose := htfClose_1
     completedHtfStartBar := currentHtfStartBar
     completedHtfEndBar := bar_index - 1
 
@@ -96,29 +99,37 @@ if htfNewCandle and showHtfBoxes and not na(completedHtfStartBar) and not na(com
 // ============================================================================
 // BOS occurs when an HTF candle CLOSES above the previous HTF candle's HIGH
 // or CLOSES below the previous HTF candle's LOW
+//
+// When htfNewCandle fires:
+//   - htfClose_1 = close of candle that JUST completed (N-1)
+//   - htfHigh_2 = high of the candle BEFORE that (N-2)
+//   - htfLow_2 = low of the candle BEFORE that (N-2)
+//
+// BOS↑: htfClose_1 > htfHigh_2 (completed candle closed above prior candle's high)
+// BOS↓: htfClose_1 < htfLow_2 (completed candle closed below prior candle's low)
 
 var bool bullishBosDetected = false
 var bool bearishBosDetected = false
 
-if htfNewCandle and not na(prevCompletedHtfHigh) and not na(prevCompletedHtfLow) and not na(completedHtfClose)
-    // Check if the just-completed HTF candle closed above previous HTF high
-    if completedHtfClose > prevCompletedHtfHigh
+if htfNewCandle and not na(htfClose_1) and not na(htfHigh_2) and not na(htfLow_2)
+    // Check if the just-completed HTF candle closed above the prior HTF candle's high
+    if htfClose_1 > htfHigh_2
         bullishBosDetected := true
         bearishBosDetected := false
 
-        // Mark BOS on the chart
+        // Mark BOS on the chart at the start of the new candle
         if showDebugLabels
-            label.new(bar_index, completedHtfHigh, "BOS↑\nClose: " + str.tostring(completedHtfClose, "#.##") + "\nPrev High: " + str.tostring(prevCompletedHtfHigh, "#.##"),
+            label.new(bar_index, htfHigh_1, "BOS↑\nClose(N-1): " + str.tostring(htfClose_1, "#.##") + "\nHigh(N-2): " + str.tostring(htfHigh_2, "#.##"),
                  style=label.style_label_down, color=bosColor, textcolor=color.white, size=size.small)
 
-    // Check if the just-completed HTF candle closed below previous HTF low
-    else if completedHtfClose < prevCompletedHtfLow
+    // Check if the just-completed HTF candle closed below the prior HTF candle's low
+    else if htfClose_1 < htfLow_2
         bearishBosDetected := true
         bullishBosDetected := false
 
-        // Mark BOS on the chart
+        // Mark BOS on the chart at the start of the new candle
         if showDebugLabels
-            label.new(bar_index, completedHtfLow, "BOS↓\nClose: " + str.tostring(completedHtfClose, "#.##") + "\nPrev Low: " + str.tostring(prevCompletedHtfLow, "#.##"),
+            label.new(bar_index, htfLow_1, "BOS↓\nClose(N-1): " + str.tostring(htfClose_1, "#.##") + "\nLow(N-2): " + str.tostring(htfLow_2, "#.##"),
                  style=label.style_label_up, color=bosColor, textcolor=color.white, size=size.small)
 
     else
@@ -134,13 +145,21 @@ if showDebugLabels
         label.delete(debugLabel)
 
     string debugText = "HTF: " + htfTimeframe +
-         "\nCurrent HTF O: " + str.tostring(htfOpen, "#.##") +
-         "\nCurrent HTF H: " + str.tostring(htfHigh, "#.##") +
-         "\nCurrent HTF L: " + str.tostring(htfLow, "#.##") +
-         "\nCurrent HTF C: " + str.tostring(htfClose, "#.##") +
-         "\n---" +
-         "\nPrev HTF High: " + str.tostring(prevCompletedHtfHigh, "#.##") +
-         "\nPrev HTF Low: " + str.tostring(prevCompletedHtfLow, "#.##")
+         "\n--- Current (N) ---" +
+         "\nO: " + str.tostring(htfOpen, "#.##") +
+         " H: " + str.tostring(htfHigh, "#.##") +
+         "\nL: " + str.tostring(htfLow, "#.##") +
+         " C: " + str.tostring(htfClose, "#.##") +
+         "\n--- Previous (N-1) ---" +
+         "\nH: " + str.tostring(htfHigh_1, "#.##") +
+         " L: " + str.tostring(htfLow_1, "#.##") +
+         " C: " + str.tostring(htfClose_1, "#.##") +
+         "\n--- Prior (N-2) ---" +
+         "\nH: " + str.tostring(htfHigh_2, "#.##") +
+         " L: " + str.tostring(htfLow_2, "#.##") +
+         "\n--- BOS Check ---" +
+         "\nClose(N-1) > High(N-2)? " + str.tostring(htfClose_1 > htfHigh_2) +
+         "\nClose(N-1) < Low(N-2)? " + str.tostring(htfClose_1 < htfLow_2)
 
     debugLabel := label.new(bar_index + 5, high, debugText,
          style=label.style_label_left, color=color.new(color.gray, 50), textcolor=color.white, size=size.small)
