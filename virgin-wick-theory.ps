@@ -1,0 +1,97 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Virgin Wick Theory [SB]", shorttitle = "VWT [SB]", overlay=true, max_lines_count=500)
+
+htfTF = input.timeframe("60", "htf")
+showHighs = input.bool(true, "show bullish virgin levels")
+showLows = input.bool(true, "show bearish virgin levels ")
+resColor = input.color(color.rgb(0, 255, 55), "bullish virgin level")
+supColor = input.color(color.rgb(255, 0, 0), "bearish virgin level")
+lineWidth = input.int(1, "width")
+maxCandles = 50000
+
+htfMs = timeframe.in_seconds(htfTF) * 1000
+
+[H,L,O,C,T] = request.security(syminfo.tickerid, htfTF, [high,low,open,close,time], lookahead=barmerge.lookahead_off)
+newHTF = ta.change(T)
+
+var float[] wickH = array.new_float()
+var float[] wickL = array.new_float()
+
+// Track active lines for alerts (level, expiry time)
+var float[] activeBullishLevels = array.new_float()
+var int[] activeBullishExpiry = array.new_int()
+var float[] activeBearishLevels = array.new_float()
+var int[] activeBearishExpiry = array.new_int()
+
+if newHTF
+    if H[1] > math.max(O[1], C[1])
+        array.push(wickH, H[1])
+    if L[1] < math.min(O[1], C[1])
+        array.push(wickL, L[1])
+
+while array.size(wickH) > maxCandles
+    array.shift(wickH)
+while array.size(wickL) > maxCandles
+    array.shift(wickL)
+
+if showHighs and array.size(wickH) > 0
+    for i = array.size(wickH)-1 to 0
+        if i < array.size(wickH)
+            w = array.get(wickH, i)
+            if C > w
+                tStart = T + htfMs
+                tEnd = tStart + htfMs
+                line.new(tStart, w, tEnd, w, xloc=xloc.bar_time, color=resColor, width=lineWidth)
+                array.push(activeBullishLevels, w)
+                array.push(activeBullishExpiry, tEnd)
+                array.remove(wickH, i)
+            else if H >= w and C <= w
+                array.remove(wickH, i)
+
+if showLows and array.size(wickL) > 0
+    for i = array.size(wickL)-1 to 0
+        if i < array.size(wickL)
+            w = array.get(wickL, i)
+            if C < w
+                tStart = T + htfMs
+                tEnd = tStart + htfMs
+                line.new(tStart, w, tEnd, w, xloc=xloc.bar_time, color=supColor, width=lineWidth)
+                array.push(activeBearishLevels, w)
+                array.push(activeBearishExpiry, tEnd)
+                array.remove(wickL, i)
+            else if L <= w and C >= w
+                array.remove(wickL, i)
+
+// Check active bullish levels for close through (and remove expired)
+for i = array.size(activeBullishLevels)-1 to 0
+    if i < array.size(activeBullishLevels)
+        lvl = array.get(activeBullishLevels, i)
+        expiry = array.get(activeBullishExpiry, i)
+        if time > expiry
+            // Line has expired, remove from tracking
+            array.remove(activeBullishLevels, i)
+            array.remove(activeBullishExpiry, i)
+        else if time >= expiry - htfMs and close > lvl
+            // Bar closed above bullish level during active period
+            alert("Close above bullish virgin level: " + str.tostring(lvl), alert.freq_once_per_bar_close)
+            array.remove(activeBullishLevels, i)
+            array.remove(activeBullishExpiry, i)
+
+// Check active bearish levels for close through (and remove expired)
+for i = array.size(activeBearishLevels)-1 to 0
+    if i < array.size(activeBearishLevels)
+        lvl = array.get(activeBearishLevels, i)
+        expiry = array.get(activeBearishExpiry, i)
+        if time > expiry
+            // Line has expired, remove from tracking
+            array.remove(activeBearishLevels, i)
+            array.remove(activeBearishExpiry, i)
+        else if time >= expiry - htfMs and close < lvl
+            // Bar closed below bearish level during active period
+            alert("Close below bearish virgin level: " + str.tostring(lvl), alert.freq_once_per_bar_close)
+            array.remove(activeBearishLevels, i)
+            array.remove(activeBearishExpiry, i)
+
