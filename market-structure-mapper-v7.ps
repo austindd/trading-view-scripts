@@ -67,7 +67,7 @@ showBrokenCtfZones = input.bool(false, "Show Broken CTF Zones", group="Zone Sett
 showBrokenHtfZones = input.bool(false, "Show Broken HTF Zones", group="Zone Settings")
 showBrokenHtf2Zones = input.bool(false, "Show Broken HTF2 Zones", group="Zone Settings")
 extendBrokenZones = input.bool(false, "Extend Broken Zones to Current Bar", group="Zone Settings")
-minZoneHeightAtr = input.float(0.5, "Min Zone Height (ATR multiplier)", minval=0.1, maxval=5.0, step=0.1, group="Zone Settings")
+minZoneHeightAtr = input.float(0.01, "Min Zone Height (ATR multiplier)", minval=0.01, maxval=5.0, step=0.01, group="Zone Settings")
 maxZonesPerSide = input.int(20, "Max Zones Per Side", minval=10, maxval=250, group="Zone Settings")
 zoneBreakOnWick = input.bool(false, "Break Zones on Wick (not just close)", group="Zone Settings")
 zoneBreakOnFirstTouch = input.bool(false, "Break Zones on First Touch", group="Zone Settings")

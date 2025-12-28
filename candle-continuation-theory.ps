@@ -10,8 +10,9 @@ indicator("Candle Continuation Theory [SB]", "CCT [SB]", overlay=true, max_lines
 htfTimeframe = input.timeframe("60", "HTF Timeframe", group="Settings")
 
 // Debug
-showHtfBoxes = input.bool(true, "Show HTF Candle Boxes (Debug)", group="Debug")
-showDebugLabels = input.bool(true, "Show Debug Labels", group="Debug")
+showHtfBoxes = input.bool(true, "Show HTF Candle Boxes", group="Preferences")
+showBOSLabels = input.bool(true, "Show BOS Labels", group="Preferences")
+showDebugLabels = input.bool(false "Show Debug Label", group="Debug")
 
 // Colors
 bullishBoxColor = input.color(color.new(color.green, 80), "Bullish HTF Box", group="Colors")
@@ -143,7 +144,7 @@ if htfNewCandle and not na(htfClose_1) and not na(htfHigh_2) and not na(htfLow_2
         bearishBosDetected := false
 
         // Draw BOS line across the broken HTF candle (N-2) at its high
-        if showDebugLabels and not na(priorHtfStartBar) and not na(priorHtfEndBar)
+        if showBOSLabels and not na(priorHtfStartBar) and not na(priorHtfEndBar)
             // Line spans the entire HTF candle whose high was broken
             line.new(priorHtfStartBar, htfHigh_2, priorHtfEndBar, htfHigh_2,
                  color=bosColor, width=2, style=line.style_solid)
@@ -158,7 +159,7 @@ if htfNewCandle and not na(htfClose_1) and not na(htfHigh_2) and not na(htfLow_2
         bullishBosDetected := false
 
         // Draw BOS line across the broken HTF candle (N-2) at its low
-        if showDebugLabels and not na(priorHtfStartBar) and not na(priorHtfEndBar)
+        if showBOSLabels and not na(priorHtfStartBar) and not na(priorHtfEndBar)
             // Line spans the entire HTF candle whose low was broken
             line.new(priorHtfStartBar, htfLow_2, priorHtfEndBar, htfLow_2,
                  color=bosColor, width=2, style=line.style_solid)
