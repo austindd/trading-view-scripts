@@ -7,9 +7,9 @@ indicator("Virgin Wick Theory [SB]", shorttitle = "VWT [SB]", overlay=true, max_
 htfTF = input.timeframe("60", "htf")
 showHighs = input.bool(true, "show bullish virgin levels")
 showLows = input.bool(true, "show bearish virgin levels ")
-resColor = input.color(color.rgb(0, 255, 55), "bullish virgin level")
-supColor = input.color(color.rgb(255, 0, 0), "bearish virgin level")
-lineWidth = input.int(1, "width")
+resColor = input.color(color.rgb(7, 188, 212), "bullish virgin level")
+supColor = input.color(color.rgb(171, 71, 189), "bearish virgin level")
+lineWidth = input.int(2, "width")
 maxCandles = 50000
 
 htfMs = timeframe.in_seconds(htfTF) * 1000
@@ -66,8 +66,8 @@ if showLows and array.size(wickL) > 0
                 array.remove(wickL, i)
 
 // Check active bullish levels for close through (and remove expired)
-for i = array.size(activeBullishLevels)-1 to 0
-    if i < array.size(activeBullishLevels)
+if array.size(activeBullishLevels) > 0
+    for i = array.size(activeBullishLevels)-1 to 0
         lvl = array.get(activeBullishLevels, i)
         expiry = array.get(activeBullishExpiry, i)
         if time > expiry
@@ -81,8 +81,8 @@ for i = array.size(activeBullishLevels)-1 to 0
             array.remove(activeBullishExpiry, i)
 
 // Check active bearish levels for close through (and remove expired)
-for i = array.size(activeBearishLevels)-1 to 0
-    if i < array.size(activeBearishLevels)
+if array.size(activeBearishLevels) > 0
+    for i = array.size(activeBearishLevels)-1 to 0
         lvl = array.get(activeBearishLevels, i)
         expiry = array.get(activeBearishExpiry, i)
         if time > expiry

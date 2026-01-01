@@ -1,0 +1,206 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("HTF Engulfing Sweep [SB]", "HES [SB]", overlay=true, max_boxes_count=200, max_labels_count=500, max_lines_count=500)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+htfTimeframe = input.timeframe("60", "HTF Timeframe", group="Settings")
+
+// Display options
+showHtfBoxes = input.bool(true, "Show HTF Candle Boxes", group="Preferences")
+showSignals = input.bool(true, "Show Signal Markers", group="Preferences")
+
+// Colors
+bullishBoxColor = input.color(color.new(color.green, 80), "Bullish HTF Box", group="Colors")
+bearishBoxColor = input.color(color.new(color.red, 80), "Bearish HTF Box", group="Colors")
+bullishSignalColor = input.color(color.green, "Bullish Signal", group="Colors")
+bearishSignalColor = input.color(color.red, "Bearish Signal", group="Colors")
+highRayColor = input.color(color.red, "High Ray", group="Colors")
+lowRayColor = input.color(color.green, "Low Ray", group="Colors")
+openMarkerColor = input.color(color.orange, "Open Marker", group="Colors")
+
+// ============================================================================
+// HTF DATA - Using confirmed candle data
+// ============================================================================
+// Get the CURRENT HTF candle's developing values (candle N)
+htfOpen = request.security(syminfo.tickerid, htfTimeframe, open, lookahead=barmerge.lookahead_on)
+htfHigh = request.security(syminfo.tickerid, htfTimeframe, high, lookahead=barmerge.lookahead_on)
+htfLow = request.security(syminfo.tickerid, htfTimeframe, low, lookahead=barmerge.lookahead_on)
+htfClose = request.security(syminfo.tickerid, htfTimeframe, close, lookahead=barmerge.lookahead_on)
+htfTime = request.security(syminfo.tickerid, htfTimeframe, time, lookahead=barmerge.lookahead_on)
+
+// Get PREVIOUS HTF candle's values (candle N-1) - the one that just completed
+htfOpen_1 = request.security(syminfo.tickerid, htfTimeframe, open[1], lookahead=barmerge.lookahead_on)
+htfHigh_1 = request.security(syminfo.tickerid, htfTimeframe, high[1], lookahead=barmerge.lookahead_on)
+htfLow_1 = request.security(syminfo.tickerid, htfTimeframe, low[1], lookahead=barmerge.lookahead_on)
+htfClose_1 = request.security(syminfo.tickerid, htfTimeframe, close[1], lookahead=barmerge.lookahead_on)
+
+// Get the HTF candle BEFORE the previous one (candle N-2)
+htfOpen_2 = request.security(syminfo.tickerid, htfTimeframe, open[2], lookahead=barmerge.lookahead_on)
+htfHigh_2 = request.security(syminfo.tickerid, htfTimeframe, high[2], lookahead=barmerge.lookahead_on)
+htfLow_2 = request.security(syminfo.tickerid, htfTimeframe, low[2], lookahead=barmerge.lookahead_on)
+htfClose_2 = request.security(syminfo.tickerid, htfTimeframe, close[2], lookahead=barmerge.lookahead_on)
+
+// Detect when a new HTF candle starts
+bool htfNewCandle = ta.change(htfTime) != 0
+
+// ============================================================================
+// HTF CANDLE TRACKING (for drawing boxes)
+// ============================================================================
+var int currentHtfStartBar = na
+var int htfCandleCount = 0
+
+// Store completed HTF candle data (N-1) for drawing the completed box
+var float completedHtfOpen = na
+var float completedHtfHigh = na
+var float completedHtfLow = na
+var float completedHtfClose = na
+var int completedHtfStartBar = na
+var int completedHtfEndBar = na
+
+// Arrays to track rays and when they were created
+var array<line> rayLines = array.new_line()
+var array<int> rayBirthCandle = array.new_int()
+
+// When new HTF candle starts, save the completed one for box drawing
+if htfNewCandle
+    htfCandleCount += 1
+
+    // Cut off rays that are 2 HTF candles old
+    int i = array.size(rayLines) - 1
+    while i >= 0
+        int birthCandle = array.get(rayBirthCandle, i)
+        if htfCandleCount - birthCandle >= 2
+            line rayLine = array.get(rayLines, i)
+            // Stop extending and set end point to previous bar (end of last HTF candle)
+            line.set_extend(rayLine, extend.none)
+            line.set_x2(rayLine, bar_index - 1)
+            // Remove from tracking arrays
+            array.remove(rayLines, i)
+            array.remove(rayBirthCandle, i)
+        i -= 1
+
+    // The candle that just completed (use the security [1] values)
+    completedHtfOpen := htfOpen_1
+    completedHtfHigh := htfHigh_1
+    completedHtfLow := htfLow_1
+    completedHtfClose := htfClose_1
+    completedHtfStartBar := currentHtfStartBar
+    completedHtfEndBar := bar_index - 1
+
+    // New candle starts now
+    currentHtfStartBar := bar_index
+
+// ============================================================================
+// HTF CANDLE BOXES
+// ============================================================================
+var box currentHtfBox = na
+var box currentHtfBodyBox = na
+
+// Draw/update box for current developing HTF candle
+if showHtfBoxes and not na(currentHtfStartBar)
+    if not na(currentHtfBox)
+        box.delete(currentHtfBox)
+    if not na(currentHtfBodyBox)
+        box.delete(currentHtfBodyBox)
+
+    bool isBullish = htfClose >= htfOpen
+    color boxColor = isBullish ? bullishBoxColor : bearishBoxColor
+
+    // Wick box (full range: high to low)
+    currentHtfBox := box.new(currentHtfStartBar, htfHigh, bar_index, htfLow,
+         bgcolor=boxColor, border_color=color.new(isBullish ? color.green : color.red, 50), border_width=1)
+
+    // Body box (open to close)
+    float bodyTop = math.max(htfOpen, htfClose)
+    float bodyBottom = math.min(htfOpen, htfClose)
+    currentHtfBodyBox := box.new(currentHtfStartBar, bodyTop, bar_index, bodyBottom,
+         bgcolor=boxColor, border_color=color.new(isBullish ? color.green : color.red, 50), border_width=1)
+
+// Draw boxes for completed HTF candle when it finishes
+if htfNewCandle and showHtfBoxes and not na(completedHtfStartBar) and not na(completedHtfEndBar)
+    bool wasHtfBullish = completedHtfClose >= completedHtfOpen
+    color completedBoxColor = wasHtfBullish ? bullishBoxColor : bearishBoxColor
+
+    // Wick box (full range: high to low)
+    box.new(completedHtfStartBar, completedHtfHigh, completedHtfEndBar, completedHtfLow,
+         bgcolor=completedBoxColor, border_color=color.new(wasHtfBullish ? color.green : color.red, 30), border_width=2)
+
+    // Body box (open to close)
+    float completedBodyTop = math.max(completedHtfOpen, completedHtfClose)
+    float completedBodyBottom = math.min(completedHtfOpen, completedHtfClose)
+    box.new(completedHtfStartBar, completedBodyTop, completedHtfEndBar, completedBodyBottom,
+         bgcolor=completedBoxColor, border_color=color.new(wasHtfBullish ? color.green : color.red, 30), border_width=2)
+
+// ============================================================================
+// ENGULFING SWEEP DETECTION
+// ============================================================================
+// When a new HTF candle starts, check if the JUST COMPLETED candle (N-1)
+// meets the engulfing sweep criteria relative to the candle before it (N-2)
+//
+// BULLISH signal (N-1 is bullish, N-2 is bearish):
+//   1. N-1 must be bullish (close > open)
+//   2. N-2 must be bearish (close < open)
+//   3. N-1 low < N-2 low (swept the previous low)
+//   4. N-1 close > N-2 open (closed through the previous candle's open)
+//
+// BEARISH signal (N-1 is bearish, N-2 is bullish):
+//   1. N-1 must be bearish (close < open)
+//   2. N-2 must be bullish (close > open)
+//   3. N-1 high > N-2 high (swept the previous high)
+//   4. N-1 close < N-2 open (closed through the previous candle's open)
+
+if htfNewCandle and showSignals and not na(htfClose_1) and not na(htfOpen_2)
+    bool n1Bullish = htfClose_1 > htfOpen_1
+    bool n1Bearish = htfClose_1 < htfOpen_1
+    bool n2Bullish = htfClose_2 > htfOpen_2
+    bool n2Bearish = htfClose_2 < htfOpen_2
+
+    // Bullish engulfing sweep
+    if n1Bullish and n2Bearish and htfLow_1 < htfLow_2 and htfClose_1 > htfOpen_2
+        // Draw triangle below the completed candle
+        int centerBar = math.round((completedHtfStartBar + completedHtfEndBar) / 2)
+        label.new(centerBar, completedHtfLow, "▲",
+             style=label.style_label_up, color=color.new(color.white, 100),
+             textcolor=bullishSignalColor, size=size.large)
+
+        // Draw horizontal rays from high and low, track them for cutoff
+        line highRay = line.new(completedHtfEndBar, completedHtfHigh, completedHtfEndBar + 1, completedHtfHigh,
+             color=highRayColor, width=1, style=line.style_solid, extend=extend.right)
+        line lowRay = line.new(completedHtfEndBar, completedHtfLow, completedHtfEndBar + 1, completedHtfLow,
+             color=lowRayColor, width=1, style=line.style_solid, extend=extend.right)
+        array.push(rayLines, highRay)
+        array.push(rayBirthCandle, htfCandleCount)
+        array.push(rayLines, lowRay)
+        array.push(rayBirthCandle, htfCandleCount)
+
+        // Mark where wick meets open (for bullish candle, open is at bottom of body)
+        label.new(completedHtfEndBar, completedHtfOpen, "◆",
+             style=label.style_label_center, color=color.new(color.white, 100),
+             textcolor=openMarkerColor, size=size.small)
+
+    // Bearish engulfing sweep
+    if n1Bearish and n2Bullish and htfHigh_1 > htfHigh_2 and htfClose_1 < htfOpen_2
+        // Draw triangle above the completed candle
+        int centerBar = math.round((completedHtfStartBar + completedHtfEndBar) / 2)
+        label.new(centerBar, completedHtfHigh, "▼",
+             style=label.style_label_down, color=color.new(color.white, 100),
+             textcolor=bearishSignalColor, size=size.large)
+
+        // Draw horizontal rays from high and low, track them for cutoff
+        line highRay = line.new(completedHtfEndBar, completedHtfHigh, completedHtfEndBar + 1, completedHtfHigh,
+             color=highRayColor, width=1, style=line.style_solid, extend=extend.right)
+        line lowRay = line.new(completedHtfEndBar, completedHtfLow, completedHtfEndBar + 1, completedHtfLow,
+             color=lowRayColor, width=1, style=line.style_solid, extend=extend.right)
+        array.push(rayLines, highRay)
+        array.push(rayBirthCandle, htfCandleCount)
+        array.push(rayLines, lowRay)
+        array.push(rayBirthCandle, htfCandleCount)
+
+        // Mark where wick meets open (for bearish candle, open is at top of body)
+        label.new(completedHtfEndBar, completedHtfOpen, "◆",
+             style=label.style_label_center, color=color.new(color.white, 100),
+             textcolor=openMarkerColor, size=size.small)
