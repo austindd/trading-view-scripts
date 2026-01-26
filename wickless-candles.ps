@@ -1,0 +1,29 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Wickless Candles", shorttitle = "Wickless", overlay=true, max_lines_count=500)
+
+// Inputs
+lineLength = input.int(10, "Line Length (bars)", minval=1, maxval=100)
+showBullish = input.bool(true, "Show Bullish Wickless (no bottom wick)")
+showBearish = input.bool(true, "Show Bearish Wickless (no top wick)")
+bullishColor = input.color(color.rgb(7, 188, 212), "Bullish Level Color")
+bearishColor = input.color(color.rgb(171, 71, 189), "Bearish Level Color")
+lineWidth = input.int(2, "Line Width", minval=1, maxval=5)
+
+// Detect wickless candles
+isBullish = close > open
+isBearish = close < open
+noBottomWick = open == low  // Bullish candle with no bottom wick
+noTopWick = open == high    // Bearish candle with no top wick
+
+bullishWickless = isBullish and noBottomWick
+bearishWickless = isBearish and noTopWick
+
+// Draw lines for wickless candles
+if showBullish and bullishWickless
+    line.new(bar_index, low, bar_index + lineLength, low, color=bullishColor, width=lineWidth)
+
+if showBearish and bearishWickless
+    line.new(bar_index, high, bar_index + lineLength, high, color=bearishColor, width=lineWidth)

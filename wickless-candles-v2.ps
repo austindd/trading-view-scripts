@@ -1,0 +1,90 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Wickless Candles V2 [SB]", shorttitle = "Wickless V2", overlay=true, max_lines_count=500)
+
+// Inputs
+lineLength = input.int(10, "Line Length (bars)", minval=1, maxval=100)
+alertLength = input.int(20, "Alert Tracking Length (bars)", minval=1, maxval=100)
+showBullish = input.bool(true, "Show Bullish Wickless (no bottom wick)")
+showBearish = input.bool(true, "Show Bearish Wickless (no top wick)")
+bullishColor = input.color(color.rgb(7, 188, 212), "Bullish Level Color")
+bearishColor = input.color(color.rgb(171, 71, 189), "Bearish Level Color")
+lineWidth = input.int(2, "Line Width", minval=1, maxval=5)
+
+// Detect wickless candles
+isBullish = close > open
+isBearish = close < open
+noBottomWick = open == low  // Bullish candle with no bottom wick
+noTopWick = open == high    // Bearish candle with no top wick
+
+bullishWickless = isBullish and noBottomWick
+bearishWickless = isBearish and noTopWick
+
+// Arrays to track active levels for alerts
+// Each level tracks: price, bar_index when created, whether first cross occurred
+var float[] bullishLevels = array.new_float()
+var int[] bullishBarIndex = array.new_int()
+var bool[] bullishFirstCrossed = array.new_bool()
+
+var float[] bearishLevels = array.new_float()
+var int[] bearishBarIndex = array.new_int()
+var bool[] bearishFirstCrossed = array.new_bool()
+
+// Draw lines for wickless candles and add to tracking
+if showBullish and bullishWickless
+    line.new(bar_index, low, bar_index + lineLength, low, color=bullishColor, width=lineWidth)
+    array.push(bullishLevels, open)
+    array.push(bullishBarIndex, bar_index)
+    array.push(bullishFirstCrossed, false)
+    alert("Bullish wickless candle formed at " + str.tostring(open), alert.freq_once_per_bar_close)
+
+if showBearish and bearishWickless
+    line.new(bar_index, high, bar_index + lineLength, high, color=bearishColor, width=lineWidth)
+    array.push(bearishLevels, open)
+    array.push(bearishBarIndex, bar_index)
+    array.push(bearishFirstCrossed, false)
+    alert("Bearish wickless candle formed at " + str.tostring(open), alert.freq_once_per_bar_close)
+
+// Check bullish levels for price crosses (price crossing below the level)
+if array.size(bullishLevels) > 0
+    for i = array.size(bullishLevels) - 1 to 0
+        lvl = array.get(bullishLevels, i)
+        startBar = array.get(bullishBarIndex, i)
+        firstCrossed = array.get(bullishFirstCrossed, i)
+
+        if bar_index - startBar > alertLength
+            // Level expired, remove from tracking
+            array.remove(bullishLevels, i)
+            array.remove(bullishBarIndex, i)
+            array.remove(bullishFirstCrossed, i)
+        else if bar_index > startBar  // Don't check on the same bar it formed
+            // Check if price crossed the level (low went below the level)
+            if low < lvl
+                if not firstCrossed
+                    alert("First cross of bullish wickless level: " + str.tostring(lvl), alert.freq_once_per_bar_close)
+                    array.set(bullishFirstCrossed, i, true)
+                else
+                    alert("Retest of bullish wickless level: " + str.tostring(lvl), alert.freq_once_per_bar_close)
+
+// Check bearish levels for price crosses (price crossing above the level)
+if array.size(bearishLevels) > 0
+    for i = array.size(bearishLevels) - 1 to 0
+        lvl = array.get(bearishLevels, i)
+        startBar = array.get(bearishBarIndex, i)
+        firstCrossed = array.get(bearishFirstCrossed, i)
+
+        if bar_index - startBar > alertLength
+            // Level expired, remove from tracking
+            array.remove(bearishLevels, i)
+            array.remove(bearishBarIndex, i)
+            array.remove(bearishFirstCrossed, i)
+        else if bar_index > startBar  // Don't check on the same bar it formed
+            // Check if price crossed the level (high went above the level)
+            if high > lvl
+                if not firstCrossed
+                    alert("First cross of bearish wickless level: " + str.tostring(lvl), alert.freq_once_per_bar_close)
+                    array.set(bearishFirstCrossed, i, true)
+                else
+                    alert("Retest of bearish wickless level: " + str.tostring(lvl), alert.freq_once_per_bar_close)
