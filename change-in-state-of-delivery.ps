@@ -15,9 +15,29 @@ showBearish = input.bool(true, "Show Bearish CISD", group="Display")
 // Settings
 swingLookback = input.int(50, "Swing Lookback Bars", minval=5, maxval=200, group="Settings", tooltip="How far back to search for candlestick swing highs/lows that can be swept")
 
-// Colors
-bullColor = input.color(#089981, "Bullish CISD", group="Colors")
-bearColor = input.color(#f23645, "Bearish CISD", group="Colors")
+// Timeframe 1
+tf1Enabled   = input.bool(true, "Enable", inline="tf1", group="Timeframe 1")
+tf1          = input.timeframe("", "Timeframe", inline="tf1", group="Timeframe 1")
+tf1BullColor = input.color(#089981, "Bullish", inline="tf1c", group="Timeframe 1")
+tf1BearColor = input.color(#f23645, "Bearish", inline="tf1c", group="Timeframe 1")
+
+// Timeframe 2
+tf2Enabled   = input.bool(false, "Enable", inline="tf2", group="Timeframe 2")
+tf2          = input.timeframe("", "Timeframe", inline="tf2", group="Timeframe 2")
+tf2BullColor = input.color(#089981, "Bullish", inline="tf2c", group="Timeframe 2")
+tf2BearColor = input.color(#f23645, "Bearish", inline="tf2c", group="Timeframe 2")
+
+// Timeframe 3
+tf3Enabled   = input.bool(false, "Enable", inline="tf3", group="Timeframe 3")
+tf3          = input.timeframe("", "Timeframe", inline="tf3", group="Timeframe 3")
+tf3BullColor = input.color(#089981, "Bullish", inline="tf3c", group="Timeframe 3")
+tf3BearColor = input.color(#f23645, "Bearish", inline="tf3c", group="Timeframe 3")
+
+// Timeframe 4
+tf4Enabled   = input.bool(false, "Enable", inline="tf4", group="Timeframe 4")
+tf4          = input.timeframe("", "Timeframe", inline="tf4", group="Timeframe 4")
+tf4BullColor = input.color(#089981, "Bullish", inline="tf4c", group="Timeframe 4")
+tf4BearColor = input.color(#f23645, "Bearish", inline="tf4c", group="Timeframe 4")
 
 // ============================================================================
 // CANDLE HELPERS
@@ -28,87 +48,6 @@ isBull(int i) =>
 
 isBear(int i) =>
     close[i] < open[i]
-
-// ============================================================================
-// SWING POINT DETECTION
-// ============================================================================
-
-// A candlestick swing low: a candle whose low is lower than the lows of both
-// its immediate neighbors. Confirmed one bar later (need right neighbor).
-isSwingLow  = low[1] < low[2] and low[1] < low[0]
-isSwingHigh = high[1] > high[2] and high[1] > high[0]
-
-var swingLowPrices  = array.new_float()
-var swingLowBars    = array.new_int()
-var swingHighPrices = array.new_float()
-var swingHighBars   = array.new_int()
-
-if isSwingLow
-    array.push(swingLowPrices, low[1])
-    array.push(swingLowBars, bar_index - 1)
-
-if isSwingHigh
-    array.push(swingHighPrices, high[1])
-    array.push(swingHighBars, bar_index - 1)
-
-// Prune entries older than lookback
-if array.size(swingLowPrices) > 0
-    while array.size(swingLowPrices) > 0 and bar_index - array.get(swingLowBars, 0) > swingLookback
-        array.shift(swingLowPrices)
-        array.shift(swingLowBars)
-
-if array.size(swingHighPrices) > 0
-    while array.size(swingHighPrices) > 0 and bar_index - array.get(swingHighBars, 0) > swingLookback
-        array.shift(swingHighPrices)
-        array.shift(swingHighBars)
-
-// ============================================================================
-// SWEEP DETECTION
-// ============================================================================
-
-// Check if candle at barOffset sweeps any tracked swing low.
-// Sweep = wick extends at/below swing low price, but candle closes above it.
-doesSweepSwingLow(int barOffset) =>
-    result = false
-    cLow   = low[barOffset]
-    cClose = close[barOffset]
-    cBar   = bar_index - barOffset
-    for i = 0 to array.size(swingLowPrices) - 1
-        if array.get(swingLowBars, i) < cBar and cLow <= array.get(swingLowPrices, i) and cClose > array.get(swingLowPrices, i)
-            result := true
-            break
-    result
-
-// Check if candle at barOffset sweeps any tracked swing high.
-// Sweep = wick extends at/above swing high price, but candle closes below it.
-doesSweepSwingHigh(int barOffset) =>
-    result = false
-    cHigh  = high[barOffset]
-    cClose = close[barOffset]
-    cBar   = bar_index - barOffset
-    for i = 0 to array.size(swingHighPrices) - 1
-        if array.get(swingHighBars, i) < cBar and cHigh >= array.get(swingHighPrices, i) and cClose < array.get(swingHighPrices, i)
-            result := true
-            break
-    result
-
-// Check if any candle in offset range [startOff..endOff] sweeps a swing low
-anySweepSwingLow(int startOff, int endOff) =>
-    result = false
-    for i = startOff to endOff
-        if doesSweepSwingLow(i)
-            result := true
-            break
-    result
-
-// Check if any candle in offset range [startOff..endOff] sweeps a swing high
-anySweepSwingHigh(int startOff, int endOff) =>
-    result = false
-    for i = startOff to endOff
-        if doesSweepSwingHigh(i)
-            result := true
-            break
-    result
 
 // ============================================================================
 // CONSECUTIVE CANDLE COUNTING
@@ -131,96 +70,163 @@ countConsecBear(int startOff) =>
     n
 
 // ============================================================================
-// PATTERN DETECTION
+// SWEEP DETECTION (scan-based, no persistent state)
 // ============================================================================
 
-// Signal flags prevent duplicate signals within the same directional run
-var bullSignaled = false
-var bearSignaled = false
-
-if isBear(0)
-    bullSignaled := false
-if isBull(0)
-    bearSignaled := false
-
-// ─── Bullish CISD ───────────────────────────────────────────────────────────
-bullishCISD = false
-
-if showBullish and isBull(0) and not bullSignaled
-    bullRun  = countConsecBull(0)
-    bearRun  = countConsecBear(bullRun)
-    preOff   = bullRun + bearRun           // candle before the bearish run
-    firstBearOff = bullRun + bearRun - 1   // chronologically first bearish candle
-
-    // Rule 2 — Standard pattern
-    // [bullish] [≥2 bearish] [≥2 bullish] where last bullish closes above first bearish open
-    if bearRun >= 2 and bullRun >= 2 and isBull(preOff)
-        if close > open[firstBearOff]
-            if anySweepSwingLow(0, bullRun - 1)
-                bullishCISD := true
-                bullSignaled := true
-
-    // Exception — single bullish candle sweeps all preceding candles + a swing low
-    // First bullish candle must wick below every preceding candle in the pattern
-    // and close above the initial bearish candle's open
-    if not bullishCISD and bearRun >= 1 and bullRun >= 1 and isBull(preOff)
-        firstBullOff = bullRun - 1   // first bullish candle in the run
-        // Check first bullish candle's low is below all preceding candles (bearish run + pre-pattern bullish)
-        allSwept = true
-        for k = firstBullOff + 1 to preOff
-            if low[firstBullOff] >= low[k]
-                allSwept := false
+// Check if candle at offset `off` sweeps any swing low within lookback range.
+// A swing low at bar [j] means low[j] < low[j+1] and low[j] < low[j-1].
+// Sweep = candle's wick reaches at/below swing low, but closes above it.
+doesSweepSwingLow(int off) =>
+    result = false
+    maxJ = math.min(off + swingLookback, 4998)
+    for j = off + 2 to maxJ
+        if low[j] < low[j + 1] and low[j] < low[j - 1]
+            if low[off] <= low[j] and close[off] > low[j]
+                result := true
                 break
-        if allSwept
-            if close[firstBullOff] > open[firstBearOff]
-                if doesSweepSwingLow(firstBullOff)
+    result
+
+doesSweepSwingHigh(int off) =>
+    result = false
+    maxJ = math.min(off + swingLookback, 4998)
+    for j = off + 2 to maxJ
+        if high[j] > high[j + 1] and high[j] > high[j - 1]
+            if high[off] >= high[j] and close[off] < high[j]
+                result := true
+                break
+    result
+
+// Check if any candle in offset range [startOff..endOff] sweeps a swing low/high
+anySweepSwingLow(int startOff, int endOff) =>
+    result = false
+    for i = startOff to endOff
+        if doesSweepSwingLow(i)
+            result := true
+            break
+    result
+
+anySweepSwingHigh(int startOff, int endOff) =>
+    result = false
+    for i = startOff to endOff
+        if doesSweepSwingHigh(i)
+            result := true
+            break
+    result
+
+// ============================================================================
+// CISD DETECTION FUNCTION
+// ============================================================================
+
+// Stateless detection — returns true on every bar where pattern conditions
+// are currently met. Deduplication is handled by the caller via edge detection.
+detectCISD() =>
+    bullishCISD = false
+    bearishCISD = false
+
+    // ─── Bullish CISD ───────────────────────────────────────────────────
+    if showBullish and isBull(0)
+        bullRun  = countConsecBull(0)
+        bearRun  = countConsecBear(bullRun)
+        preOff   = bullRun + bearRun
+        firstBearOff = bullRun + bearRun - 1
+
+        // Standard: [bullish] [≥2 bearish] [≥2 bullish], last bullish closes above first bearish open
+        if bearRun >= 2 and bullRun >= 2 and isBull(preOff)
+            if close > open[firstBearOff]
+                if anySweepSwingLow(0, bullRun - 1)
                     bullishCISD := true
-                    bullSignaled := true
 
-// ─── Bearish CISD ───────────────────────────────────────────────────────────
-bearishCISD = false
+        // Exception: single bullish candle sweeps all preceding candles + a swing low
+        if not bullishCISD and bearRun >= 1 and bullRun >= 1 and isBull(preOff)
+            firstBullOff = bullRun - 1
+            allSwept = true
+            for k = firstBullOff + 1 to preOff
+                if low[firstBullOff] >= low[k]
+                    allSwept := false
+                    break
+            if allSwept
+                if close[firstBullOff] > open[firstBearOff]
+                    if doesSweepSwingLow(firstBullOff)
+                        bullishCISD := true
 
-if showBearish and isBear(0) and not bearSignaled
-    bearRun  = countConsecBear(0)
-    bullRun  = countConsecBull(bearRun)
-    preOff   = bearRun + bullRun           // candle before the bullish run
-    firstBullOff = bearRun + bullRun - 1   // chronologically first bullish candle
+    // ─── Bearish CISD ───────────────────────────────────────────────────
+    if showBearish and isBear(0)
+        bearRun  = countConsecBear(0)
+        bullRun  = countConsecBull(bearRun)
+        preOff   = bearRun + bullRun
+        firstBullOff = bearRun + bullRun - 1
 
-    // Rule 2 — Standard pattern
-    // [bearish] [≥2 bullish] [≥2 bearish] where last bearish closes below first bullish open
-    if bullRun >= 2 and bearRun >= 2 and isBear(preOff)
-        if close < open[firstBullOff]
-            if anySweepSwingHigh(0, bearRun - 1)
-                bearishCISD := true
-                bearSignaled := true
-
-    // Exception — single bearish candle sweeps all preceding candles + a swing high
-    // First bearish candle must wick above every preceding candle in the pattern
-    // and close below the initial bullish candle's open
-    if not bearishCISD and bullRun >= 1 and bearRun >= 1 and isBear(preOff)
-        firstBearOff = bearRun - 1   // first bearish candle in the run
-        // Check first bearish candle's high is above all preceding candles (bullish run + pre-pattern bearish)
-        allSwept = true
-        for k = firstBearOff + 1 to preOff
-            if high[firstBearOff] <= high[k]
-                allSwept := false
-                break
-        if allSwept
-            if close[firstBearOff] < open[firstBullOff]
-                if doesSweepSwingHigh(firstBearOff)
+        // Standard: [bearish] [≥2 bullish] [≥2 bearish], last bearish closes below first bullish open
+        if bullRun >= 2 and bearRun >= 2 and isBear(preOff)
+            if close < open[firstBullOff]
+                if anySweepSwingHigh(0, bearRun - 1)
                     bearishCISD := true
-                    bearSignaled := true
+
+        // Exception: single bearish candle sweeps all preceding candles + a swing high
+        if not bearishCISD and bullRun >= 1 and bearRun >= 1 and isBear(preOff)
+            firstBearOff = bearRun - 1
+            allSwept = true
+            for k = firstBearOff + 1 to preOff
+                if high[firstBearOff] <= high[k]
+                    allSwept := false
+                    break
+            if allSwept
+                if close[firstBearOff] < open[firstBullOff]
+                    if doesSweepSwingHigh(firstBearOff)
+                        bearishCISD := true
+
+    [bullishCISD, bearishCISD]
+
+// ============================================================================
+// MULTI-TIMEFRAME SECURITY CALLS
+// ============================================================================
+
+[rawBull1, rawBear1] = request.security(syminfo.tickerid, tf1, detectCISD())
+[rawBull2, rawBear2] = request.security(syminfo.tickerid, tf2, detectCISD())
+[rawBull3, rawBear3] = request.security(syminfo.tickerid, tf3, detectCISD())
+[rawBull4, rawBear4] = request.security(syminfo.tickerid, tf4, detectCISD())
+
+// Edge detection: signal only on the first chart bar where the value transitions to true.
+// Prevents duplicate signals when an HTF bar spans multiple chart bars.
+bull1 = tf1Enabled and rawBull1 and not nz(rawBull1[1])
+bear1 = tf1Enabled and rawBear1 and not nz(rawBear1[1])
+bull2 = tf2Enabled and rawBull2 and not nz(rawBull2[1])
+bear2 = tf2Enabled and rawBear2 and not nz(rawBear2[1])
+bull3 = tf3Enabled and rawBull3 and not nz(rawBull3[1])
+bear3 = tf3Enabled and rawBear3 and not nz(rawBear3[1])
+bull4 = tf4Enabled and rawBull4 and not nz(rawBull4[1])
+bear4 = tf4Enabled and rawBear4 and not nz(rawBear4[1])
 
 // ============================================================================
 // VISUALIZATION
 // ============================================================================
 
-plotshape(bullishCISD, "Bullish CISD", shape.labelup, location.belowbar, bullColor, text="CISD", textcolor=color.white, size=size.small)
-plotshape(bearishCISD, "Bearish CISD", shape.labeldown, location.abovebar, bearColor, text="CISD", textcolor=color.white, size=size.small)
+// Build label text: append timeframe for non-chart timeframes
+tf1Text = tf1 == "" ? "CISD" : "CISD\n" + tf1
+tf2Text = tf2 == "" ? "CISD" : "CISD\n" + tf2
+tf3Text = tf3 == "" ? "CISD" : "CISD\n" + tf3
+tf4Text = tf4 == "" ? "CISD" : "CISD\n" + tf4
+
+if bull1
+    label.new(bar_index, low, tf1Text, style=label.style_label_up, color=tf1BullColor, textcolor=color.white, size=size.small)
+if bear1
+    label.new(bar_index, high, tf1Text, style=label.style_label_down, color=tf1BearColor, textcolor=color.white, size=size.small)
+if bull2
+    label.new(bar_index, low, tf2Text, style=label.style_label_up, color=tf2BullColor, textcolor=color.white, size=size.small)
+if bear2
+    label.new(bar_index, high, tf2Text, style=label.style_label_down, color=tf2BearColor, textcolor=color.white, size=size.small)
+if bull3
+    label.new(bar_index, low, tf3Text, style=label.style_label_up, color=tf3BullColor, textcolor=color.white, size=size.small)
+if bear3
+    label.new(bar_index, high, tf3Text, style=label.style_label_down, color=tf3BearColor, textcolor=color.white, size=size.small)
+if bull4
+    label.new(bar_index, low, tf4Text, style=label.style_label_up, color=tf4BullColor, textcolor=color.white, size=size.small)
+if bear4
+    label.new(bar_index, high, tf4Text, style=label.style_label_down, color=tf4BearColor, textcolor=color.white, size=size.small)
 
 // ============================================================================
 // ALERTS
 // ============================================================================
 
-alertcondition(bullishCISD, "Bullish CISD", "Bullish Change In State Of Delivery detected")
-alertcondition(bearishCISD, "Bearish CISD", "Bearish Change In State Of Delivery detected")
+alertcondition(bull1 or bull2 or bull3 or bull4, "Bullish CISD", "Bullish Change In State Of Delivery detected")
+alertcondition(bear1 or bear2 or bear3 or bear4, "Bearish CISD", "Bearish Change In State Of Delivery detected")
