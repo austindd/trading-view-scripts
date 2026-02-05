@@ -52,13 +52,15 @@ if isSwingHigh
     array.push(swingHighBars, bar_index - 1)
 
 // Prune entries older than lookback
-while array.size(swingLowPrices) > 0 and bar_index - array.get(swingLowBars, 0) > swingLookback
-    array.shift(swingLowPrices)
-    array.shift(swingLowBars)
+if array.size(swingLowPrices) > 0
+    while array.size(swingLowPrices) > 0 and bar_index - array.get(swingLowBars, 0) > swingLookback
+        array.shift(swingLowPrices)
+        array.shift(swingLowBars)
 
-while array.size(swingHighPrices) > 0 and bar_index - array.get(swingHighBars, 0) > swingLookback
-    array.shift(swingHighPrices)
-    array.shift(swingHighBars)
+if array.size(swingHighPrices) > 0
+    while array.size(swingHighPrices) > 0 and bar_index - array.get(swingHighBars, 0) > swingLookback
+        array.shift(swingHighPrices)
+        array.shift(swingHighBars)
 
 // ============================================================================
 // SWEEP DETECTION
@@ -158,14 +160,19 @@ if showBullish and isBull(0) and not bullSignaled
                 bullishCISD := true
                 bullSignaled := true
 
-    // Rule 3 — Exception: single bearish candle with stricter sweep requirements
-    // [bullish] [1 bearish] [bullish] where first bullish wicks past swing low + both preceding lows
-    if not bullishCISD and bearRun == 1 and bullRun >= 1 and isBull(preOff)
+    // Exception — single bullish candle sweeps all preceding candles + a swing low
+    // First bullish candle must wick below every preceding candle in the pattern
+    // and close above the initial bearish candle's open
+    if not bullishCISD and bearRun >= 1 and bullRun >= 1 and isBull(preOff)
         firstBullOff = bullRun - 1   // first bullish candle in the run
-        bearOff      = bullRun       // the single bearish candle
-        preBullOff   = bullRun + 1   // bullish candle before the bearish one
-        if low[firstBullOff] < low[bearOff] and low[firstBullOff] < low[preBullOff]
-            if close[firstBullOff] > open[bearOff]
+        // Check first bullish candle's low is below all preceding candles (bearish run + pre-pattern bullish)
+        allSwept = true
+        for k = firstBullOff + 1 to preOff
+            if low[firstBullOff] >= low[k]
+                allSwept := false
+                break
+        if allSwept
+            if close[firstBullOff] > open[firstBearOff]
                 if doesSweepSwingLow(firstBullOff)
                     bullishCISD := true
                     bullSignaled := true
@@ -187,14 +194,19 @@ if showBearish and isBear(0) and not bearSignaled
                 bearishCISD := true
                 bearSignaled := true
 
-    // Rule 3 — Exception: single bullish candle with stricter sweep requirements
-    // [bearish] [1 bullish] [bearish] where first bearish wicks past swing high + both preceding highs
-    if not bearishCISD and bullRun == 1 and bearRun >= 1 and isBear(preOff)
+    // Exception — single bearish candle sweeps all preceding candles + a swing high
+    // First bearish candle must wick above every preceding candle in the pattern
+    // and close below the initial bullish candle's open
+    if not bearishCISD and bullRun >= 1 and bearRun >= 1 and isBear(preOff)
         firstBearOff = bearRun - 1   // first bearish candle in the run
-        bullOff      = bearRun       // the single bullish candle
-        preBearOff   = bearRun + 1   // bearish candle before the bullish one
-        if high[firstBearOff] > high[bullOff] and high[firstBearOff] > high[preBearOff]
-            if close[firstBearOff] < open[bullOff]
+        // Check first bearish candle's high is above all preceding candles (bullish run + pre-pattern bearish)
+        allSwept = true
+        for k = firstBearOff + 1 to preOff
+            if high[firstBearOff] <= high[k]
+                allSwept := false
+                break
+        if allSwept
+            if close[firstBearOff] < open[firstBullOff]
                 if doesSweepSwingHigh(firstBearOff)
                     bearishCISD := true
                     bearSignaled := true
