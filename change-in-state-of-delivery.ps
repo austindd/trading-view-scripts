@@ -178,16 +178,31 @@ detectCISD() =>
     [bullishCISD, bearishCISD]
 
 // ============================================================================
-// MULTI-TIMEFRAME SECURITY CALLS
+// MULTI-TIMEFRAME DETECTION
 // ============================================================================
 
-[rawBull1, rawBear1] = request.security(syminfo.tickerid, tf1, detectCISD())
-[rawBull2, rawBear2] = request.security(syminfo.tickerid, tf2, detectCISD())
-[rawBull3, rawBear3] = request.security(syminfo.tickerid, tf3, detectCISD())
-[rawBull4, rawBear4] = request.security(syminfo.tickerid, tf4, detectCISD())
+// Direct call for chart timeframe (no one-bar delay from request.security)
+[chartBull, chartBear] = detectCISD()
+
+// Security calls for HTF support (lookahead_off returns last completed HTF bar)
+[secBull1, secBear1] = request.security(syminfo.tickerid, tf1, detectCISD())
+[secBull2, secBear2] = request.security(syminfo.tickerid, tf2, detectCISD())
+[secBull3, secBear3] = request.security(syminfo.tickerid, tf3, detectCISD())
+[secBull4, secBear4] = request.security(syminfo.tickerid, tf4, detectCISD())
+
+// Use direct result for chart TF to avoid the one-bar delay that
+// request.security() introduces for the chart's own timeframe.
+rawBull1 = tf1 == "" ? chartBull : secBull1
+rawBear1 = tf1 == "" ? chartBear : secBear1
+rawBull2 = tf2 == "" ? chartBull : secBull2
+rawBear2 = tf2 == "" ? chartBear : secBear2
+rawBull3 = tf3 == "" ? chartBull : secBull3
+rawBear3 = tf3 == "" ? chartBear : secBear3
+rawBull4 = tf4 == "" ? chartBull : secBull4
+rawBear4 = tf4 == "" ? chartBear : secBear4
 
 // Edge detection: signal only on the first chart bar where the value transitions to true.
-// Prevents duplicate signals when an HTF bar spans multiple chart bars.
+// Prevents duplicate signals across consecutive bars / HTF bar spans.
 bull1 = tf1Enabled and rawBull1 and not nz(rawBull1[1])
 bear1 = tf1Enabled and rawBear1 and not nz(rawBear1[1])
 bull2 = tf2Enabled and rawBull2 and not nz(rawBull2[1])
