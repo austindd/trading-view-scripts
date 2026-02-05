@@ -131,9 +131,10 @@ detectCISD() =>
         firstBearOff = bullRun + bearRun - 1
 
         // Standard: [bullish] [≥2 bearish] [≥2 bullish], last bullish closes above first bearish open
+        // Any candle in the pattern (bearish or bullish) can sweep the swing low
         if bearRun >= 2 and bullRun >= 2 and isBull(preOff)
             if close > open[firstBearOff]
-                if anySweepSwingLow(0, bullRun - 1)
+                if anySweepSwingLow(0, firstBearOff)
                     bullishCISD := true
 
         // Exception: single bullish candle sweeps all preceding candles + a swing low
@@ -157,9 +158,10 @@ detectCISD() =>
         firstBullOff = bearRun + bullRun - 1
 
         // Standard: [bearish] [≥2 bullish] [≥2 bearish], last bearish closes below first bullish open
+        // Any candle in the pattern (bullish or bearish) can sweep the swing high
         if bullRun >= 2 and bearRun >= 2 and isBear(preOff)
             if close < open[firstBullOff]
-                if anySweepSwingHigh(0, bearRun - 1)
+                if anySweepSwingHigh(0, firstBullOff)
                     bearishCISD := true
 
         // Exception: single bearish candle sweeps all preceding candles + a swing high
