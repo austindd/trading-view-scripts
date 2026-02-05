@@ -4,9 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-This repository contains Pine Script indicators for TradingView. Pine Script is TradingView's domain-specific language for creating custom technical indicators and strategies for financial markets.
-
-**Current Script:** Market Structure Mapper V2 - An indicator that identifies and tracks valid highs/lows, break of structure (BOS), and liquidity sweeps in market price action.
+This repository contains Pine Script (v5) indicators and strategies for TradingView, focused on **market structure analysis and price action trading**. All scripts are authored by "scientificbest" and licensed under Mozilla Public License 2.0.
 
 ## File Format
 
@@ -16,94 +14,117 @@ This repository contains Pine Script indicators for TradingView. Pine Script is 
 
 ## Development Workflow
 
-### Testing Scripts
+### Testing
 
 Pine Script cannot be tested locally. To test changes:
 
 1. Open TradingView in a browser
 2. Navigate to Pine Editor (bottom panel)
-3. Copy the entire script content
-4. Paste into the editor
-5. Click "Add to Chart" to visualize
-6. Check for compilation errors in the console
+3. Copy the entire script content and paste into the editor
+4. Click "Add to Chart" to visualize
+5. Check for compilation errors in the console
 
 ### Deployment
 
-Pine Scripts are deployed by:
-1. Copying script content to TradingView's Pine Editor
-2. Saving/publishing directly within TradingView
-3. No build or compilation commands exist for this codebase
+Scripts are deployed by copying content to TradingView's Pine Editor and saving/publishing within TradingView. No build or compilation commands exist.
 
-## Code Architecture
+## Scripts
 
-### Market Structure Mapper V2 Logic Flow
+### Market Structure Mapper Series
 
-The indicator follows a state machine pattern to track market structure:
+The core of this repo. Each version builds on the previous:
 
-1. **Initialization Phase** (lines 280-298)
-   - Waits for first bearish breakdown signal
-   - Scans back up to 200 bars to find initial valid high
-   - Sets `initialized = true` and begins tracking
+| File | Lines | Description |
+|------|-------|-------------|
+| `market-structure-mapper-v2.ps` | 367 | Foundational version. Identifies valid highs/lows, BOS, and liquidity sweeps using a state machine pattern with parallel arrays. |
+| `market-structure-mapper-v3.ps` | 1,115 | Adds higher timeframe (HTF) overlay with dual-timeframe tracking (CTF + HTF). |
+| `market-structure-mapper-v4.ps` | 1,141 | Refactors with custom types (`HighLevel`, `LowLevel`) replacing parallel arrays. Level classifications: strong, weak, broken, swept. |
+| `market-structure-mapper-v5.ps` | 1,838 | Adds supply/demand zones (`Zone` type) with box visualization, break conditions (wick vs close), and ATR-based min height filter. |
+| `market-structure-mapper-v6.ps` | 2,512 | Three-timeframe analysis (CTF + HTF + HTF2/trading range). S&D zones per timeframe. |
+| `market-structure-mapper-v7.ps` | 3,029 | **Latest version.** Full three-timeframe with comprehensive settings, independent toggles per TF, peaks/valleys visualization, broken zone extension. |
+| `__working_version_of_v7.ps` | 2,819 | Experimental variant of V7 with tweaked defaults (lime/maroon colors). |
+| `market-structure-mapper-strategy-v1.ps` | 2,836 | **Strategy** (not indicator). Backtestable zone trading with directional bias filter, R:R config (1:1–5:1), max active trades, zone intersection stats table. |
 
-2. **State Tracking** (lines 28-35)
-   - `lookingForLow` / `lookingForHigh`: Boolean flags controlling which structure element to seek next
-   - `currentValidHigh` / `currentValidLow`: Active structure levels being tracked
-   - Alternates between seeking highs and lows based on market flow
+### Specialized Indicators
 
-3. **Structure Detection** (lines 300-363)
-   - **Break of Structure (BOS):** Occurs when price closes beyond the current valid level
-   - **New Valid High:** Identified after bearish breakdown when `lookingForHigh = true`
-   - **New Valid Low:** Identified after bullish breakout when `lookingForLow = true`
-   - Uses `findHighestBetween()` and `findLowestBetween()` to locate structure points
+| File | Lines | Description |
+|------|-------|-------------|
+| `candle-continuation-theory.ps` | 201 | HTF candle structure analysis for continuation signals. Visualizes HTF candle boxes (N, N-1, N-2) with BOS detection across HTF candles. |
+| `virgin-wick-theory.ps` | 97 | Identifies virgin wicks (uncrossed wick extremes from HTF candles). Array-based tracking with 2-candle expiry. Alerts on close-through. |
+| `htf-engulfing-sweep.ps` | 206 | Detects HTF engulfing patterns with sweep ray generation. Rays extend 2 HTF candles then stop. |
+| `engulfing-bar-play.ps` | 275 | Engulfing bar detection with configurable consecutive-candle filter (default: 3 prior candles in same direction). Ray extensions from pattern extremes. |
+| `wickless-candles.ps` | 29 | Simplest script. Draws horizontal lines at wickless candle levels. No state tracking. |
+| `wickless-candles-v2.ps` | 90 | Enhanced wickless detection with array-based level tracking, alert generation on formation/first cross/retest, and configurable tracking window (default: 20 bars). |
 
-4. **Level Management** (lines 107-169)
-   - Arrays store all historical levels with metadata (broken/sweeped status)
-   - `addValidHigh()` / `addValidLow()` functions manage level creation
-   - Previous solid lines deleted when new levels form to prevent clutter
-   - Most recent high/low indices tracked separately for BOS detection
+## Architecture Patterns
 
-5. **Visual Updates** (lines 171-278)
-   - `checkBrokenLevels()` runs every bar to update line styles
-   - **Sweep:** Wick crosses level but close doesn't → line becomes dotted
-   - **Break:** Close crosses level → line treatment depends on recency
-     - Recent level (potential BOS): Line stops extending, turns gray, gets BOS label
-     - Old level: Line deleted entirely
+### State Machine (All MSM versions)
 
-### Key Helper Functions
+1. **Initialization:** Wait for first BOS signal, scan back for initial structure
+2. **Structure Detection:** Alternate between seeking highs and lows based on market flow
+3. **Level Management:** Track levels in arrays, update broken/swept status
+4. **Visual Updates:** Restyle lines each bar (solid → dotted on sweep, stop extending on break)
 
-- `isBearishBreakdown()` (line 42): Detects bearish candle closing below previous low
-- `isBullishBreakout()` (line 46): Detects bullish candle closing above previous high
-- `findLowestBetween()` (line 50): Scans bar range for lowest low price
-- `findHighestBetween()` (line 79): Scans bar range for highest high price
+### Key Concepts
 
-### Pine Script Constraints
+- **Break of Structure (BOS):** Price closes beyond a current valid level
+- **Sweep:** Wick crosses a level but close doesn't (level becomes dotted)
+- **Valid High/Low:** Structure points identified after breakdowns/breakouts
+- **Supply/Demand Zones (V5+):** Box regions around structure points that may act as future support/resistance
 
-- **Max lines:** 500 (set in indicator declaration)
-- **Max labels:** 500 (set in indicator declaration)
-- **Lookback limit:** 5000 bars (enforced in find functions at lines 67, 96)
-- **Persistence:** Uses `var` keyword for variables that maintain state across bars
+### Multi-Timeframe Pattern
 
-## Configuration Options
+All HTF-aware scripts use:
+```pine
+[htfHigh, htfLow, htfOpen, htfClose, htfTime] = request.security(syminfo.tickerid, htfTimeframe, [...])
+newHTF = ta.change(htfTime) != 0  // Detect new HTF bar
+```
 
-The script exposes user inputs (lines 7-13):
+### Data Structure Evolution
 
-- **Display toggles:** Show/hide high/low labels and BOS labels
-- **Styling:** Line width (1-5)
-- **Colors:** Valid high, valid low, and BOS colors (customizable)
+- **V2–V3:** Parallel arrays (`highLevels`, `highBars`, `highBroken`, `highLines`, etc.)
+- **V4+:** Custom types encapsulating level data:
+  ```pine
+  type HighLevel
+      float price
+      int barIndex
+      line levelLine
+      string levelType  // "strong", "weak", "broken", "swept"
+  ```
+- **V5+:** Zone type for supply/demand:
+  ```pine
+  type Zone
+      float top
+      float bottom
+      int leftTime
+      int rightTime
+      bool broken
+      bool touched
+      int creationBar
+  ```
+
+### Shared Helper Functions (MSM series)
+
+- `isBearishBreakdown()` — bearish candle closing below previous low
+- `isBullishBreakout()` — bullish candle closing above previous high
+- `findLowestBetween(start, end)` — scan bar range for lowest low
+- `findHighestBetween(start, end)` — scan bar range for highest high
 
 ## Common Modifications
 
-When modifying this script:
-
-- **Adding new levels:** Follow the pattern of `highLevels`/`lowLevels` arrays with parallel tracking arrays
-- **Changing detection logic:** Modify the helper functions or conditions in lines 300-363
-- **Adjusting visuals:** Update line/label creation in `addValidHigh()`/`addValidLow()` or `checkBrokenLevels()`
-- **Performance tuning:** Adjust lookback limits (currently 200 for init, 5000 for searches)
+- **Adding new levels:** Follow the typed array pattern from V4+ (`HighLevel`/`LowLevel`)
+- **Changing detection logic:** Modify helper functions or main detection conditions
+- **Adjusting visuals:** Update line/label/box creation functions or `checkBrokenLevels()`
+- **Adding a new timeframe:** Follow the HTF pattern from V6+ (separate state variables, colors, and detection logic per TF)
+- **Adding alerts:** Follow `wickless-candles-v2.ps` or `virgin-wick-theory.ps` patterns for array-based alert tracking
 
 ## Pine Script Language Notes
 
-- **Bar execution model:** Script runs once per bar, sequentially from left to right on chart
-- **No loops across bars:** Cannot iterate through future bars (only historical via `[index]` notation)
-- **Array indices:** 0-based, but bar history uses `[1]` for previous bar, `[2]` for two bars ago
-- **Type system:** Strictly typed (float, int, bool, string, color, line, label, etc.)
-- **Scope:** Most variables must be declared at script scope, not inside conditions
+- **Bar execution model:** Script runs once per bar, left to right. No loops across future bars.
+- **History operator:** `[1]` = previous bar, `[2]` = two bars ago. Array indices are 0-based.
+- **State persistence:** `var` keyword maintains values across bars. Without `var`, variables reset each bar.
+- **Type system:** Strictly typed (float, int, bool, string, color, line, label, box, etc.)
+- **Scope:** Most variables must be declared at script scope, not inside conditions.
+- **Drawing limits:** Indicators set `max_lines_count`, `max_labels_count`, `max_boxes_count` in the `indicator()` call. Exceeding these silently removes oldest drawings.
+- **Lookback limit:** Find functions enforce a 5000-bar max lookback.
+- **`request.security()`:** Used for HTF data. `lookahead` parameter controls whether current or confirmed bar data is used.
