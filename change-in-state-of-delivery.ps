@@ -56,7 +56,8 @@ isBear(int i) =>
 countConsecBull(int startOff) =>
     n = 0
     i = startOff
-    while i < 200 and isBull(i)
+    // Include doji (close == open) as part of bullish run
+    while i < 200 and close[i] >= open[i]
         n += 1
         i += 1
     n
@@ -64,7 +65,8 @@ countConsecBull(int startOff) =>
 countConsecBear(int startOff) =>
     n = 0
     i = startOff
-    while i < 200 and isBear(i)
+    // Include doji (close == open) as part of bearish run
+    while i < 200 and close[i] <= open[i]
         n += 1
         i += 1
     n
