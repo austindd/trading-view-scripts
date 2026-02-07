@@ -479,11 +479,17 @@ identifyHtfSupplyZone() =>
 				if array.size(htfSupplyZones) > 0
 					array.shift(htfSupplyZones)
 
-			// Get Zone
+			// Get Zone - extend to include the base candle (like CTF does)
 			if not na(move)
 				prevZone := array.size(htfSupplyZones) > 0 ? array.get(htfSupplyZones, 0) : na
 				if na(zone)
-					zone := Zone.new(dir=-1, top=move.highPrice, btm=move.startPrice, startLoc=move.startLoc, endLoc=move.endLoc, strongMove=move, score=ZoneScore.new(strengthOfMove=0, timeAtZone=0, freshness=0, riskReward=0, originality=0, htfOverlappingZone=0), crossed=false, crossedLoc=na, touched=false, touchedLoc=na, isHtf=true)
+					// Get base candle high/low from history to extend the zone
+					baseIndex = move.numberOfBars
+					baseHigh = baseIndex < array.size(htfHighHist) ? nz(array.get(htfHighHist, baseIndex), move.highPrice) : move.highPrice
+					baseLow = baseIndex < array.size(htfLowHist) ? nz(array.get(htfLowHist, baseIndex), move.startPrice) : move.startPrice
+					zoneTop = math.max(move.highPrice, baseHigh)
+					zoneBtm = math.min(move.startPrice, baseLow)
+					zone := Zone.new(dir=-1, top=zoneTop, btm=zoneBtm, startLoc=move.startLoc, endLoc=move.endLoc, strongMove=move, score=ZoneScore.new(strengthOfMove=0, timeAtZone=0, freshness=0, riskReward=0, originality=0, htfOverlappingZone=0), crossed=false, crossedLoc=na, touched=false, touchedLoc=na, isHtf=true)
 
 		if not na(move) and not na(zone)
 			zoneHeight = zone.top - zone.btm
@@ -568,11 +574,17 @@ identifyHtfDemandZone() =>
 				if array.size(htfDemandZones) > 0
 					array.shift(htfDemandZones)
 
-			// Get Zone
+			// Get Zone - extend to include the base candle (like CTF does)
 			if not na(move)
 				prevZone := array.size(htfDemandZones) > 0 ? array.get(htfDemandZones, 0) : na
 				if na(zone)
-					zone := Zone.new(dir=1, top=move.startPrice, btm=move.lowPrice, startLoc=move.startLoc, endLoc=move.endLoc, strongMove=move, score=ZoneScore.new(strengthOfMove=0, timeAtZone=0, freshness=0, riskReward=0, originality=0, htfOverlappingZone=0), crossed=false, crossedLoc=na, touched=false, touchedLoc=na, isHtf=true)
+					// Get base candle high/low from history to extend the zone
+					baseIndex = move.numberOfBars
+					baseHigh = baseIndex < array.size(htfHighHist) ? nz(array.get(htfHighHist, baseIndex), move.startPrice) : move.startPrice
+					baseLow = baseIndex < array.size(htfLowHist) ? nz(array.get(htfLowHist, baseIndex), move.lowPrice) : move.lowPrice
+					zoneTop = math.max(move.startPrice, baseHigh)
+					zoneBtm = math.min(move.lowPrice, baseLow)
+					zone := Zone.new(dir=1, top=zoneTop, btm=zoneBtm, startLoc=move.startLoc, endLoc=move.endLoc, strongMove=move, score=ZoneScore.new(strengthOfMove=0, timeAtZone=0, freshness=0, riskReward=0, originality=0, htfOverlappingZone=0), crossed=false, crossedLoc=na, touched=false, touchedLoc=na, isHtf=true)
 
 		if not na(move) and not na(zone)
 			zoneHeight = zone.top - zone.btm
