@@ -76,23 +76,33 @@ countConsecBear(int startOff) =>
 // ============================================================================
 
 // Check if candle at offset `off` sweeps any swing low within lookback range.
-// A swing low at bar [j] means low[j] < low[j+1] and low[j] < low[j-1].
+// A candlestick swing low at bar [j] requires:
+//   1. low[j] < low[j+1] and low[j] < low[j-1] (middle candle's low is lowest)
+//   2. body bottom of [j] > low[j+1] (body is above the left candle's low)
 // Sweep = candle's wick reaches at/below swing low, but closes above it.
 doesSweepSwingLow(int off) =>
     result = false
     maxJ = math.min(off + swingLookback, 4998)
     for j = off + 2 to maxJ
-        if low[j] < low[j + 1] and low[j] < low[j - 1]
+        bodyBottom = math.min(open[j], close[j])
+        isSwingLow = low[j] < low[j + 1] and low[j] < low[j - 1] and bodyBottom > low[j + 1]
+        if isSwingLow
             if low[off] <= low[j] and close[off] > low[j]
                 result := true
                 break
     result
 
+// A candlestick swing high at bar [j] requires:
+//   1. high[j] > high[j+1] and high[j] > high[j-1] (middle candle's high is highest)
+//   2. body top of [j] < high[j+1] (body is below the left candle's high)
+// Sweep = candle's wick reaches at/above swing high, but closes below it.
 doesSweepSwingHigh(int off) =>
     result = false
     maxJ = math.min(off + swingLookback, 4998)
     for j = off + 2 to maxJ
-        if high[j] > high[j + 1] and high[j] > high[j - 1]
+        bodyTop = math.max(open[j], close[j])
+        isSwingHigh = high[j] > high[j + 1] and high[j] > high[j - 1] and bodyTop < high[j + 1]
+        if isSwingHigh
             if high[off] >= high[j] and close[off] < high[j]
                 result := true
                 break
