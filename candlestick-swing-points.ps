@@ -1,0 +1,108 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
+// © scientificbest
+
+//@version=5
+indicator("Candlestick Swing Points [SB]", "CSP [SB]", overlay=true, max_lines_count=500)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Inputs
+////////////////////////////////////////////////////////////////////////////////
+
+grp1 = "Display Settings"
+grp2 = "Colors"
+
+showSwingHighs          = input.bool(true, title="Show Swing Highs", group=grp1)
+showSwingLows           = input.bool(true, title="Show Swing Lows", group=grp1)
+extendLines             = input.bool(true, title="Extend Lines Until Crossed", group=grp1, tooltip="If enabled, lines extend until price crosses them. If disabled, lines extend to the end of the chart.")
+lineWidth               = input.int(1, title="Line Width", minval=1, maxval=5, group=grp1)
+maxLines                = input.int(50, title="Max Lines Per Side", minval=1, maxval=250, group=grp1)
+
+swingHighColor          = input.color(color.new(color.red, 30), title="Swing High Color", group=grp2)
+swingLowColor           = input.color(color.new(color.green, 30), title="Swing Low Color", group=grp2)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Types
+////////////////////////////////////////////////////////////////////////////////
+
+type SwingPoint
+    float price
+    int barIdx
+    line levelLine
+    bool crossed
+
+////////////////////////////////////////////////////////////////////////////////
+//// Variables
+////////////////////////////////////////////////////////////////////////////////
+
+var array<SwingPoint> swingHighs = array.new<SwingPoint>()
+var array<SwingPoint> swingLows = array.new<SwingPoint>()
+
+////////////////////////////////////////////////////////////////////////////////
+//// Swing Point Detection
+////////////////////////////////////////////////////////////////////////////////
+
+// Swing high: middle candle's high > both neighbors' highs
+// We check on bar_index, looking back at the completed 3-candle pattern
+// Pattern: [2] [1] [0] where [1] is the swing point
+isSwingHigh = high[1] > high[2] and high[1] > high[0]
+
+// Swing low: middle candle's low < both neighbors' lows
+isSwingLow = low[1] < low[2] and low[1] < low[0]
+
+////////////////////////////////////////////////////////////////////////////////
+//// Create New Swing Points
+////////////////////////////////////////////////////////////////////////////////
+
+if isSwingHigh and showSwingHighs
+    // Create line from the swing high
+    newLine = line.new(bar_index - 1, high[1], bar_index, high[1], color=swingHighColor, width=lineWidth, extend=extend.right)
+    newSwing = SwingPoint.new(price=high[1], barIdx=bar_index - 1, levelLine=newLine, crossed=false)
+    array.unshift(swingHighs, newSwing)
+
+    // Limit array size
+    if array.size(swingHighs) > maxLines
+        oldSwing = array.pop(swingHighs)
+        line.delete(oldSwing.levelLine)
+
+if isSwingLow and showSwingLows
+    // Create line from the swing low
+    newLine = line.new(bar_index - 1, low[1], bar_index, low[1], color=swingLowColor, width=lineWidth, extend=extend.right)
+    newSwing = SwingPoint.new(price=low[1], barIdx=bar_index - 1, levelLine=newLine, crossed=false)
+    array.unshift(swingLows, newSwing)
+
+    // Limit array size
+    if array.size(swingLows) > maxLines
+        oldSwing = array.pop(swingLows)
+        line.delete(oldSwing.levelLine)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Check for Crossed Levels
+////////////////////////////////////////////////////////////////////////////////
+
+if extendLines
+    // Check swing highs - crossed when price closes above
+    if array.size(swingHighs) > 0
+        for i = array.size(swingHighs) - 1 to 0
+            swing = array.get(swingHighs, i)
+            if not swing.crossed and swing.barIdx < bar_index
+                if close > swing.price
+                    swing.crossed := true
+                    line.set_extend(swing.levelLine, extend.none)
+                    line.set_x2(swing.levelLine, bar_index)
+
+    // Check swing lows - crossed when price closes below
+    if array.size(swingLows) > 0
+        for i = array.size(swingLows) - 1 to 0
+            swing = array.get(swingLows, i)
+            if not swing.crossed and swing.barIdx < bar_index
+                if close < swing.price
+                    swing.crossed := true
+                    line.set_extend(swing.levelLine, extend.none)
+                    line.set_x2(swing.levelLine, bar_index)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Alerts
+////////////////////////////////////////////////////////////////////////////////
+
+alertcondition(isSwingHigh, title="Swing High Formed", message="Candlestick Swing High formed at {{high}}")
+alertcondition(isSwingLow, title="Swing Low Formed", message="Candlestick Swing Low formed at {{low}}")
