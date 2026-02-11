@@ -1,0 +1,456 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("FVG / IFVG [SB]", shorttitle="FVG [SB]", overlay=true, max_boxes_count=500, max_labels_count=500)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+// Display Settings
+grpDisplay = "Display Settings"
+showBullishFVG   = input.bool(true, "Show Bullish FVG", group=grpDisplay)
+showBearishFVG   = input.bool(true, "Show Bearish FVG", group=grpDisplay)
+showIFVG         = input.bool(true, "Show IFVG (Inverted FVG)", group=grpDisplay, tooltip="When an FVG is mitigated (price closes through it), it becomes an Inverse FVG")
+showLabels       = input.bool(true, "Show Labels", group=grpDisplay)
+maxZonesPerTF    = input.int(20, "Max Zones Per Timeframe", minval=5, maxval=100, group=grpDisplay)
+
+// Extension Settings
+grpExtend = "Extension Settings"
+extendMode       = input.string("Right Edge", "Extend Mode", options=["Right Edge", "Fixed Bars"], group=grpExtend)
+fixedBars        = input.int(50, "Fixed Bar Count", minval=5, maxval=500, group=grpExtend, tooltip="Number of bars to extend when using Fixed Bars mode")
+
+// Timeframe 1 (Chart TF)
+grpTF1 = "Timeframe 1 (Chart)"
+tf1Enabled       = input.bool(true, "Enable", inline="tf1", group=grpTF1)
+tf1              = input.timeframe("", "Timeframe", inline="tf1", group=grpTF1)
+tf1BullColor     = input.color(color.new(#089981, 70), "Bullish", inline="tf1c", group=grpTF1)
+tf1BearColor     = input.color(color.new(#f23645, 70), "Bearish", inline="tf1c", group=grpTF1)
+tf1BullIFVGColor = input.color(color.new(#089981, 85), "Bull IFVG", inline="tf1i", group=grpTF1)
+tf1BearIFVGColor = input.color(color.new(#f23645, 85), "Bear IFVG", inline="tf1i", group=grpTF1)
+
+// Timeframe 2
+grpTF2 = "Timeframe 2"
+tf2Enabled       = input.bool(false, "Enable", inline="tf2", group=grpTF2)
+tf2              = input.timeframe("15", "Timeframe", inline="tf2", group=grpTF2)
+tf2BullColor     = input.color(color.new(#26a69a, 70), "Bullish", inline="tf2c", group=grpTF2)
+tf2BearColor     = input.color(color.new(#ef5350, 70), "Bearish", inline="tf2c", group=grpTF2)
+tf2BullIFVGColor = input.color(color.new(#26a69a, 85), "Bull IFVG", inline="tf2i", group=grpTF2)
+tf2BearIFVGColor = input.color(color.new(#ef5350, 85), "Bear IFVG", inline="tf2i", group=grpTF2)
+
+// Timeframe 3
+grpTF3 = "Timeframe 3"
+tf3Enabled       = input.bool(false, "Enable", inline="tf3", group=grpTF3)
+tf3              = input.timeframe("60", "Timeframe", inline="tf3", group=grpTF3)
+tf3BullColor     = input.color(color.new(#2196f3, 70), "Bullish", inline="tf3c", group=grpTF3)
+tf3BearColor     = input.color(color.new(#ff5722, 70), "Bearish", inline="tf3c", group=grpTF3)
+tf3BullIFVGColor = input.color(color.new(#2196f3, 85), "Bull IFVG", inline="tf3i", group=grpTF3)
+tf3BearIFVGColor = input.color(color.new(#ff5722, 85), "Bear IFVG", inline="tf3i", group=grpTF3)
+
+// Timeframe 4
+grpTF4 = "Timeframe 4"
+tf4Enabled       = input.bool(false, "Enable", inline="tf4", group=grpTF4)
+tf4              = input.timeframe("240", "Timeframe", inline="tf4", group=grpTF4)
+tf4BullColor     = input.color(color.new(#9c27b0, 70), "Bullish", inline="tf4c", group=grpTF4)
+tf4BearColor     = input.color(color.new(#ff9800, 70), "Bearish", inline="tf4c", group=grpTF4)
+tf4BullIFVGColor = input.color(color.new(#9c27b0, 85), "Bull IFVG", inline="tf4i", group=grpTF4)
+tf4BearIFVGColor = input.color(color.new(#ff9800, 85), "Bear IFVG", inline="tf4i", group=grpTF4)
+
+// Timeframe 5
+grpTF5 = "Timeframe 5"
+tf5Enabled       = input.bool(false, "Enable", inline="tf5", group=grpTF5)
+tf5              = input.timeframe("D", "Timeframe", inline="tf5", group=grpTF5)
+tf5BullColor     = input.color(color.new(#00bcd4, 70), "Bullish", inline="tf5c", group=grpTF5)
+tf5BearColor     = input.color(color.new(#e91e63, 70), "Bearish", inline="tf5c", group=grpTF5)
+tf5BullIFVGColor = input.color(color.new(#00bcd4, 85), "Bull IFVG", inline="tf5i", group=grpTF5)
+tf5BearIFVGColor = input.color(color.new(#e91e63, 85), "Bear IFVG", inline="tf5i", group=grpTF5)
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+type FVGZone
+    float top
+    float bottom
+    int startBar
+    int endBar
+    bool isBullish
+    bool isIFVG
+    box zoneBox
+    label zoneLabel
+    string tfLabel
+
+// ============================================================================
+// VARIABLES
+// ============================================================================
+
+var array<FVGZone> tf1Zones = array.new<FVGZone>()
+var array<FVGZone> tf2Zones = array.new<FVGZone>()
+var array<FVGZone> tf3Zones = array.new<FVGZone>()
+var array<FVGZone> tf4Zones = array.new<FVGZone>()
+var array<FVGZone> tf5Zones = array.new<FVGZone>()
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+// Get display text for timeframe
+getTFLabel(string tf) =>
+    tf == "" ? timeframe.period : tf
+
+// Create a new FVG zone
+createZone(array<FVGZone> zones, float top, float bottom, int startBar, bool isBullish, color bullColor, color bearColor, color bullIFVGColor, color bearIFVGColor, string tfLabel) =>
+    // Calculate end bar based on extension mode
+    endBar = extendMode == "Right Edge" ? bar_index + 500 : bar_index + fixedBars
+
+    // Determine colors
+    boxColor = isBullish ? bullColor : bearColor
+
+    // Create box
+    newBox = box.new(startBar, top, endBar, bottom, border_color=boxColor, bgcolor=boxColor, border_width=1)
+    if extendMode == "Right Edge"
+        box.set_extend(newBox, extend.right)
+
+    // Create label
+    newLabel = label.new(startBar, isBullish ? bottom : top, tfLabel + " FVG",
+                         style=isBullish ? label.style_label_up : label.style_label_down,
+                         color=color.new(boxColor, 50), textcolor=color.white, size=size.tiny)
+    if not showLabels
+        label.set_text(newLabel, "")
+
+    // Create zone object
+    newZone = FVGZone.new(top, bottom, startBar, endBar, isBullish, false, newBox, newLabel, tfLabel)
+    array.unshift(zones, newZone)
+
+    // Limit array size
+    if array.size(zones) > maxZonesPerTF
+        oldZone = array.pop(zones)
+        box.delete(oldZone.zoneBox)
+        label.delete(oldZone.zoneLabel)
+
+// Update zone to IFVG
+convertToIFVG(FVGZone zone, color bullIFVGColor, color bearIFVGColor) =>
+    if not zone.isIFVG
+        zone.isIFVG := true
+        ifvgColor = zone.isBullish ? bullIFVGColor : bearIFVGColor
+        box.set_bgcolor(zone.zoneBox, ifvgColor)
+        box.set_border_color(zone.zoneBox, ifvgColor)
+        if showLabels
+            label.set_text(zone.zoneLabel, zone.tfLabel + " IFVG")
+            label.set_color(zone.zoneLabel, color.new(ifvgColor, 50))
+
+// Check and update zones for mitigation
+checkZoneMitigation(array<FVGZone> zones, color bullIFVGColor, color bearIFVGColor) =>
+    if array.size(zones) > 0
+        for i = 0 to array.size(zones) - 1
+            zone = array.get(zones, i)
+            if not zone.isIFVG and zone.startBar < bar_index
+                // Bullish FVG mitigated when price closes below the bottom
+                if zone.isBullish and close < zone.bottom
+                    convertToIFVG(zone, bullIFVGColor, bearIFVGColor)
+                // Bearish FVG mitigated when price closes above the top
+                else if not zone.isBullish and close > zone.top
+                    convertToIFVG(zone, bullIFVGColor, bearIFVGColor)
+
+// Update zone end bars for fixed mode
+updateZoneExtensions(array<FVGZone> zones) =>
+    if extendMode == "Fixed Bars" and array.size(zones) > 0
+        for i = 0 to array.size(zones) - 1
+            zone = array.get(zones, i)
+            expectedEnd = zone.startBar + fixedBars
+            if bar_index <= expectedEnd
+                box.set_right(zone.zoneBox, expectedEnd)
+
+// ============================================================================
+// CHART TIMEFRAME FVG DETECTION
+// ============================================================================
+
+// Detect FVG on current bar (looking back at completed pattern)
+// Bullish FVG: low[0] > high[2] (gap between current low and 2-bars-ago high)
+// Bearish FVG: high[0] < low[2] (gap between current high and 2-bars-ago low)
+detectChartFVG() =>
+    bullishFVG = low[1] > high[3]
+    bearishFVG = high[1] < low[3]
+
+    bullTop = low[1]
+    bullBottom = high[3]
+    bearTop = low[3]
+    bearBottom = high[1]
+
+    [bullishFVG, bearishFVG, bullTop, bullBottom, bearTop, bearBottom]
+
+// ============================================================================
+// HTF FVG DETECTION
+// ============================================================================
+
+// Get HTF candle data with history
+getHTFData(string tf) =>
+    [htfHigh, htfLow, htfTime] = request.security(syminfo.tickerid, tf, [high, low, time])
+    [htfHigh, htfLow, htfTime]
+
+// Detect if we're on a new HTF bar
+isNewHTFBar(int htfTime) =>
+    ta.change(htfTime) != 0
+
+// ============================================================================
+// TIMEFRAME 1 PROCESSING (Chart TF or custom)
+// ============================================================================
+
+if tf1Enabled
+    if tf1 == ""
+        // Use chart timeframe directly
+        [bullFVG, bearFVG, bullTop, bullBottom, bearTop, bearBottom] = detectChartFVG()
+
+        if bullFVG and showBullishFVG
+            createZone(tf1Zones, bullTop, bullBottom, bar_index - 2, true, tf1BullColor, tf1BearColor, tf1BullIFVGColor, tf1BearIFVGColor, getTFLabel(tf1))
+
+        if bearFVG and showBearishFVG
+            createZone(tf1Zones, bearTop, bearBottom, bar_index - 2, false, tf1BullColor, tf1BearColor, tf1BullIFVGColor, tf1BearIFVGColor, getTFLabel(tf1))
+    else
+        // Use HTF via request.security
+        [htfHigh, htfLow, htfTime] = getHTFData(tf1)
+
+        var float tf1High0 = na
+        var float tf1Low0 = na
+        var float tf1High1 = na
+        var float tf1Low1 = na
+        var float tf1High2 = na
+        var float tf1Low2 = na
+        var float tf1High3 = na
+        var float tf1Low3 = na
+        var int tf1StartBar = na
+
+        if isNewHTFBar(htfTime)
+            tf1High3 := tf1High2
+            tf1Low3 := tf1Low2
+            tf1High2 := tf1High1
+            tf1Low2 := tf1Low1
+            tf1High1 := tf1High0
+            tf1Low1 := tf1Low0
+            tf1High0 := htfHigh[1]
+            tf1Low0 := htfLow[1]
+            tf1StartBar := bar_index
+
+            // Check for FVG on completed candles
+            if not na(tf1Low1) and not na(tf1High3)
+                bullFVG = tf1Low1 > tf1High3
+                bearFVG = tf1High1 < tf1Low3
+
+                if bullFVG and showBullishFVG
+                    createZone(tf1Zones, tf1Low1, tf1High3, bar_index, true, tf1BullColor, tf1BearColor, tf1BullIFVGColor, tf1BearIFVGColor, getTFLabel(tf1))
+
+                if bearFVG and showBearishFVG
+                    createZone(tf1Zones, tf1Low3, tf1High1, bar_index, false, tf1BullColor, tf1BearColor, tf1BullIFVGColor, tf1BearIFVGColor, getTFLabel(tf1))
+
+    // Check for mitigation
+    checkZoneMitigation(tf1Zones, tf1BullIFVGColor, tf1BearIFVGColor)
+    updateZoneExtensions(tf1Zones)
+
+// ============================================================================
+// TIMEFRAME 2 PROCESSING
+// ============================================================================
+
+if tf2Enabled
+    if tf2 == ""
+        [bullFVG, bearFVG, bullTop, bullBottom, bearTop, bearBottom] = detectChartFVG()
+
+        if bullFVG and showBullishFVG
+            createZone(tf2Zones, bullTop, bullBottom, bar_index - 2, true, tf2BullColor, tf2BearColor, tf2BullIFVGColor, tf2BearIFVGColor, getTFLabel(tf2))
+
+        if bearFVG and showBearishFVG
+            createZone(tf2Zones, bearTop, bearBottom, bar_index - 2, false, tf2BullColor, tf2BearColor, tf2BullIFVGColor, tf2BearIFVGColor, getTFLabel(tf2))
+    else
+        [htfHigh, htfLow, htfTime] = getHTFData(tf2)
+
+        var float tf2High0 = na
+        var float tf2Low0 = na
+        var float tf2High1 = na
+        var float tf2Low1 = na
+        var float tf2High2 = na
+        var float tf2Low2 = na
+        var float tf2High3 = na
+        var float tf2Low3 = na
+        var int tf2StartBar = na
+
+        if isNewHTFBar(htfTime)
+            tf2High3 := tf2High2
+            tf2Low3 := tf2Low2
+            tf2High2 := tf2High1
+            tf2Low2 := tf2Low1
+            tf2High1 := tf2High0
+            tf2Low1 := tf2Low0
+            tf2High0 := htfHigh[1]
+            tf2Low0 := htfLow[1]
+            tf2StartBar := bar_index
+
+            if not na(tf2Low1) and not na(tf2High3)
+                bullFVG = tf2Low1 > tf2High3
+                bearFVG = tf2High1 < tf2Low3
+
+                if bullFVG and showBullishFVG
+                    createZone(tf2Zones, tf2Low1, tf2High3, bar_index, true, tf2BullColor, tf2BearColor, tf2BullIFVGColor, tf2BearIFVGColor, getTFLabel(tf2))
+
+                if bearFVG and showBearishFVG
+                    createZone(tf2Zones, tf2Low3, tf2High1, bar_index, false, tf2BullColor, tf2BearColor, tf2BullIFVGColor, tf2BearIFVGColor, getTFLabel(tf2))
+
+    checkZoneMitigation(tf2Zones, tf2BullIFVGColor, tf2BearIFVGColor)
+    updateZoneExtensions(tf2Zones)
+
+// ============================================================================
+// TIMEFRAME 3 PROCESSING
+// ============================================================================
+
+if tf3Enabled
+    if tf3 == ""
+        [bullFVG, bearFVG, bullTop, bullBottom, bearTop, bearBottom] = detectChartFVG()
+
+        if bullFVG and showBullishFVG
+            createZone(tf3Zones, bullTop, bullBottom, bar_index - 2, true, tf3BullColor, tf3BearColor, tf3BullIFVGColor, tf3BearIFVGColor, getTFLabel(tf3))
+
+        if bearFVG and showBearishFVG
+            createZone(tf3Zones, bearTop, bearBottom, bar_index - 2, false, tf3BullColor, tf3BearColor, tf3BullIFVGColor, tf3BearIFVGColor, getTFLabel(tf3))
+    else
+        [htfHigh, htfLow, htfTime] = getHTFData(tf3)
+
+        var float tf3High0 = na
+        var float tf3Low0 = na
+        var float tf3High1 = na
+        var float tf3Low1 = na
+        var float tf3High2 = na
+        var float tf3Low2 = na
+        var float tf3High3 = na
+        var float tf3Low3 = na
+        var int tf3StartBar = na
+
+        if isNewHTFBar(htfTime)
+            tf3High3 := tf3High2
+            tf3Low3 := tf3Low2
+            tf3High2 := tf3High1
+            tf3Low2 := tf3Low1
+            tf3High1 := tf3High0
+            tf3Low1 := tf3Low0
+            tf3High0 := htfHigh[1]
+            tf3Low0 := htfLow[1]
+            tf3StartBar := bar_index
+
+            if not na(tf3Low1) and not na(tf3High3)
+                bullFVG = tf3Low1 > tf3High3
+                bearFVG = tf3High1 < tf3Low3
+
+                if bullFVG and showBullishFVG
+                    createZone(tf3Zones, tf3Low1, tf3High3, bar_index, true, tf3BullColor, tf3BearColor, tf3BullIFVGColor, tf3BearIFVGColor, getTFLabel(tf3))
+
+                if bearFVG and showBearishFVG
+                    createZone(tf3Zones, tf3Low3, tf3High1, bar_index, false, tf3BullColor, tf3BearColor, tf3BullIFVGColor, tf3BearIFVGColor, getTFLabel(tf3))
+
+    checkZoneMitigation(tf3Zones, tf3BullIFVGColor, tf3BearIFVGColor)
+    updateZoneExtensions(tf3Zones)
+
+// ============================================================================
+// TIMEFRAME 4 PROCESSING
+// ============================================================================
+
+if tf4Enabled
+    if tf4 == ""
+        [bullFVG, bearFVG, bullTop, bullBottom, bearTop, bearBottom] = detectChartFVG()
+
+        if bullFVG and showBullishFVG
+            createZone(tf4Zones, bullTop, bullBottom, bar_index - 2, true, tf4BullColor, tf4BearColor, tf4BullIFVGColor, tf4BearIFVGColor, getTFLabel(tf4))
+
+        if bearFVG and showBearishFVG
+            createZone(tf4Zones, bearTop, bearBottom, bar_index - 2, false, tf4BullColor, tf4BearColor, tf4BullIFVGColor, tf4BearIFVGColor, getTFLabel(tf4))
+    else
+        [htfHigh, htfLow, htfTime] = getHTFData(tf4)
+
+        var float tf4High0 = na
+        var float tf4Low0 = na
+        var float tf4High1 = na
+        var float tf4Low1 = na
+        var float tf4High2 = na
+        var float tf4Low2 = na
+        var float tf4High3 = na
+        var float tf4Low3 = na
+        var int tf4StartBar = na
+
+        if isNewHTFBar(htfTime)
+            tf4High3 := tf4High2
+            tf4Low3 := tf4Low2
+            tf4High2 := tf4High1
+            tf4Low2 := tf4Low1
+            tf4High1 := tf4High0
+            tf4Low1 := tf4Low0
+            tf4High0 := htfHigh[1]
+            tf4Low0 := htfLow[1]
+            tf4StartBar := bar_index
+
+            if not na(tf4Low1) and not na(tf4High3)
+                bullFVG = tf4Low1 > tf4High3
+                bearFVG = tf4High1 < tf4Low3
+
+                if bullFVG and showBullishFVG
+                    createZone(tf4Zones, tf4Low1, tf4High3, bar_index, true, tf4BullColor, tf4BearColor, tf4BullIFVGColor, tf4BearIFVGColor, getTFLabel(tf4))
+
+                if bearFVG and showBearishFVG
+                    createZone(tf4Zones, tf4Low3, tf4High1, bar_index, false, tf4BullColor, tf4BearColor, tf4BullIFVGColor, tf4BearIFVGColor, getTFLabel(tf4))
+
+    checkZoneMitigation(tf4Zones, tf4BullIFVGColor, tf4BearIFVGColor)
+    updateZoneExtensions(tf4Zones)
+
+// ============================================================================
+// TIMEFRAME 5 PROCESSING
+// ============================================================================
+
+if tf5Enabled
+    if tf5 == ""
+        [bullFVG, bearFVG, bullTop, bullBottom, bearTop, bearBottom] = detectChartFVG()
+
+        if bullFVG and showBullishFVG
+            createZone(tf5Zones, bullTop, bullBottom, bar_index - 2, true, tf5BullColor, tf5BearColor, tf5BullIFVGColor, tf5BearIFVGColor, getTFLabel(tf5))
+
+        if bearFVG and showBearishFVG
+            createZone(tf5Zones, bearTop, bearBottom, bar_index - 2, false, tf5BullColor, tf5BearColor, tf5BullIFVGColor, tf5BearIFVGColor, getTFLabel(tf5))
+    else
+        [htfHigh, htfLow, htfTime] = getHTFData(tf5)
+
+        var float tf5High0 = na
+        var float tf5Low0 = na
+        var float tf5High1 = na
+        var float tf5Low1 = na
+        var float tf5High2 = na
+        var float tf5Low2 = na
+        var float tf5High3 = na
+        var float tf5Low3 = na
+        var int tf5StartBar = na
+
+        if isNewHTFBar(htfTime)
+            tf5High3 := tf5High2
+            tf5Low3 := tf5Low2
+            tf5High2 := tf5High1
+            tf5Low2 := tf5Low1
+            tf5High1 := tf5High0
+            tf5Low1 := tf5Low0
+            tf5High0 := htfHigh[1]
+            tf5Low0 := htfLow[1]
+            tf5StartBar := bar_index
+
+            if not na(tf5Low1) and not na(tf5High3)
+                bullFVG = tf5Low1 > tf5High3
+                bearFVG = tf5High1 < tf5Low3
+
+                if bullFVG and showBullishFVG
+                    createZone(tf5Zones, tf5Low1, tf5High3, bar_index, true, tf5BullColor, tf5BearColor, tf5BullIFVGColor, tf5BearIFVGColor, getTFLabel(tf5))
+
+                if bearFVG and showBearishFVG
+                    createZone(tf5Zones, tf5Low3, tf5High1, bar_index, false, tf5BullColor, tf5BearColor, tf5BullIFVGColor, tf5BearIFVGColor, getTFLabel(tf5))
+
+    checkZoneMitigation(tf5Zones, tf5BullIFVGColor, tf5BearIFVGColor)
+    updateZoneExtensions(tf5Zones)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+// Alert conditions for new FVGs
+alertcondition(tf1Enabled and showBullishFVG and low[1] > high[3], "Bullish FVG", "Bullish FVG detected")
+alertcondition(tf1Enabled and showBearishFVG and high[1] < low[3], "Bearish FVG", "Bearish FVG detected")
