@@ -10,9 +10,9 @@ indicator("FVG / IFVG [SB]", shorttitle="FVG [SB]", overlay=true, max_boxes_coun
 
 // Display Settings
 grpDisplay = "Display Settings"
-showBullishFVG   = input.bool(true, "Show Bullish FVG", group=grpDisplay)
-showBearishFVG   = input.bool(true, "Show Bearish FVG", group=grpDisplay)
-showIFVG         = input.bool(true, "Show IFVG (Inverted FVG)", group=grpDisplay, tooltip="When an FVG is mitigated (price closes through it), it becomes an Inverse FVG")
+showBullishFVG   = input.bool(true, "Show Bullish", group=grpDisplay)
+showBearishFVG   = input.bool(true, "Show Bearish", group=grpDisplay)
+displayMode      = input.string("All", "Display Mode", options=["All", "FVG Only", "IFVG Only"], group=grpDisplay, tooltip="All: Show both FVG and IFVG\nFVG Only: Show only unmitigated FVGs (hide when mitigated)\nIFVG Only: Show only mitigated FVGs (IFVGs)")
 showLabels       = input.bool(true, "Show Labels", group=grpDisplay)
 maxZonesPerTF    = input.int(20, "Max Zones Per Timeframe", minval=5, maxval=100, group=grpDisplay)
 
@@ -119,6 +119,13 @@ createZone(array<FVGZone> zones, float top, float bottom, int startBar, bool isB
     if not showLabels
         label.set_text(newLabel, "")
 
+    // Hide initially if IFVG Only mode
+    if displayMode == "IFVG Only"
+        box.set_bgcolor(newBox, color.new(boxColor, 100))
+        box.set_border_color(newBox, color.new(boxColor, 100))
+        label.set_textcolor(newLabel, color.new(color.white, 100))
+        label.set_color(newLabel, color.new(boxColor, 100))
+
     // Create zone object
     newZone = FVGZone.new(top, bottom, startBar, endBar, isBullish, false, newBox, newLabel, tfLabel)
     array.unshift(zones, newZone)
@@ -134,11 +141,28 @@ convertToIFVG(FVGZone zone, color bullIFVGColor, color bearIFVGColor) =>
     if not zone.isIFVG
         zone.isIFVG := true
         ifvgColor = zone.isBullish ? bullIFVGColor : bearIFVGColor
-        box.set_bgcolor(zone.zoneBox, ifvgColor)
-        box.set_border_color(zone.zoneBox, ifvgColor)
-        if showLabels
-            label.set_text(zone.zoneLabel, zone.tfLabel + " IFVG")
-            label.set_color(zone.zoneLabel, color.new(ifvgColor, 50))
+
+        if displayMode == "FVG Only"
+            // Hide the zone when it becomes IFVG
+            box.set_bgcolor(zone.zoneBox, color.new(ifvgColor, 100))
+            box.set_border_color(zone.zoneBox, color.new(ifvgColor, 100))
+            label.set_textcolor(zone.zoneLabel, color.new(color.white, 100))
+            label.set_color(zone.zoneLabel, color.new(ifvgColor, 100))
+        else if displayMode == "IFVG Only"
+            // Show the zone now that it's an IFVG
+            box.set_bgcolor(zone.zoneBox, ifvgColor)
+            box.set_border_color(zone.zoneBox, ifvgColor)
+            if showLabels
+                label.set_text(zone.zoneLabel, zone.tfLabel + " IFVG")
+                label.set_color(zone.zoneLabel, color.new(ifvgColor, 50))
+                label.set_textcolor(zone.zoneLabel, color.white)
+        else
+            // "All" mode - show as IFVG with different color
+            box.set_bgcolor(zone.zoneBox, ifvgColor)
+            box.set_border_color(zone.zoneBox, ifvgColor)
+            if showLabels
+                label.set_text(zone.zoneLabel, zone.tfLabel + " IFVG")
+                label.set_color(zone.zoneLabel, color.new(ifvgColor, 50))
 
 // Check and update zones for mitigation
 checkZoneMitigation(array<FVGZone> zones, color bullIFVGColor, color bearIFVGColor) =>
