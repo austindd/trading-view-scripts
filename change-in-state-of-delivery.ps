@@ -12,6 +12,13 @@ indicator("Change In State Of Delivery [SB]", shorttitle="CISD [SB]", overlay=tr
 showBullish = input.bool(true, "Show Bullish CISD", group="Display")
 showBearish = input.bool(true, "Show Bearish CISD", group="Display")
 
+// Detection Types
+grpDetection = "Detection Types"
+detectMultiLegIn   = input.bool(true, "2+ Leg-In (Standard)", group=grpDetection, tooltip="2+ leg-in candles engulfed by 1+ leg-out candles")
+detectSingleWithFVG = input.bool(true, "1 Leg-In + FVG", group=grpDetection, tooltip="1 leg-in candle + 2+ leg-out candles with Fair Value Gap")
+detectSingleWithWick = input.bool(true, "1 Leg-In + Wick", group=grpDetection, tooltip="1 leg-in candle + 1 leg-out candle that wicks through leg-in's extreme")
+detectDoubleLegIn  = input.bool(true, "Double Leg-In", group=grpDetection, tooltip="1 leg-in + 2+ leg-out that engulfs two separate leg-in sequences")
+
 // Settings
 swingLookback = input.int(50, "Swing Lookback Bars", minval=5, maxval=200, group="Settings", tooltip="How far back to search for candlestick swing highs/lows that can be swept")
 
@@ -182,14 +189,14 @@ detectCISD() =>
         if bearRun >= 1 and bullRun >= 1 and close[preOff] >= open[preOff]
             // Check engulfment: close above first bearish candle's open
             if close > open[firstBearOff]
-                if bearRun >= 2
+                if bearRun >= 2 and detectMultiLegIn
                     // 2+ leg-in candles: valid CISD, no wick required
                     bullishCISD := true
                 else if bearRun == 1 and bullRun >= 2
                     // 1 leg-in + 2+ leg-out: valid if bullish FVG forms
-                    if hasBullishFVG(0, firstBearOff)
+                    if detectSingleWithFVG and hasBullishFVG(0, firstBearOff)
                         bullishCISD := true
-                    else
+                    else if detectDoubleLegIn
                         // Also valid if leg-out engulfs TWO separate leg-in sequences
                         // Pattern: [leg-in 1: bearish] + [middle: bullish] + [leg-in 2: bearish] + [leg-out: bullish]
                         middleBullRun = countConsecBull(preOff)
@@ -201,7 +208,7 @@ detectCISD() =>
                                 // Check if leg-out engulfs all the way back to first leg-in
                                 if close > open[firstBear1Off]
                                     bullishCISD := true
-                else if bearRun == 1 and bullRun == 1
+                else if bearRun == 1 and bullRun == 1 and detectSingleWithWick
                     // 1 leg-in + 1 leg-out: must wick below leg-in's low
                     if low[0] < low[firstBearOff]
                         bullishCISD := true
@@ -219,14 +226,14 @@ detectCISD() =>
         if bullRun >= 1 and bearRun >= 1 and close[preOff] <= open[preOff]
             // Check engulfment: close below first bullish candle's open
             if close < open[firstBullOff]
-                if bullRun >= 2
+                if bullRun >= 2 and detectMultiLegIn
                     // 2+ leg-in candles: valid CISD, no wick required
                     bearishCISD := true
                 else if bullRun == 1 and bearRun >= 2
                     // 1 leg-in + 2+ leg-out: valid if bearish FVG forms
-                    if hasBearishFVG(0, firstBullOff)
+                    if detectSingleWithFVG and hasBearishFVG(0, firstBullOff)
                         bearishCISD := true
-                    else
+                    else if detectDoubleLegIn
                         // Also valid if leg-out engulfs TWO separate leg-in sequences
                         // Pattern: [leg-in 1: bullish] + [middle: bearish] + [leg-in 2: bullish] + [leg-out: bearish]
                         middleBearRun = countConsecBear(preOff)
@@ -238,7 +245,7 @@ detectCISD() =>
                                 // Check if leg-out engulfs all the way back to first leg-in
                                 if close < open[firstBull1Off]
                                     bearishCISD := true
-                else if bullRun == 1 and bearRun == 1
+                else if bullRun == 1 and bearRun == 1 and detectSingleWithWick
                     // 1 leg-in + 1 leg-out: must wick above leg-in's high
                     if high[0] > high[firstBullOff]
                         bearishCISD := true
