@@ -28,7 +28,8 @@ type SwingPoint
     float price
     int barIdx
     line levelLine
-    bool crossed
+    bool wicked      // Wicked through but not closed through
+    bool crossed     // Closed through
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Variables
@@ -55,8 +56,8 @@ isSwingLow = low[1] < low[2] and low[1] < low[0]
 
 if isSwingHigh and showSwingHighs
     // Create line from the swing high
-    newLine = line.new(bar_index - 1, high[1], bar_index, high[1], color=swingHighColor, width=lineWidth, extend=extend.right)
-    newSwing = SwingPoint.new(price=high[1], barIdx=bar_index - 1, levelLine=newLine, crossed=false)
+    newLine = line.new(bar_index - 1, high[1], bar_index, high[1], color=swingHighColor, width=lineWidth, extend=extend.right, style=line.style_solid)
+    newSwing = SwingPoint.new(price=high[1], barIdx=bar_index - 1, levelLine=newLine, wicked=false, crossed=false)
     array.unshift(swingHighs, newSwing)
 
     // Limit array size
@@ -66,8 +67,8 @@ if isSwingHigh and showSwingHighs
 
 if isSwingLow and showSwingLows
     // Create line from the swing low
-    newLine = line.new(bar_index - 1, low[1], bar_index, low[1], color=swingLowColor, width=lineWidth, extend=extend.right)
-    newSwing = SwingPoint.new(price=low[1], barIdx=bar_index - 1, levelLine=newLine, crossed=false)
+    newLine = line.new(bar_index - 1, low[1], bar_index, low[1], color=swingLowColor, width=lineWidth, extend=extend.right, style=line.style_solid)
+    newSwing = SwingPoint.new(price=low[1], barIdx=bar_index - 1, levelLine=newLine, wicked=false, crossed=false)
     array.unshift(swingLows, newSwing)
 
     // Limit array size
@@ -76,29 +77,40 @@ if isSwingLow and showSwingLows
         line.delete(oldSwing.levelLine)
 
 ////////////////////////////////////////////////////////////////////////////////
-//// Check for Crossed Levels
+//// Check for Wicked and Crossed Levels
 ////////////////////////////////////////////////////////////////////////////////
 
-if extendLines
-    // Check swing highs - crossed when price closes above
-    if array.size(swingHighs) > 0
-        for i = array.size(swingHighs) - 1 to 0
-            swing = array.get(swingHighs, i)
-            if not swing.crossed and swing.barIdx < bar_index
-                if close > swing.price
-                    swing.crossed := true
+// Check swing highs
+if array.size(swingHighs) > 0
+    for i = array.size(swingHighs) - 1 to 0
+        swing = array.get(swingHighs, i)
+        if not swing.crossed and swing.barIdx < bar_index
+            // Check for close through (crossed)
+            if close > swing.price
+                swing.crossed := true
+                if extendLines
                     line.set_extend(swing.levelLine, extend.none)
                     line.set_x2(swing.levelLine, bar_index)
+            // Check for wick through (wicked but not closed)
+            else if not swing.wicked and high > swing.price
+                swing.wicked := true
+                line.set_style(swing.levelLine, line.style_dotted)
 
-    // Check swing lows - crossed when price closes below
-    if array.size(swingLows) > 0
-        for i = array.size(swingLows) - 1 to 0
-            swing = array.get(swingLows, i)
-            if not swing.crossed and swing.barIdx < bar_index
-                if close < swing.price
-                    swing.crossed := true
+// Check swing lows
+if array.size(swingLows) > 0
+    for i = array.size(swingLows) - 1 to 0
+        swing = array.get(swingLows, i)
+        if not swing.crossed and swing.barIdx < bar_index
+            // Check for close through (crossed)
+            if close < swing.price
+                swing.crossed := true
+                if extendLines
                     line.set_extend(swing.levelLine, extend.none)
                     line.set_x2(swing.levelLine, bar_index)
+            // Check for wick through (wicked but not closed)
+            else if not swing.wicked and low < swing.price
+                swing.wicked := true
+                line.set_style(swing.levelLine, line.style_dotted)
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Alerts
