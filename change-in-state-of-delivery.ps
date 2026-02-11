@@ -126,67 +126,121 @@ anySweepSwingHigh(int startOff, int endOff) =>
     result
 
 // ============================================================================
+// FVG DETECTION
+// ============================================================================
+
+// Check if a bullish FVG exists in the range [startOff..endOff] (can include leg-in candle)
+// Bullish FVG: low of 3rd candle > high of 1st candle (gap up)
+hasBullishFVG(int startOff, int endOff) =>
+    result = false
+    if endOff - startOff >= 2  // Need at least 3 candles
+        for i = startOff to endOff - 2
+            if low[i] > high[i + 2]
+                result := true
+                break
+    result
+
+// Check if a bearish FVG exists in the range [startOff..endOff] (can include leg-in candle)
+// Bearish FVG: high of 3rd candle < low of 1st candle (gap down)
+hasBearishFVG(int startOff, int endOff) =>
+    result = false
+    if endOff - startOff >= 2  // Need at least 3 candles
+        for i = startOff to endOff - 2
+            if high[i] < low[i + 2]
+                result := true
+                break
+    result
+
+// ============================================================================
 // CISD DETECTION FUNCTION
 // ============================================================================
 
 // Stateless detection — returns true on every bar where pattern conditions
 // are currently met. Deduplication is handled by the caller via edge detection.
+//
+// Rules:
+// 1. 2+ leg-in candles engulfed by 1+ leg-out candles = valid CISD (no wick required)
+// 2. 1 leg-in candle + 2+ leg-out candles = valid only if FVG forms in leg-out
+//    (can include final leg-in candle for FVG calculation)
+// 3. 1 leg-in candle + 1 leg-out candle = valid only if leg-out wicks through
+//    the leg-in's high/low before breaking structure
+//
 detectCISD() =>
     bullishCISD = false
     bearishCISD = false
 
     // ─── Bullish CISD ───────────────────────────────────────────────────
-    if showBullish and isBull(0)
-        bullRun  = countConsecBull(0)
-        bearRun  = countConsecBear(bullRun)
+    // Leg-in: bearish candles (close < open)
+    // Leg-out: bullish candles (close >= open, including doji)
+    if showBullish and close >= open  // Current candle is bullish or doji
+        bullRun  = countConsecBull(0)   // Leg-out length
+        bearRun  = countConsecBear(bullRun)  // Leg-in length
         preOff   = bullRun + bearRun
         firstBearOff = bullRun + bearRun - 1
 
-        // Standard: [bullish] [≥2 bearish] [≥2 bullish], last bullish closes above first bearish open
-        // Any candle in the pattern (bearish or bullish) can sweep the swing low
-        if bearRun >= 2 and bullRun >= 2 and isBull(preOff)
+        // Must have at least 1 candle in each leg and pattern preceded by bullish/doji
+        if bearRun >= 1 and bullRun >= 1 and close[preOff] >= open[preOff]
+            // Check engulfment: close above first bearish candle's open
             if close > open[firstBearOff]
-                if anySweepSwingLow(0, firstBearOff)
+                if bearRun >= 2
+                    // 2+ leg-in candles: valid CISD, no wick required
                     bullishCISD := true
-
-        // Exception: single bullish candle sweeps all preceding candles + a swing low
-        if not bullishCISD and bearRun >= 1 and bullRun >= 1 and isBull(preOff)
-            firstBullOff = bullRun - 1
-            allSwept = true
-            for k = firstBullOff + 1 to preOff
-                if low[firstBullOff] >= low[k]
-                    allSwept := false
-                    break
-            if allSwept
-                if close[firstBullOff] > open[firstBearOff]
-                    if doesSweepSwingLow(firstBullOff)
+                else if bearRun == 1 and bullRun >= 2
+                    // 1 leg-in + 2+ leg-out: valid if bullish FVG forms
+                    if hasBullishFVG(0, firstBearOff)
+                        bullishCISD := true
+                    else
+                        // Also valid if leg-out engulfs TWO separate leg-in sequences
+                        // Pattern: [leg-in 1: bearish] + [middle: bullish] + [leg-in 2: bearish] + [leg-out: bullish]
+                        middleBullRun = countConsecBull(preOff)
+                        if middleBullRun >= 1
+                            bearRun2 = countConsecBear(preOff + middleBullRun)
+                            if bearRun2 >= 1
+                                // Found double leg-in structure
+                                firstBear1Off = preOff + middleBullRun + bearRun2 - 1
+                                // Check if leg-out engulfs all the way back to first leg-in
+                                if close > open[firstBear1Off]
+                                    bullishCISD := true
+                else if bearRun == 1 and bullRun == 1
+                    // 1 leg-in + 1 leg-out: must wick below leg-in's low
+                    if low[0] < low[firstBearOff]
                         bullishCISD := true
 
     // ─── Bearish CISD ───────────────────────────────────────────────────
-    if showBearish and isBear(0)
-        bearRun  = countConsecBear(0)
-        bullRun  = countConsecBull(bearRun)
+    // Leg-in: bullish candles (close > open)
+    // Leg-out: bearish candles (close <= open, including doji)
+    if showBearish and close <= open  // Current candle is bearish or doji
+        bearRun  = countConsecBear(0)   // Leg-out length
+        bullRun  = countConsecBull(bearRun)  // Leg-in length
         preOff   = bearRun + bullRun
         firstBullOff = bearRun + bullRun - 1
 
-        // Standard: [bearish] [≥2 bullish] [≥2 bearish], last bearish closes below first bullish open
-        // Any candle in the pattern (bullish or bearish) can sweep the swing high
-        if bullRun >= 2 and bearRun >= 2 and isBear(preOff)
+        // Must have at least 1 candle in each leg and pattern preceded by bearish/doji
+        if bullRun >= 1 and bearRun >= 1 and close[preOff] <= open[preOff]
+            // Check engulfment: close below first bullish candle's open
             if close < open[firstBullOff]
-                if anySweepSwingHigh(0, firstBullOff)
+                if bullRun >= 2
+                    // 2+ leg-in candles: valid CISD, no wick required
                     bearishCISD := true
-
-        // Exception: single bearish candle sweeps all preceding candles + a swing high
-        if not bearishCISD and bullRun >= 1 and bearRun >= 1 and isBear(preOff)
-            firstBearOff = bearRun - 1
-            allSwept = true
-            for k = firstBearOff + 1 to preOff
-                if high[firstBearOff] <= high[k]
-                    allSwept := false
-                    break
-            if allSwept
-                if close[firstBearOff] < open[firstBullOff]
-                    if doesSweepSwingHigh(firstBearOff)
+                else if bullRun == 1 and bearRun >= 2
+                    // 1 leg-in + 2+ leg-out: valid if bearish FVG forms
+                    if hasBearishFVG(0, firstBullOff)
+                        bearishCISD := true
+                    else
+                        // Also valid if leg-out engulfs TWO separate leg-in sequences
+                        // Pattern: [leg-in 1: bullish] + [middle: bearish] + [leg-in 2: bullish] + [leg-out: bearish]
+                        middleBearRun = countConsecBear(preOff)
+                        if middleBearRun >= 1
+                            bullRun2 = countConsecBull(preOff + middleBearRun)
+                            if bullRun2 >= 1
+                                // Found double leg-in structure
+                                firstBull1Off = preOff + middleBearRun + bullRun2 - 1
+                                // Check if leg-out engulfs all the way back to first leg-in
+                                if close < open[firstBull1Off]
+                                    bearishCISD := true
+                else if bullRun == 1 and bearRun == 1
+                    // 1 leg-in + 1 leg-out: must wick above leg-in's high
+                    if high[0] > high[firstBullOff]
                         bearishCISD := true
 
     [bullishCISD, bearishCISD]
