@@ -13,6 +13,7 @@ grp2 = "Colors"
 
 showSwingHighs          = input.bool(true, title="Show Swing Highs", group=grp1)
 showSwingLows           = input.bool(true, title="Show Swing Lows", group=grp1)
+allowEqualSwings        = input.bool(true, title="Allow Equal Highs/Lows", group=grp1, tooltip="Count consecutive equal highs as a valid swing high when surrounded by lower highs (and vice versa for lows)")
 extendLines             = input.bool(true, title="Extend Lines Until Crossed", group=grp1, tooltip="If enabled, lines extend until price crosses them. If disabled, lines extend to the end of the chart.")
 lineWidth               = input.int(1, title="Line Width", minval=1, maxval=5, group=grp1)
 maxLines                = input.int(50, title="Max Lines Per Side", minval=1, maxval=250, group=grp1)
@@ -42,22 +43,76 @@ var array<SwingPoint> swingLows = array.new<SwingPoint>()
 //// Swing Point Detection
 ////////////////////////////////////////////////////////////////////////////////
 
-// Swing high: middle candle's high > both neighbors' highs
-// We check on bar_index, looking back at the completed 3-candle pattern
-// Pattern: [2] [1] [0] where [1] is the swing point
-isSwingHigh = high[1] > high[2] and high[1] > high[0]
+// Count consecutive equal highs going back from offset, returns count and first bar offset
+countEqualHighs(int startOff) =>
+    count = 1
+    price = high[startOff]
+    i = startOff + 1
+    while i < 200 and high[i] == price
+        count += 1
+        i += 1
+    [count, i - 1]  // Returns count and offset of last equal high
 
-// Swing low: middle candle's low < both neighbors' lows
-isSwingLow = low[1] < low[2] and low[1] < low[0]
+// Count consecutive equal lows going back from offset
+countEqualLows(int startOff) =>
+    count = 1
+    price = low[startOff]
+    i = startOff + 1
+    while i < 200 and low[i] == price
+        count += 1
+        i += 1
+    [count, i - 1]  // Returns count and offset of last equal low
+
+// Standard swing high: middle candle's high > both neighbors' highs
+// Pattern: [2] [1] [0] where [1] is the swing point
+isStandardSwingHigh = high[1] > high[2] and high[1] > high[0]
+
+// Standard swing low: middle candle's low < both neighbors' lows
+isStandardSwingLow = low[1] < low[2] and low[1] < low[0]
+
+// Equal highs swing: consecutive equal highs surrounded by lower highs
+// Detected when current bar breaks below the plateau
+var int equalHighStartBar = na
+var float equalHighPrice = na
+isEqualSwingHigh = false
+
+if allowEqualSwings and high[0] < high[1]
+    [eqCount, lastEqOff] = countEqualHighs(1)
+    // Check if we have 2+ equal highs and the bar before them is lower
+    if eqCount >= 2 and high[lastEqOff + 1] < high[lastEqOff]
+        isEqualSwingHigh := true
+        equalHighStartBar := bar_index - lastEqOff
+        equalHighPrice := high[1]
+
+// Equal lows swing: consecutive equal lows surrounded by higher lows
+var int equalLowStartBar = na
+var float equalLowPrice = na
+isEqualSwingLow = false
+
+if allowEqualSwings and low[0] > low[1]
+    [eqCount, lastEqOff] = countEqualLows(1)
+    // Check if we have 2+ equal lows and the bar before them is higher
+    if eqCount >= 2 and low[lastEqOff + 1] > low[lastEqOff]
+        isEqualSwingLow := true
+        equalLowStartBar := bar_index - lastEqOff
+        equalLowPrice := low[1]
+
+// Combined detection
+isSwingHigh = isStandardSwingHigh or isEqualSwingHigh
+isSwingLow = isStandardSwingLow or isEqualSwingLow
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Create New Swing Points
 ////////////////////////////////////////////////////////////////////////////////
 
 if isSwingHigh and showSwingHighs
+    // Determine start bar and price based on swing type
+    startBar = isEqualSwingHigh ? equalHighStartBar : bar_index - 1
+    swingPrice = isEqualSwingHigh ? equalHighPrice : high[1]
+
     // Create line from the swing high
-    newLine = line.new(bar_index - 1, high[1], bar_index, high[1], color=swingHighColor, width=lineWidth, extend=extend.right, style=line.style_solid)
-    newSwing = SwingPoint.new(price=high[1], barIdx=bar_index - 1, levelLine=newLine, wicked=false, crossed=false)
+    newLine = line.new(startBar, swingPrice, bar_index, swingPrice, color=swingHighColor, width=lineWidth, extend=extend.right, style=line.style_solid)
+    newSwing = SwingPoint.new(price=swingPrice, barIdx=startBar, levelLine=newLine, wicked=false, crossed=false)
     array.unshift(swingHighs, newSwing)
 
     // Limit array size
@@ -66,9 +121,13 @@ if isSwingHigh and showSwingHighs
         line.delete(oldSwing.levelLine)
 
 if isSwingLow and showSwingLows
+    // Determine start bar and price based on swing type
+    startBar = isEqualSwingLow ? equalLowStartBar : bar_index - 1
+    swingPrice = isEqualSwingLow ? equalLowPrice : low[1]
+
     // Create line from the swing low
-    newLine = line.new(bar_index - 1, low[1], bar_index, low[1], color=swingLowColor, width=lineWidth, extend=extend.right, style=line.style_solid)
-    newSwing = SwingPoint.new(price=low[1], barIdx=bar_index - 1, levelLine=newLine, wicked=false, crossed=false)
+    newLine = line.new(startBar, swingPrice, bar_index, swingPrice, color=swingLowColor, width=lineWidth, extend=extend.right, style=line.style_solid)
+    newSwing = SwingPoint.new(price=swingPrice, barIdx=startBar, levelLine=newLine, wicked=false, crossed=false)
     array.unshift(swingLows, newSwing)
 
     // Limit array size
