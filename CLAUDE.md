@@ -45,10 +45,20 @@ The core of this repo. Each version builds on the previous:
 | `__working_version_of_v7.ps` | 2,819 | Experimental variant of V7 with tweaked defaults (lime/maroon colors). |
 | `market-structure-mapper-strategy-v1.ps` | 2,836 | **Strategy** (not indicator). Backtestable zone trading with directional bias filter, R:R config (1:1–5:1), max active trades, zone intersection stats table. |
 
+### Supply & Demand Zones Series
+
+Standalone S&D zone detection using z-score analysis to identify significant price moves:
+
+| File | Lines | Description |
+|------|-------|-------------|
+| `supply-demand-zones-v4.ps` | 471 | Z-score based zone detection. Identifies "explosive" candles via statistical outliers, creates zones at move origins. Tracks touched/crossed status. Configurable significance threshold and move-to-zone ratio filter. |
+| `supply-demand-zones-v8.ps` | 756 | **Multi-timeframe version.** Adds HTF zone detection with independent enable/colors. Maintains HTF candle history arrays for proper lookback. Debug labels option for troubleshooting. |
+
 ### Specialized Indicators
 
 | File | Lines | Description |
 |------|-------|-------------|
+| `candlestick-swing-points.ps` | 120 | Plots horizontal lines from 3-candle swing points (middle candle high/low exceeds neighbors). Lines are solid until wicked (dotted) or closed through (stops extending). |
 | `candle-continuation-theory.ps` | 201 | HTF candle structure analysis for continuation signals. Visualizes HTF candle boxes (N, N-1, N-2) with BOS detection across HTF candles. |
 | `virgin-wick-theory.ps` | 97 | Identifies virgin wicks (uncrossed wick extremes from HTF candles). Array-based tracking with 2-candle expiry. Alerts on close-through. |
 | `htf-engulfing-sweep.ps` | 206 | Detects HTF engulfing patterns with sweep ray generation. Rays extend 2 HTF candles then stop. |
@@ -68,9 +78,11 @@ The core of this repo. Each version builds on the previous:
 ### Key Concepts
 
 - **Break of Structure (BOS):** Price closes beyond a current valid level
-- **Sweep:** Wick crosses a level but close doesn't (level becomes dotted)
+- **Sweep/Wick:** Wick crosses a level but close doesn't (level becomes dotted)
 - **Valid High/Low:** Structure points identified after breakdowns/breakouts
 - **Supply/Demand Zones (V5+):** Box regions around structure points that may act as future support/resistance
+- **Candlestick Swing Point:** 3-candle pattern where middle candle's high/low exceeds both neighbors
+- **Z-Score Zone Detection:** Statistical outlier detection to identify "explosive" moves; zones form at move origins
 
 ### Multi-Timeframe Pattern
 
@@ -79,6 +91,20 @@ All HTF-aware scripts use:
 [htfHigh, htfLow, htfOpen, htfClose, htfTime] = request.security(syminfo.tickerid, htfTimeframe, [...])
 newHTF = ta.change(htfTime) != 0  // Detect new HTF bar
 ```
+
+### HTF History Arrays Pattern (S&D Zones V8)
+
+For HTF calculations requiring lookback across multiple HTF candles, maintain history arrays:
+```pine
+var float[] htfHighHist = array.new<float>(50, na)
+// ... other OHLC history arrays
+
+if htfNewCandle
+    array.unshift(htfHighHist, htfHigh[1])  // Push completed candle
+    if array.size(htfHighHist) > 50
+        array.pop(htfHighHist)
+```
+This allows iterating over previous HTF candles in detection loops, since `htfHigh[i]` only gives CTF bar history of sampled HTF values.
 
 ### Data Structure Evolution
 
