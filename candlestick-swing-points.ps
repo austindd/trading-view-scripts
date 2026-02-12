@@ -82,6 +82,66 @@ var array<SwingPoint> tf5SwingLows = array.new<SwingPoint>()
 //// Helper Functions
 ////////////////////////////////////////////////////////////////////////////////
 
+// Find lowest low between two bar indices (from MSM v7 pattern)
+findLowestBetween(startBar, endBar) =>
+    float lowestPrice = na
+    int lowestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    int maxLookback = 200
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(low[i])
+                if na(lowestPrice) or low[i] < lowestPrice
+                    lowestPrice := low[i]
+                    lowestBarIndex := currentBar - i
+
+    [lowestPrice, lowestBarIndex]
+
+// Find highest high between two bar indices (from MSM v7 pattern)
+findHighestBetween(startBar, endBar) =>
+    float highestPrice = na
+    int highestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    int maxLookback = 200
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(high[i])
+                if na(highestPrice) or high[i] > highestPrice
+                    highestPrice := high[i]
+                    highestBarIndex := currentBar - i
+
+    [highestPrice, highestBarIndex]
+
 // Create a new swing point and add to array
 createSwingPoint(array<SwingPoint> swings, float price, int startBar, color lineColor) =>
     newLine = line.new(startBar, price, bar_index, price, color=lineColor, width=lineWidth, extend=extend.right, style=line.style_solid)
@@ -268,11 +328,16 @@ if tf1Enabled
             tf1Bar2 := tf1Bar1, tf1Bar1 := tf1Bar0, tf1Bar0 := bar_index
 
             // Detect swing points on completed HTF candles
-            if not na(tf1H1) and not na(tf1H2) and not na(tf1H0)
+            // tf1H1/L1 is the middle candle, its LTF bar range is (tf1Bar2, tf1Bar1]
+            if not na(tf1H1) and not na(tf1H2) and not na(tf1H0) and not na(tf1Bar2) and not na(tf1Bar1)
                 if tf1H1 > tf1H2 and tf1H1 > tf1H0 and showSwingHighs
-                    createSwingPoint(tf1SwingHighs, tf1H1, tf1Bar1, tf1HighColor)
+                    [_, highBar] = findHighestBetween(tf1Bar2, tf1Bar1)
+                    if not na(highBar)
+                        createSwingPoint(tf1SwingHighs, tf1H1, highBar, tf1HighColor)
                 if tf1L1 < tf1L2 and tf1L1 < tf1L0 and showSwingLows
-                    createSwingPoint(tf1SwingLows, tf1L1, tf1Bar1, tf1LowColor)
+                    [_, lowBar] = findLowestBetween(tf1Bar2, tf1Bar1)
+                    if not na(lowBar)
+                        createSwingPoint(tf1SwingLows, tf1L1, lowBar, tf1LowColor)
 
         useHTFMode = wickMode == "HTF Candle"
         checkSwingHighs(tf1SwingHighs, useHTFMode, tf1H0, tf1L0, tf1C0, tf1NewHTF)
@@ -309,11 +374,15 @@ if tf2Enabled
             tf2C1 := tf2C0, tf2C0 := htfClose[1]
             tf2Bar2 := tf2Bar1, tf2Bar1 := tf2Bar0, tf2Bar0 := bar_index
 
-            if not na(tf2H1) and not na(tf2H2) and not na(tf2H0)
+            if not na(tf2H1) and not na(tf2H2) and not na(tf2H0) and not na(tf2Bar2) and not na(tf2Bar1)
                 if tf2H1 > tf2H2 and tf2H1 > tf2H0 and showSwingHighs
-                    createSwingPoint(tf2SwingHighs, tf2H1, tf2Bar1, tf2HighColor)
+                    [_, highBar] = findHighestBetween(tf2Bar2, tf2Bar1)
+                    if not na(highBar)
+                        createSwingPoint(tf2SwingHighs, tf2H1, highBar, tf2HighColor)
                 if tf2L1 < tf2L2 and tf2L1 < tf2L0 and showSwingLows
-                    createSwingPoint(tf2SwingLows, tf2L1, tf2Bar1, tf2LowColor)
+                    [_, lowBar] = findLowestBetween(tf2Bar2, tf2Bar1)
+                    if not na(lowBar)
+                        createSwingPoint(tf2SwingLows, tf2L1, lowBar, tf2LowColor)
 
         useHTFMode = wickMode == "HTF Candle"
         checkSwingHighs(tf2SwingHighs, useHTFMode, tf2H0, tf2L0, tf2C0, tf2NewHTF)
@@ -350,11 +419,15 @@ if tf3Enabled
             tf3C1 := tf3C0, tf3C0 := htfClose[1]
             tf3Bar2 := tf3Bar1, tf3Bar1 := tf3Bar0, tf3Bar0 := bar_index
 
-            if not na(tf3H1) and not na(tf3H2) and not na(tf3H0)
+            if not na(tf3H1) and not na(tf3H2) and not na(tf3H0) and not na(tf3Bar2) and not na(tf3Bar1)
                 if tf3H1 > tf3H2 and tf3H1 > tf3H0 and showSwingHighs
-                    createSwingPoint(tf3SwingHighs, tf3H1, tf3Bar1, tf3HighColor)
+                    [_, highBar] = findHighestBetween(tf3Bar2, tf3Bar1)
+                    if not na(highBar)
+                        createSwingPoint(tf3SwingHighs, tf3H1, highBar, tf3HighColor)
                 if tf3L1 < tf3L2 and tf3L1 < tf3L0 and showSwingLows
-                    createSwingPoint(tf3SwingLows, tf3L1, tf3Bar1, tf3LowColor)
+                    [_, lowBar] = findLowestBetween(tf3Bar2, tf3Bar1)
+                    if not na(lowBar)
+                        createSwingPoint(tf3SwingLows, tf3L1, lowBar, tf3LowColor)
 
         useHTFMode = wickMode == "HTF Candle"
         checkSwingHighs(tf3SwingHighs, useHTFMode, tf3H0, tf3L0, tf3C0, tf3NewHTF)
@@ -391,11 +464,15 @@ if tf4Enabled
             tf4C1 := tf4C0, tf4C0 := htfClose[1]
             tf4Bar2 := tf4Bar1, tf4Bar1 := tf4Bar0, tf4Bar0 := bar_index
 
-            if not na(tf4H1) and not na(tf4H2) and not na(tf4H0)
+            if not na(tf4H1) and not na(tf4H2) and not na(tf4H0) and not na(tf4Bar2) and not na(tf4Bar1)
                 if tf4H1 > tf4H2 and tf4H1 > tf4H0 and showSwingHighs
-                    createSwingPoint(tf4SwingHighs, tf4H1, tf4Bar1, tf4HighColor)
+                    [_, highBar] = findHighestBetween(tf4Bar2, tf4Bar1)
+                    if not na(highBar)
+                        createSwingPoint(tf4SwingHighs, tf4H1, highBar, tf4HighColor)
                 if tf4L1 < tf4L2 and tf4L1 < tf4L0 and showSwingLows
-                    createSwingPoint(tf4SwingLows, tf4L1, tf4Bar1, tf4LowColor)
+                    [_, lowBar] = findLowestBetween(tf4Bar2, tf4Bar1)
+                    if not na(lowBar)
+                        createSwingPoint(tf4SwingLows, tf4L1, lowBar, tf4LowColor)
 
         useHTFMode = wickMode == "HTF Candle"
         checkSwingHighs(tf4SwingHighs, useHTFMode, tf4H0, tf4L0, tf4C0, tf4NewHTF)
@@ -432,11 +509,15 @@ if tf5Enabled
             tf5C1 := tf5C0, tf5C0 := htfClose[1]
             tf5Bar2 := tf5Bar1, tf5Bar1 := tf5Bar0, tf5Bar0 := bar_index
 
-            if not na(tf5H1) and not na(tf5H2) and not na(tf5H0)
+            if not na(tf5H1) and not na(tf5H2) and not na(tf5H0) and not na(tf5Bar2) and not na(tf5Bar1)
                 if tf5H1 > tf5H2 and tf5H1 > tf5H0 and showSwingHighs
-                    createSwingPoint(tf5SwingHighs, tf5H1, tf5Bar1, tf5HighColor)
+                    [_, highBar] = findHighestBetween(tf5Bar2, tf5Bar1)
+                    if not na(highBar)
+                        createSwingPoint(tf5SwingHighs, tf5H1, highBar, tf5HighColor)
                 if tf5L1 < tf5L2 and tf5L1 < tf5L0 and showSwingLows
-                    createSwingPoint(tf5SwingLows, tf5L1, tf5Bar1, tf5LowColor)
+                    [_, lowBar] = findLowestBetween(tf5Bar2, tf5Bar1)
+                    if not na(lowBar)
+                        createSwingPoint(tf5SwingLows, tf5L1, lowBar, tf5LowColor)
 
         useHTFMode = wickMode == "HTF Candle"
         checkSwingHighs(tf5SwingHighs, useHTFMode, tf5H0, tf5L0, tf5C0, tf5NewHTF)
