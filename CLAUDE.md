@@ -92,6 +92,45 @@ All HTF-aware scripts use:
 newHTF = ta.change(htfTime) != 0  // Detect new HTF bar
 ```
 
+### CRITICAL: `request.security()` and the `[1]` History Offset Trap
+
+> **DO NOT DELETE THIS SECTION.** This documents a subtle, hard-to-debug Pine Script pitfall that took extensive debugging to identify. It applies to any script that tracks HTF candle OHLC history using `request.security()` with bar boundary detection.
+
+When using `request.security()` with `lookahead=barmerge.lookahead_off` (Pine v5 default) and detecting new HTF bars via `ta.change(htfTime) != 0`:
+
+- **`htfHigh`** = the just-completed HTF candle's high (correct for accessing completed candle data)
+- **`htfHigh[1]`** = the candle **BEFORE** the just-completed one (OFF BY ONE HTF CANDLE)
+
+The `[1]` history operator references the **previous chart bar's sampled value**, not the previous HTF bar. With `lookahead_off`, the previous chart bar (last bar of the old HTF candle) still had the prior completed candle's data — the current candle's confirmed data only becomes available on the bar where `ta.change(htfTime)` fires.
+
+**The bug pattern:**
+```pine
+// WRONG — introduces a one-candle offset between OHLC data and bar positions
+if newHTFCandle
+    H0 := htfHigh[1]    // Gets candle N-1's high, NOT candle N's
+    Bar0 := bar_index    // Correctly marks candle N's boundary
+    // H0 and Bar0 now refer to DIFFERENT candles
+```
+
+**The correct pattern (confirmed by MSM V7):**
+```pine
+// CORRECT — OHLC and bar positions are aligned
+if newHTFCandle
+    H0 := htfHigh       // Gets the just-completed candle N's high
+    Bar0 := bar_index    // Correctly marks candle N's boundary
+```
+
+**Why this bug is hard to catch:**
+- Lines still appear at plausible-looking price levels, just shifted by one HTF candle
+- The offset in chart bars varies depending on HTF candle size, appearing "random"
+- The swing/structure detection logic still fires, just on wrong candle combinations
+- Scan functions like `findHighestBetween` find real highs — just in the wrong candle's range
+- The bug is invisible in the code without understanding `request.security()` timing semantics
+
+**Related fix:** When scanning for the specific LTF bar within an HTF swing candle, use the exact middle candle range `(Bar2-1, Bar1-1)` rather than a wider range like `(Bar2-1, bar_index)` to prevent accidentally selecting bars from adjacent candles.
+
+**Reference:** MSM V7 (`market-structure-mapper-v7.ps`) uses `htfHigh`, `htfLow`, `htfClose` directly (without `[1]`) after `htfNewCandle` detection in all its BOS and level-break logic. This is the proven correct pattern.
+
 ### HTF History Arrays Pattern (S&D Zones V8)
 
 For HTF calculations requiring lookback across multiple HTF candles, maintain history arrays:
@@ -153,4 +192,4 @@ This allows iterating over previous HTF candles in detection loops, since `htfHi
 - **Scope:** Most variables must be declared at script scope, not inside conditions.
 - **Drawing limits:** Indicators set `max_lines_count`, `max_labels_count`, `max_boxes_count` in the `indicator()` call. Exceeding these silently removes oldest drawings.
 - **Lookback limit:** Find functions enforce a 5000-bar max lookback.
-- **`request.security()`:** Used for HTF data. `lookahead` parameter controls whether current or confirmed bar data is used.
+- **`request.security()`:** Used for HTF data. `lookahead` parameter controls whether current or confirmed bar data is used. **See the critical section "request.security() and the [1] History Offset Trap" above — using `htfHigh[1]` instead of `htfHigh` after new-HTF detection is a common, hard-to-debug mistake.**
