@@ -13,6 +13,7 @@ showSwingHighs          = input.bool(true, title="Show Swing Highs", group=grpDi
 showSwingLows           = input.bool(true, title="Show Swing Lows", group=grpDisplay)
 allowEqualSwings        = input.bool(true, title="Allow Equal Highs/Lows", group=grpDisplay, tooltip="Count consecutive equal highs as a valid swing high when surrounded by lower highs (and vice versa for lows)")
 wickMode                = input.string("Chart TF", title="HTF Level Detection", options=["Chart TF", "HTF Candle"], group=grpDisplay, tooltip="Chart TF: Sweep/cross detected on chart timeframe candles.\nHTF Candle: Sweep/cross only detected when HTF candle completes - swept if HTF wicks through, crossed if HTF closes through.")
+onlyShowSwept           = input.bool(false, title="Only Show Swept Levels", group=grpDisplay, tooltip="When enabled, lines are hidden until they are swept (wicked through). Unswept levels remain invisible.")
 extendLines             = input.bool(true, title="Extend Lines Until Crossed", group=grpDisplay, tooltip="If enabled, lines extend until price crosses them. If disabled, lines extend to the end of the chart.")
 lineWidth               = input.int(1, title="Line Width", minval=1, maxval=5, group=grpDisplay)
 maxLinesPerTF           = input.int(20, title="Max Lines Per Timeframe", minval=5, maxval=100, group=grpDisplay)
@@ -61,6 +62,7 @@ type SwingPoint
     float price
     int barIdx
     line levelLine
+    color lineColor  // Stored color for revealing after sweep
     bool wicked      // Wicked through but not closed through
     bool crossed     // Closed through
 
@@ -145,8 +147,9 @@ findHighestBetween(startBar, endBar) =>
 
 // Create a new swing point and add to array
 createSwingPoint(array<SwingPoint> swings, float price, int startBar, color lineColor) =>
-    newLine = line.new(startBar, price, bar_index, price, color=lineColor, width=lineWidth, extend=extend.right, style=line.style_solid)
-    newSwing = SwingPoint.new(price=price, barIdx=startBar, levelLine=newLine, wicked=false, crossed=false)
+    displayColor = onlyShowSwept ? color.new(color.white, 100) : lineColor
+    newLine = line.new(startBar, price, bar_index, price, color=displayColor, width=lineWidth, extend=extend.right, style=line.style_solid)
+    newSwing = SwingPoint.new(price=price, barIdx=startBar, levelLine=newLine, lineColor=lineColor, wicked=false, crossed=false)
     array.unshift(swings, newSwing)
 
     // Limit array size
@@ -176,6 +179,8 @@ checkSwingHighs(array<SwingPoint> swings, bool useHTFMode, float htfHigh, float 
                             // HTF candle wicked through but didn't close through
                             swing.wicked := true
                             line.set_style(swing.levelLine, line.style_dotted)
+                            if onlyShowSwept
+                                line.set_color(swing.levelLine, swing.lineColor)
                 else
                     // Chart TF mode: check on every bar
                     if close > swing.price
@@ -186,6 +191,8 @@ checkSwingHighs(array<SwingPoint> swings, bool useHTFMode, float htfHigh, float 
                     else if not swing.wicked and high > swing.price
                         swing.wicked := true
                         line.set_style(swing.levelLine, line.style_dotted)
+                        if onlyShowSwept
+                            line.set_color(swing.levelLine, swing.lineColor)
 
 checkSwingLows(array<SwingPoint> swings, bool useHTFMode, float htfHigh, float htfLow, float htfClose, bool isNewHTF) =>
     if array.size(swings) > 0
@@ -205,6 +212,8 @@ checkSwingLows(array<SwingPoint> swings, bool useHTFMode, float htfHigh, float h
                             // HTF candle wicked through but didn't close through
                             swing.wicked := true
                             line.set_style(swing.levelLine, line.style_dotted)
+                            if onlyShowSwept
+                                line.set_color(swing.levelLine, swing.lineColor)
                 else
                     // Chart TF mode: check on every bar
                     if close < swing.price
@@ -215,6 +224,8 @@ checkSwingLows(array<SwingPoint> swings, bool useHTFMode, float htfHigh, float h
                     else if not swing.wicked and low < swing.price
                         swing.wicked := true
                         line.set_style(swing.levelLine, line.style_dotted)
+                        if onlyShowSwept
+                            line.set_color(swing.levelLine, swing.lineColor)
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Chart Timeframe Detection
