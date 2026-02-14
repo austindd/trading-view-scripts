@@ -1,0 +1,651 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
+// © scientificbest
+
+//@version=5
+indicator("Candlestick Swing Points V2 [SB]", "CSP V2 [SB]", overlay=true, max_lines_count=500, max_labels_count=500)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Inputs
+////////////////////////////////////////////////////////////////////////////////
+
+grpDisplay = "Display Settings"
+showSwingHighs          = input.bool(true, title="Show Swing Highs", group=grpDisplay)
+showSwingLows           = input.bool(true, title="Show Swing Lows", group=grpDisplay)
+allowEqualSwings        = input.bool(true, title="Allow Equal Highs/Lows", group=grpDisplay, tooltip="Count consecutive equal highs as a valid swing high when surrounded by lower highs (and vice versa for lows)")
+wickMode                = input.string("Chart TF", title="HTF Level Detection", options=["Chart TF", "HTF Candle"], group=grpDisplay, tooltip="Chart TF: Sweep/cross detected on chart timeframe candles.\nHTF Candle: Sweep/cross only detected when HTF candle completes - swept if HTF wicks through, crossed if HTF closes through.")
+onlyShowSwept           = input.bool(false, title="Only Show Swept Levels", group=grpDisplay, tooltip="When enabled, lines are hidden until they are swept (wicked through). Unswept levels remain invisible.")
+engulfingSweep          = input.bool(false, title="Engulfing Sweep", group=grpDisplay, tooltip="When a close breaks a level, if the next candle closes back through, treat as swept instead of broken.")
+ifvgSweep               = input.bool(false, title="IFVG Sweep", group=grpDisplay, tooltip="When a close breaks a level, allow up to N candles to close back through. If any does, treat as swept instead of broken.")
+ifvgMaxCandles          = input.int(3, title="IFVG Max Candles", minval=1, maxval=20, group=grpDisplay, tooltip="Max candles to wait for a close back through the level when IFVG Sweep is enabled.")
+extendLines             = input.bool(true, title="Extend Lines Until Crossed", group=grpDisplay, tooltip="If enabled, lines extend until price crosses them. If disabled, lines extend to the end of the chart.")
+lineWidth               = input.int(1, title="Line Width", minval=1, maxval=5, group=grpDisplay)
+maxLinesPerTF           = input.int(20, title="Max Lines Per Timeframe", minval=5, maxval=100, group=grpDisplay)
+debugMode               = input.bool(false, title="Debug Mode (TF2)", group=grpDisplay, tooltip="Shows debug labels for TF2 HTF swing detection")
+
+// Timeframe 1 (Chart TF)
+grpTF1 = "Timeframe 1 (Chart)"
+tf1Enabled       = input.bool(true, "Enable", inline="tf1", group=grpTF1)
+tf1              = input.timeframe("", "Timeframe", inline="tf1", group=grpTF1)
+tf1HighColor     = input.color(color.new(color.red, 30), "High", inline="tf1c", group=grpTF1)
+tf1LowColor      = input.color(color.new(color.green, 30), "Low", inline="tf1c", group=grpTF1)
+
+// Timeframe 2
+grpTF2 = "Timeframe 2"
+tf2Enabled       = input.bool(false, "Enable", inline="tf2", group=grpTF2)
+tf2              = input.timeframe("15", "Timeframe", inline="tf2", group=grpTF2)
+tf2HighColor     = input.color(color.new(color.orange, 30), "High", inline="tf2c", group=grpTF2)
+tf2LowColor      = input.color(color.new(color.teal, 30), "Low", inline="tf2c", group=grpTF2)
+
+// Timeframe 3
+grpTF3 = "Timeframe 3"
+tf3Enabled       = input.bool(false, "Enable", inline="tf3", group=grpTF3)
+tf3              = input.timeframe("60", "Timeframe", inline="tf3", group=grpTF3)
+tf3HighColor     = input.color(color.new(color.maroon, 30), "High", inline="tf3c", group=grpTF3)
+tf3LowColor      = input.color(color.new(color.lime, 30), "Low", inline="tf3c", group=grpTF3)
+
+// Timeframe 4
+grpTF4 = "Timeframe 4"
+tf4Enabled       = input.bool(false, "Enable", inline="tf4", group=grpTF4)
+tf4              = input.timeframe("240", "Timeframe", inline="tf4", group=grpTF4)
+tf4HighColor     = input.color(color.new(color.purple, 30), "High", inline="tf4c", group=grpTF4)
+tf4LowColor      = input.color(color.new(color.blue, 30), "Low", inline="tf4c", group=grpTF4)
+
+// Timeframe 5
+grpTF5 = "Timeframe 5"
+tf5Enabled       = input.bool(false, "Enable", inline="tf5", group=grpTF5)
+tf5              = input.timeframe("D", "Timeframe", inline="tf5", group=grpTF5)
+tf5HighColor     = input.color(color.new(color.fuchsia, 30), "High", inline="tf5c", group=grpTF5)
+tf5LowColor      = input.color(color.new(color.aqua, 30), "Low", inline="tf5c", group=grpTF5)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Computed Values
+////////////////////////////////////////////////////////////////////////////////
+
+// Effective rescue window: 0 = no rescue (original behavior), 1 = engulfing only, N = IFVG
+rescueWindow = ifvgSweep ? ifvgMaxCandles : (engulfingSweep ? 1 : 0)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Types
+////////////////////////////////////////////////////////////////////////////////
+
+type SwingPoint
+    float price
+    int barIdx
+    line levelLine
+    color lineColor          // Stored color for revealing after sweep
+    bool wicked              // Wicked through but not closed through
+    bool crossed             // Closed through (permanent)
+    bool tentativelyCrossed  // Waiting for rescue close within window
+    int crossedCandleCount   // Candles elapsed since tentative cross
+
+////////////////////////////////////////////////////////////////////////////////
+//// Variables - Arrays per timeframe
+////////////////////////////////////////////////////////////////////////////////
+
+var array<SwingPoint> tf1SwingHighs = array.new<SwingPoint>()
+var array<SwingPoint> tf1SwingLows = array.new<SwingPoint>()
+var array<SwingPoint> tf2SwingHighs = array.new<SwingPoint>()
+var array<SwingPoint> tf2SwingLows = array.new<SwingPoint>()
+var array<SwingPoint> tf3SwingHighs = array.new<SwingPoint>()
+var array<SwingPoint> tf3SwingLows = array.new<SwingPoint>()
+var array<SwingPoint> tf4SwingHighs = array.new<SwingPoint>()
+var array<SwingPoint> tf4SwingLows = array.new<SwingPoint>()
+var array<SwingPoint> tf5SwingHighs = array.new<SwingPoint>()
+var array<SwingPoint> tf5SwingLows = array.new<SwingPoint>()
+
+////////////////////////////////////////////////////////////////////////////////
+//// Helper Functions
+////////////////////////////////////////////////////////////////////////////////
+
+// Find lowest low between two bar indices (from MSM v7 pattern)
+findLowestBetween(startBar, endBar) =>
+    float lowestPrice = na
+    int lowestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    int maxLookback = 200
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(low[i])
+                if na(lowestPrice) or low[i] < lowestPrice
+                    lowestPrice := low[i]
+                    lowestBarIndex := currentBar - i
+
+    [lowestPrice, lowestBarIndex]
+
+// Find highest high between two bar indices (from MSM v7 pattern)
+findHighestBetween(startBar, endBar) =>
+    float highestPrice = na
+    int highestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    int maxLookback = 200
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(high[i])
+                if na(highestPrice) or high[i] > highestPrice
+                    highestPrice := high[i]
+                    highestBarIndex := currentBar - i
+
+    [highestPrice, highestBarIndex]
+
+// Create a new swing point and add to array
+createSwingPoint(array<SwingPoint> swings, float price, int startBar, color lineColor) =>
+    displayColor = onlyShowSwept ? color.new(color.white, 100) : lineColor
+    newLine = line.new(startBar, price, bar_index, price, color=displayColor, width=lineWidth, extend=extend.right, style=line.style_solid)
+    newSwing = SwingPoint.new(price=price, barIdx=startBar, levelLine=newLine, lineColor=lineColor, wicked=false, crossed=false, tentativelyCrossed=false, crossedCandleCount=0)
+    array.unshift(swings, newSwing)
+
+    // Limit array size
+    if array.size(swings) > maxLinesPerTF
+        oldSwing = array.pop(swings)
+        line.delete(oldSwing.levelLine)
+
+// Helper: apply "tentatively crossed" visuals (broken appearance)
+applyTentativelyCrossedVisuals(SwingPoint swing) =>
+    line.set_style(swing.levelLine, line.style_solid)
+    if extendLines
+        line.set_extend(swing.levelLine, extend.none)
+        line.set_x2(swing.levelLine, bar_index)
+    if onlyShowSwept
+        line.set_color(swing.levelLine, color.new(color.white, 100))
+
+// Helper: apply "rescued" visuals (swept appearance)
+applyRescuedVisuals(SwingPoint swing) =>
+    line.set_style(swing.levelLine, line.style_dotted)
+    if extendLines
+        line.set_extend(swing.levelLine, extend.right)
+    if onlyShowSwept
+        line.set_color(swing.levelLine, swing.lineColor)
+
+// Helper: apply "permanently crossed" visuals
+applyPermanentlyCrossedVisuals(SwingPoint swing) =>
+    if extendLines
+        line.set_extend(swing.levelLine, extend.none)
+        line.set_x2(swing.levelLine, bar_index)
+
+// Helper: apply "wicked" visuals
+applyWickedVisuals(SwingPoint swing) =>
+    line.set_style(swing.levelLine, line.style_dotted)
+    if onlyShowSwept
+        line.set_color(swing.levelLine, swing.lineColor)
+
+// Check swing highs for wicked/crossed status with engulfing/IFVG rescue
+checkSwingHighs(array<SwingPoint> swings, bool useHTFMode, float htfHigh, float htfLow, float htfClose, bool isNewHTF, int rWindow) =>
+    if array.size(swings) > 0
+        for i = array.size(swings) - 1 to 0
+            swing = array.get(swings, i)
+            if not swing.crossed and swing.barIdx < bar_index
+
+                // Phase 1: Handle tentatively crossed levels (rescue check)
+                if swing.tentativelyCrossed
+                    bool shouldEvaluate = false
+                    float evalClose = na
+
+                    if useHTFMode
+                        if isNewHTF and not na(htfClose)
+                            shouldEvaluate := true
+                            evalClose := htfClose
+                    else
+                        shouldEvaluate := true
+                        evalClose := close
+
+                    if shouldEvaluate
+                        swing.crossedCandleCount += 1
+                        if evalClose < swing.price
+                            // Rescued: close went back below the level
+                            swing.tentativelyCrossed := false
+                            swing.crossedCandleCount := 0
+                            swing.wicked := true
+                            applyRescuedVisuals(swing)
+                        else if swing.crossedCandleCount >= rWindow
+                            // Window expired: permanently crossed
+                            swing.tentativelyCrossed := false
+                            swing.crossed := true
+                            na
+
+                // Phase 2: Normal crossed/wicked detection
+                else
+                    if useHTFMode
+                        if isNewHTF and not na(htfHigh) and not na(htfClose)
+                            if htfClose > swing.price
+                                if rWindow > 0
+                                    swing.tentativelyCrossed := true
+                                    swing.crossedCandleCount := 0
+                                    applyTentativelyCrossedVisuals(swing)
+                                else
+                                    swing.crossed := true
+                                    applyPermanentlyCrossedVisuals(swing)
+                            else if not swing.wicked and htfHigh > swing.price
+                                swing.wicked := true
+                                applyWickedVisuals(swing)
+                    else
+                        if close > swing.price
+                            if rWindow > 0
+                                swing.tentativelyCrossed := true
+                                swing.crossedCandleCount := 0
+                                applyTentativelyCrossedVisuals(swing)
+                            else
+                                swing.crossed := true
+                                applyPermanentlyCrossedVisuals(swing)
+                        else if not swing.wicked and high > swing.price
+                            swing.wicked := true
+                            applyWickedVisuals(swing)
+
+// Check swing lows for wicked/crossed status with engulfing/IFVG rescue
+checkSwingLows(array<SwingPoint> swings, bool useHTFMode, float htfHigh, float htfLow, float htfClose, bool isNewHTF, int rWindow) =>
+    if array.size(swings) > 0
+        for i = array.size(swings) - 1 to 0
+            swing = array.get(swings, i)
+            if not swing.crossed and swing.barIdx < bar_index
+
+                // Phase 1: Handle tentatively crossed levels (rescue check)
+                if swing.tentativelyCrossed
+                    bool shouldEvaluate = false
+                    float evalClose = na
+
+                    if useHTFMode
+                        if isNewHTF and not na(htfClose)
+                            shouldEvaluate := true
+                            evalClose := htfClose
+                    else
+                        shouldEvaluate := true
+                        evalClose := close
+
+                    if shouldEvaluate
+                        swing.crossedCandleCount += 1
+                        if evalClose > swing.price
+                            // Rescued: close went back above the level
+                            swing.tentativelyCrossed := false
+                            swing.crossedCandleCount := 0
+                            swing.wicked := true
+                            applyRescuedVisuals(swing)
+                        else if swing.crossedCandleCount >= rWindow
+                            // Window expired: permanently crossed
+                            swing.tentativelyCrossed := false
+                            swing.crossed := true
+                            na
+
+                // Phase 2: Normal crossed/wicked detection
+                else
+                    if useHTFMode
+                        if isNewHTF and not na(htfLow) and not na(htfClose)
+                            if htfClose < swing.price
+                                if rWindow > 0
+                                    swing.tentativelyCrossed := true
+                                    swing.crossedCandleCount := 0
+                                    applyTentativelyCrossedVisuals(swing)
+                                else
+                                    swing.crossed := true
+                                    applyPermanentlyCrossedVisuals(swing)
+                            else if not swing.wicked and htfLow < swing.price
+                                swing.wicked := true
+                                applyWickedVisuals(swing)
+                    else
+                        if close < swing.price
+                            if rWindow > 0
+                                swing.tentativelyCrossed := true
+                                swing.crossedCandleCount := 0
+                                applyTentativelyCrossedVisuals(swing)
+                            else
+                                swing.crossed := true
+                                applyPermanentlyCrossedVisuals(swing)
+                        else if not swing.wicked and low < swing.price
+                            swing.wicked := true
+                            applyWickedVisuals(swing)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Chart Timeframe Detection
+////////////////////////////////////////////////////////////////////////////////
+
+// Count consecutive equal highs going back from offset
+countEqualHighsChart(int startOff) =>
+    count = 1
+    price = high[startOff]
+    i = startOff + 1
+    while i < 200 and high[i] == price
+        count += 1
+        i += 1
+    [count, i - 1]
+
+// Count consecutive equal lows going back from offset
+countEqualLowsChart(int startOff) =>
+    count = 1
+    price = low[startOff]
+    i = startOff + 1
+    while i < 200 and low[i] == price
+        count += 1
+        i += 1
+    [count, i - 1]
+
+// Detect chart TF swing points
+detectChartSwings() =>
+    // Standard detection
+    isStdHigh = high[1] > high[2] and high[1] > high[0]
+    isStdLow = low[1] < low[2] and low[1] < low[0]
+
+    // Equal swings detection
+    isEqHigh = false
+    eqHighPrice = float(na)
+    eqHighStartOff = 0
+
+    isEqLow = false
+    eqLowPrice = float(na)
+    eqLowStartOff = 0
+
+    if allowEqualSwings and high[0] < high[1]
+        [eqCount, lastEqOff] = countEqualHighsChart(1)
+        if eqCount >= 2 and high[lastEqOff + 1] < high[lastEqOff]
+            isEqHigh := true
+            eqHighPrice := high[1]
+            eqHighStartOff := lastEqOff
+
+    if allowEqualSwings and low[0] > low[1]
+        [eqCount, lastEqOff] = countEqualLowsChart(1)
+        if eqCount >= 2 and low[lastEqOff + 1] > low[lastEqOff]
+            isEqLow := true
+            eqLowPrice := low[1]
+            eqLowStartOff := lastEqOff
+
+    // Combine results
+    isHigh = isStdHigh or isEqHigh
+    isLow = isStdLow or isEqLow
+
+    highPrice = isEqHigh ? eqHighPrice : high[1]
+    highStartBar = isEqHigh ? bar_index - eqHighStartOff : bar_index - 1
+
+    lowPrice = isEqLow ? eqLowPrice : low[1]
+    lowStartBar = isEqLow ? bar_index - eqLowStartOff : bar_index - 1
+
+    [isHigh, isLow, highPrice, lowPrice, highStartBar, lowStartBar]
+
+////////////////////////////////////////////////////////////////////////////////
+//// HTF Detection with History Arrays
+////////////////////////////////////////////////////////////////////////////////
+
+// Get HTF data (including close for wick detection)
+getHTFData(string tf) =>
+    [h, l, c, t] = request.security(syminfo.tickerid, tf, [high, low, close, time])
+    [h, l, c, t]
+
+// Detect new HTF bar
+isNewHTFBar(int htfTime) =>
+    ta.change(htfTime) != 0
+
+////////////////////////////////////////////////////////////////////////////////
+//// Timeframe 1 Processing
+////////////////////////////////////////////////////////////////////////////////
+
+var float tf1H0 = na, var float tf1H1 = na, var float tf1H2 = na
+var float tf1L0 = na, var float tf1L1 = na, var float tf1L2 = na
+var float tf1C0 = na, var float tf1C1 = na
+var int tf1Bar0 = na, var int tf1Bar1 = na, var int tf1Bar2 = na
+var bool tf1NewHTF = false
+
+if tf1Enabled
+    if tf1 == ""
+        // Chart timeframe - use direct detection
+        [isHigh, isLow, highPrice, lowPrice, highStartBar, lowStartBar] = detectChartSwings()
+
+        if isHigh and showSwingHighs
+            createSwingPoint(tf1SwingHighs, highPrice, highStartBar, tf1HighColor)
+        if isLow and showSwingLows
+            createSwingPoint(tf1SwingLows, lowPrice, lowStartBar, tf1LowColor)
+
+        // Chart TF always uses chart wick mode
+        checkSwingHighs(tf1SwingHighs, false, na, na, na, false, rescueWindow)
+        checkSwingLows(tf1SwingLows, false, na, na, na, false, rescueWindow)
+    else
+        // HTF - use history arrays
+        [htfHigh, htfLow, htfClose, htfTime] = getHTFData(tf1)
+        tf1NewHTF := isNewHTFBar(htfTime)
+
+        if tf1NewHTF
+            tf1H2 := tf1H1, tf1H1 := tf1H0, tf1H0 := htfHigh
+            tf1L2 := tf1L1, tf1L1 := tf1L0, tf1L0 := htfLow
+            tf1C1 := tf1C0, tf1C0 := htfClose
+            tf1Bar2 := tf1Bar1, tf1Bar1 := tf1Bar0, tf1Bar0 := bar_index
+
+            // Detect swing points on completed HTF candles
+            // tf1H1/L1 is the middle candle, its LTF bar range is [tf1Bar2, tf1Bar1 - 1]
+            if not na(tf1H1) and not na(tf1H2) and not na(tf1H0) and not na(tf1Bar2)
+                if tf1H1 > tf1H2 and tf1H1 > tf1H0 and showSwingHighs
+                    [_, highBar] = findHighestBetween(tf1Bar2 - 1, tf1Bar1 - 1)
+                    if not na(highBar)
+                        createSwingPoint(tf1SwingHighs, tf1H1, highBar, tf1HighColor)
+                if tf1L1 < tf1L2 and tf1L1 < tf1L0 and showSwingLows
+                    [_, lowBar] = findLowestBetween(tf1Bar2 - 1, tf1Bar1 - 1)
+                    if not na(lowBar)
+                        createSwingPoint(tf1SwingLows, tf1L1, lowBar, tf1LowColor)
+
+        useHTFMode = wickMode == "HTF Candle"
+        checkSwingHighs(tf1SwingHighs, useHTFMode, tf1H0, tf1L0, tf1C0, tf1NewHTF, rescueWindow)
+        checkSwingLows(tf1SwingLows, useHTFMode, tf1H0, tf1L0, tf1C0, tf1NewHTF, rescueWindow)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Timeframe 2 Processing
+////////////////////////////////////////////////////////////////////////////////
+
+var float tf2H0 = na, var float tf2H1 = na, var float tf2H2 = na
+var float tf2L0 = na, var float tf2L1 = na, var float tf2L2 = na
+var float tf2C0 = na, var float tf2C1 = na
+var int tf2Bar0 = na, var int tf2Bar1 = na, var int tf2Bar2 = na
+var bool tf2NewHTF = false
+
+if tf2Enabled
+    if tf2 == ""
+        [isHigh, isLow, highPrice, lowPrice, highStartBar, lowStartBar] = detectChartSwings()
+
+        if isHigh and showSwingHighs
+            createSwingPoint(tf2SwingHighs, highPrice, highStartBar, tf2HighColor)
+        if isLow and showSwingLows
+            createSwingPoint(tf2SwingLows, lowPrice, lowStartBar, tf2LowColor)
+
+        checkSwingHighs(tf2SwingHighs, false, na, na, na, false, rescueWindow)
+        checkSwingLows(tf2SwingLows, false, na, na, na, false, rescueWindow)
+    else
+        [htfHigh, htfLow, htfClose, htfTime] = getHTFData(tf2)
+        tf2NewHTF := isNewHTFBar(htfTime)
+
+        if tf2NewHTF
+            tf2H2 := tf2H1, tf2H1 := tf2H0, tf2H0 := htfHigh
+            tf2L2 := tf2L1, tf2L1 := tf2L0, tf2L0 := htfLow
+            tf2C1 := tf2C0, tf2C0 := htfClose
+            tf2Bar2 := tf2Bar1, tf2Bar1 := tf2Bar0, tf2Bar0 := bar_index
+
+            if debugMode
+                label.new(bar_index, high, "NEW\nbi=" + str.tostring(bar_index) + "\nB0=" + str.tostring(tf2Bar0) + "\nB1=" + str.tostring(tf2Bar1) + "\nB2=" + str.tostring(tf2Bar2) + "\nH0=" + str.tostring(tf2H0) + "\nH1=" + str.tostring(tf2H1), style=label.style_label_down, color=color.gray, textcolor=color.white, size=size.small)
+
+            if not na(tf2H1) and not na(tf2H2) and not na(tf2H0) and not na(tf2Bar2)
+                if tf2H1 > tf2H2 and tf2H1 > tf2H0 and showSwingHighs
+                    [foundHigh, highBar] = findHighestBetween(tf2Bar2 - 1, tf2Bar1 - 1)
+                    if debugMode
+                        label.new(bar_index, high * 1.001, "SH\nhighBar=" + str.tostring(highBar) + "\nfoundH=" + str.tostring(foundHigh) + "\nH1=" + str.tostring(tf2H1) + "\nB2=" + str.tostring(tf2Bar2) + "\nB1=" + str.tostring(tf2Bar1), style=label.style_label_down, color=color.red, textcolor=color.white, size=size.small)
+                        if not na(highBar)
+                            label.new(highBar, high, "X", style=label.style_label_up, color=color.red, textcolor=color.white, size=size.small)
+                    if not na(highBar)
+                        createSwingPoint(tf2SwingHighs, tf2H1, highBar, tf2HighColor)
+                if tf2L1 < tf2L2 and tf2L1 < tf2L0 and showSwingLows
+                    [foundLow, lowBar] = findLowestBetween(tf2Bar2 - 1, tf2Bar1 - 1)
+                    if debugMode
+                        label.new(bar_index, low * 0.999, "SL\nlowBar=" + str.tostring(lowBar) + "\nfoundL=" + str.tostring(foundLow) + "\nL1=" + str.tostring(tf2L1) + "\nB2=" + str.tostring(tf2Bar2) + "\nB1=" + str.tostring(tf2Bar1), style=label.style_label_up, color=color.green, textcolor=color.white, size=size.small)
+                        if not na(lowBar)
+                            label.new(lowBar, low, "X", style=label.style_label_down, color=color.green, textcolor=color.white, size=size.small)
+                    if not na(lowBar)
+                        createSwingPoint(tf2SwingLows, tf2L1, lowBar, tf2LowColor)
+
+        useHTFMode = wickMode == "HTF Candle"
+        checkSwingHighs(tf2SwingHighs, useHTFMode, tf2H0, tf2L0, tf2C0, tf2NewHTF, rescueWindow)
+        checkSwingLows(tf2SwingLows, useHTFMode, tf2H0, tf2L0, tf2C0, tf2NewHTF, rescueWindow)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Timeframe 3 Processing
+////////////////////////////////////////////////////////////////////////////////
+
+var float tf3H0 = na, var float tf3H1 = na, var float tf3H2 = na
+var float tf3L0 = na, var float tf3L1 = na, var float tf3L2 = na
+var float tf3C0 = na, var float tf3C1 = na
+var int tf3Bar0 = na, var int tf3Bar1 = na, var int tf3Bar2 = na
+var bool tf3NewHTF = false
+
+if tf3Enabled
+    if tf3 == ""
+        [isHigh, isLow, highPrice, lowPrice, highStartBar, lowStartBar] = detectChartSwings()
+
+        if isHigh and showSwingHighs
+            createSwingPoint(tf3SwingHighs, highPrice, highStartBar, tf3HighColor)
+        if isLow and showSwingLows
+            createSwingPoint(tf3SwingLows, lowPrice, lowStartBar, tf3LowColor)
+
+        checkSwingHighs(tf3SwingHighs, false, na, na, na, false, rescueWindow)
+        checkSwingLows(tf3SwingLows, false, na, na, na, false, rescueWindow)
+    else
+        [htfHigh, htfLow, htfClose, htfTime] = getHTFData(tf3)
+        tf3NewHTF := isNewHTFBar(htfTime)
+
+        if tf3NewHTF
+            tf3H2 := tf3H1, tf3H1 := tf3H0, tf3H0 := htfHigh
+            tf3L2 := tf3L1, tf3L1 := tf3L0, tf3L0 := htfLow
+            tf3C1 := tf3C0, tf3C0 := htfClose
+            tf3Bar2 := tf3Bar1, tf3Bar1 := tf3Bar0, tf3Bar0 := bar_index
+
+            if not na(tf3H1) and not na(tf3H2) and not na(tf3H0) and not na(tf3Bar2)
+                if tf3H1 > tf3H2 and tf3H1 > tf3H0 and showSwingHighs
+                    [_, highBar] = findHighestBetween(tf3Bar2 - 1, tf3Bar1 - 1)
+                    if not na(highBar)
+                        createSwingPoint(tf3SwingHighs, tf3H1, highBar, tf3HighColor)
+                if tf3L1 < tf3L2 and tf3L1 < tf3L0 and showSwingLows
+                    [_, lowBar] = findLowestBetween(tf3Bar2 - 1, tf3Bar1 - 1)
+                    if not na(lowBar)
+                        createSwingPoint(tf3SwingLows, tf3L1, lowBar, tf3LowColor)
+
+        useHTFMode = wickMode == "HTF Candle"
+        checkSwingHighs(tf3SwingHighs, useHTFMode, tf3H0, tf3L0, tf3C0, tf3NewHTF, rescueWindow)
+        checkSwingLows(tf3SwingLows, useHTFMode, tf3H0, tf3L0, tf3C0, tf3NewHTF, rescueWindow)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Timeframe 4 Processing
+////////////////////////////////////////////////////////////////////////////////
+
+var float tf4H0 = na, var float tf4H1 = na, var float tf4H2 = na
+var float tf4L0 = na, var float tf4L1 = na, var float tf4L2 = na
+var float tf4C0 = na, var float tf4C1 = na
+var int tf4Bar0 = na, var int tf4Bar1 = na, var int tf4Bar2 = na
+var bool tf4NewHTF = false
+
+if tf4Enabled
+    if tf4 == ""
+        [isHigh, isLow, highPrice, lowPrice, highStartBar, lowStartBar] = detectChartSwings()
+
+        if isHigh and showSwingHighs
+            createSwingPoint(tf4SwingHighs, highPrice, highStartBar, tf4HighColor)
+        if isLow and showSwingLows
+            createSwingPoint(tf4SwingLows, lowPrice, lowStartBar, tf4LowColor)
+
+        checkSwingHighs(tf4SwingHighs, false, na, na, na, false, rescueWindow)
+        checkSwingLows(tf4SwingLows, false, na, na, na, false, rescueWindow)
+    else
+        [htfHigh, htfLow, htfClose, htfTime] = getHTFData(tf4)
+        tf4NewHTF := isNewHTFBar(htfTime)
+
+        if tf4NewHTF
+            tf4H2 := tf4H1, tf4H1 := tf4H0, tf4H0 := htfHigh
+            tf4L2 := tf4L1, tf4L1 := tf4L0, tf4L0 := htfLow
+            tf4C1 := tf4C0, tf4C0 := htfClose
+            tf4Bar2 := tf4Bar1, tf4Bar1 := tf4Bar0, tf4Bar0 := bar_index
+
+            if not na(tf4H1) and not na(tf4H2) and not na(tf4H0) and not na(tf4Bar2)
+                if tf4H1 > tf4H2 and tf4H1 > tf4H0 and showSwingHighs
+                    [_, highBar] = findHighestBetween(tf4Bar2 - 1, tf4Bar1 - 1)
+                    if not na(highBar)
+                        createSwingPoint(tf4SwingHighs, tf4H1, highBar, tf4HighColor)
+                if tf4L1 < tf4L2 and tf4L1 < tf4L0 and showSwingLows
+                    [_, lowBar] = findLowestBetween(tf4Bar2 - 1, tf4Bar1 - 1)
+                    if not na(lowBar)
+                        createSwingPoint(tf4SwingLows, tf4L1, lowBar, tf4LowColor)
+
+        useHTFMode = wickMode == "HTF Candle"
+        checkSwingHighs(tf4SwingHighs, useHTFMode, tf4H0, tf4L0, tf4C0, tf4NewHTF, rescueWindow)
+        checkSwingLows(tf4SwingLows, useHTFMode, tf4H0, tf4L0, tf4C0, tf4NewHTF, rescueWindow)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Timeframe 5 Processing
+////////////////////////////////////////////////////////////////////////////////
+
+var float tf5H0 = na, var float tf5H1 = na, var float tf5H2 = na
+var float tf5L0 = na, var float tf5L1 = na, var float tf5L2 = na
+var float tf5C0 = na, var float tf5C1 = na
+var int tf5Bar0 = na, var int tf5Bar1 = na, var int tf5Bar2 = na
+var bool tf5NewHTF = false
+
+if tf5Enabled
+    if tf5 == ""
+        [isHigh, isLow, highPrice, lowPrice, highStartBar, lowStartBar] = detectChartSwings()
+
+        if isHigh and showSwingHighs
+            createSwingPoint(tf5SwingHighs, highPrice, highStartBar, tf5HighColor)
+        if isLow and showSwingLows
+            createSwingPoint(tf5SwingLows, lowPrice, lowStartBar, tf5LowColor)
+
+        checkSwingHighs(tf5SwingHighs, false, na, na, na, false, rescueWindow)
+        checkSwingLows(tf5SwingLows, false, na, na, na, false, rescueWindow)
+    else
+        [htfHigh, htfLow, htfClose, htfTime] = getHTFData(tf5)
+        tf5NewHTF := isNewHTFBar(htfTime)
+
+        if tf5NewHTF
+            tf5H2 := tf5H1, tf5H1 := tf5H0, tf5H0 := htfHigh
+            tf5L2 := tf5L1, tf5L1 := tf5L0, tf5L0 := htfLow
+            tf5C1 := tf5C0, tf5C0 := htfClose
+            tf5Bar2 := tf5Bar1, tf5Bar1 := tf5Bar0, tf5Bar0 := bar_index
+
+            if not na(tf5H1) and not na(tf5H2) and not na(tf5H0) and not na(tf5Bar2)
+                if tf5H1 > tf5H2 and tf5H1 > tf5H0 and showSwingHighs
+                    [_, highBar] = findHighestBetween(tf5Bar2 - 1, tf5Bar1 - 1)
+                    if not na(highBar)
+                        createSwingPoint(tf5SwingHighs, tf5H1, highBar, tf5HighColor)
+                if tf5L1 < tf5L2 and tf5L1 < tf5L0 and showSwingLows
+                    [_, lowBar] = findLowestBetween(tf5Bar2 - 1, tf5Bar1 - 1)
+                    if not na(lowBar)
+                        createSwingPoint(tf5SwingLows, tf5L1, lowBar, tf5LowColor)
+
+        useHTFMode = wickMode == "HTF Candle"
+        checkSwingHighs(tf5SwingHighs, useHTFMode, tf5H0, tf5L0, tf5C0, tf5NewHTF, rescueWindow)
+        checkSwingLows(tf5SwingLows, useHTFMode, tf5H0, tf5L0, tf5C0, tf5NewHTF, rescueWindow)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Alerts
+////////////////////////////////////////////////////////////////////////////////
+
+// Chart TF alerts
+[chartIsHigh, chartIsLow, _, _, _, _] = detectChartSwings()
+alertcondition(chartIsHigh, title="Swing High Formed", message="Candlestick Swing High formed")
+alertcondition(chartIsLow, title="Swing Low Formed", message="Candlestick Swing Low formed")
