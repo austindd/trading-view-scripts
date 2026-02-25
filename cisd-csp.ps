@@ -84,21 +84,20 @@ countConsecBear(int startOff) =>
 // ============================================================================
 
 // Check if candle at offset `off` sweeps any CSP swing low within lookback range.
+// beyondPrice: if not na, the CSP level must be below this price to qualify.
 // A candlestick swing low at bar [j] requires:
 //   1. low[j] < low[j+1] and low[j] < low[j-1] (middle candle's low is lowest)
-//   2. low[j] < min(open[j], close[j]) (the low is a wick, not body — e.g. bullish candle
-//      where open == low is invalid)
+//   2. low[j] < min(open[j], close[j]) (the low is a wick, not body)
 // Sweep = candle's wick reaches at/below swing low, but closes above it.
-doesSweepSwingLow(int off) =>
+doesSweepSwingLow(int off, float beyondPrice) =>
     result = false
     maxJ = math.min(off + swingLookback, 4998)
     for j = off + 2 to maxJ
         bodyBottom = math.min(open[j], close[j])
         isSwingLow = low[j] < low[j + 1] and low[j] < low[j - 1] and low[j] < bodyBottom
-        if isSwingLow
+        if isSwingLow and (na(beyondPrice) or low[j] < beyondPrice)
             if low[off] <= low[j] and close[off] > low[j]
                 // Verify the level wasn't already broken (closed through) before the sweep.
-                // Check candles between swing confirmation (j-2) and sweep candle (off+1).
                 levelBroken = false
                 for k = off + 1 to j - 2
                     if close[k] < low[j]
@@ -110,21 +109,20 @@ doesSweepSwingLow(int off) =>
     result
 
 // Check if candle at offset `off` sweeps any CSP swing high within lookback range.
+// beyondPrice: if not na, the CSP level must be above this price to qualify.
 // A candlestick swing high at bar [j] requires:
 //   1. high[j] > high[j+1] and high[j] > high[j-1] (middle candle's high is highest)
-//   2. high[j] > max(open[j], close[j]) (the high is a wick, not body — e.g. bearish candle
-//      where open == high is invalid)
+//   2. high[j] > max(open[j], close[j]) (the high is a wick, not body)
 // Sweep = candle's wick reaches at/above swing high, but closes below it.
-doesSweepSwingHigh(int off) =>
+doesSweepSwingHigh(int off, float beyondPrice) =>
     result = false
     maxJ = math.min(off + swingLookback, 4998)
     for j = off + 2 to maxJ
         bodyTop = math.max(open[j], close[j])
         isSwingHigh = high[j] > high[j + 1] and high[j] > high[j - 1] and high[j] > bodyTop
-        if isSwingHigh
+        if isSwingHigh and (na(beyondPrice) or high[j] > beyondPrice)
             if high[off] >= high[j] and close[off] < high[j]
                 // Verify the level wasn't already broken (closed through) before the sweep.
-                // Check candles between swing confirmation (j-2) and sweep candle (off+1).
                 levelBroken = false
                 for k = off + 1 to j - 2
                     if close[k] > high[j]
@@ -135,21 +133,60 @@ doesSweepSwingHigh(int off) =>
                     break
     result
 
-// Check if any candle in offset range [startOff..endOff] sweeps a CSP swing low/high
-anySweepSwingLow(int startOff, int endOff) =>
+// Check if any candle in the CISD sequence validly sweeps a CSP swing low.
+// Sweep validity depends on which candle does the sweeping:
+//   1. Leg-out candle (offset 0 to legOutCount-1): always valid
+//   2. Final leg-in candle (offset legOutCount): always valid
+//   3. Earlier leg-in candle (offset legOutCount+1 to cisdEndOff): only valid if
+//      the CSP level is below ALL candle bodies of the entire CISD sequence
+hasCISDSweepLow(int legOutCount, int cisdEndOff) =>
     result = false
-    for i = startOff to endOff
-        if doesSweepSwingLow(i)
+    // Condition 1: Any leg-out candle sweeps — always valid
+    for i = 0 to legOutCount - 1
+        if doesSweepSwingLow(i, float(na))
             result := true
             break
+    // Condition 2: Final leg-in candle sweeps — always valid
+    if not result
+        if doesSweepSwingLow(legOutCount, float(na))
+            result := true
+    // Condition 3: Earlier leg-in candles — CSP must be beyond all CISD bodies
+    if not result and cisdEndOff > legOutCount
+        float minBody = float(na)
+        for k = 0 to cisdEndOff
+            bodyBot = math.min(open[k], close[k])
+            if na(minBody) or bodyBot < minBody
+                minBody := bodyBot
+        for i = legOutCount + 1 to cisdEndOff
+            if doesSweepSwingLow(i, minBody)
+                result := true
+                break
     result
 
-anySweepSwingHigh(int startOff, int endOff) =>
+// Check if any candle in the CISD sequence validly sweeps a CSP swing high.
+// Same positional rules as above, mirrored for highs.
+hasCISDSweepHigh(int legOutCount, int cisdEndOff) =>
     result = false
-    for i = startOff to endOff
-        if doesSweepSwingHigh(i)
+    // Condition 1: Any leg-out candle sweeps — always valid
+    for i = 0 to legOutCount - 1
+        if doesSweepSwingHigh(i, float(na))
             result := true
             break
+    // Condition 2: Final leg-in candle sweeps — always valid
+    if not result
+        if doesSweepSwingHigh(legOutCount, float(na))
+            result := true
+    // Condition 3: Earlier leg-in candles — CSP must be beyond all CISD bodies
+    if not result and cisdEndOff > legOutCount
+        float maxBody = float(na)
+        for k = 0 to cisdEndOff
+            bodyTop = math.max(open[k], close[k])
+            if na(maxBody) or bodyTop > maxBody
+                maxBody := bodyTop
+        for i = legOutCount + 1 to cisdEndOff
+            if doesSweepSwingHigh(i, maxBody)
+                result := true
+                break
     result
 
 // ============================================================================
@@ -206,12 +243,12 @@ detectCISD() =>
             if close > open[firstBearOff]
                 if bearRun >= 2 and detectMultiLegIn
                     // 2+ leg-in candles: valid CISD if CSP sweep exists in sequence
-                    if anySweepSwingLow(0, firstBearOff)
+                    if hasCISDSweepLow(bullRun, firstBearOff)
                         bullishCISD := true
                 else if bearRun == 1 and bullRun >= 2
                     // 1 leg-in + 2+ leg-out: valid if FVG forms AND CSP sweep
                     if detectSingleWithFVG and hasBullishFVG(0, firstBearOff)
-                        if anySweepSwingLow(0, firstBearOff)
+                        if hasCISDSweepLow(bullRun, firstBearOff)
                             bullishCISD := true
                     else if detectDoubleLegIn
                         // Double leg-in: engulfs two separate leg-in sequences
@@ -221,12 +258,12 @@ detectCISD() =>
                             if bearRun2 >= 1
                                 firstBear1Off = preOff + middleBullRun + bearRun2 - 1
                                 if close > open[firstBear1Off]
-                                    if anySweepSwingLow(0, firstBear1Off)
+                                    if hasCISDSweepLow(bullRun, firstBear1Off)
                                         bullishCISD := true
                 else if bearRun == 1 and bullRun == 1 and detectSingleWithWick
                     // 1 leg-in + 1 leg-out: must wick below leg-in's low AND CSP sweep
                     if low[0] < low[firstBearOff]
-                        if anySweepSwingLow(0, firstBearOff)
+                        if hasCISDSweepLow(bullRun, firstBearOff)
                             bullishCISD := true
 
     // ─── Bearish CISD ───────────────────────────────────────────────────
@@ -244,12 +281,12 @@ detectCISD() =>
             if close < open[firstBullOff]
                 if bullRun >= 2 and detectMultiLegIn
                     // 2+ leg-in candles: valid CISD if CSP sweep exists in sequence
-                    if anySweepSwingHigh(0, firstBullOff)
+                    if hasCISDSweepHigh(bearRun, firstBullOff)
                         bearishCISD := true
                 else if bullRun == 1 and bearRun >= 2
                     // 1 leg-in + 2+ leg-out: valid if FVG forms AND CSP sweep
                     if detectSingleWithFVG and hasBearishFVG(0, firstBullOff)
-                        if anySweepSwingHigh(0, firstBullOff)
+                        if hasCISDSweepHigh(bearRun, firstBullOff)
                             bearishCISD := true
                     else if detectDoubleLegIn
                         // Double leg-in: engulfs two separate leg-in sequences
@@ -259,12 +296,12 @@ detectCISD() =>
                             if bullRun2 >= 1
                                 firstBull1Off = preOff + middleBearRun + bullRun2 - 1
                                 if close < open[firstBull1Off]
-                                    if anySweepSwingHigh(0, firstBull1Off)
+                                    if hasCISDSweepHigh(bearRun, firstBull1Off)
                                         bearishCISD := true
                 else if bullRun == 1 and bearRun == 1 and detectSingleWithWick
                     // 1 leg-in + 1 leg-out: must wick above leg-in's high AND CSP sweep
                     if high[0] > high[firstBullOff]
-                        if anySweepSwingHigh(0, firstBullOff)
+                        if hasCISDSweepHigh(bearRun, firstBullOff)
                             bearishCISD := true
 
     [bullishCISD, bearishCISD]
