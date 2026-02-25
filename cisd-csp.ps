@@ -86,35 +86,53 @@ countConsecBear(int startOff) =>
 // Check if candle at offset `off` sweeps any CSP swing low within lookback range.
 // A candlestick swing low at bar [j] requires:
 //   1. low[j] < low[j+1] and low[j] < low[j-1] (middle candle's low is lowest)
-//   2. body bottom of [j] > low[j+1] (body is above the left candle's low — wick-formed level)
+//   2. low[j] < min(open[j], close[j]) (the low is a wick, not body — e.g. bullish candle
+//      where open == low is invalid)
 // Sweep = candle's wick reaches at/below swing low, but closes above it.
 doesSweepSwingLow(int off) =>
     result = false
     maxJ = math.min(off + swingLookback, 4998)
     for j = off + 2 to maxJ
         bodyBottom = math.min(open[j], close[j])
-        isSwingLow = low[j] < low[j + 1] and low[j] < low[j - 1] and bodyBottom > low[j + 1]
+        isSwingLow = low[j] < low[j + 1] and low[j] < low[j - 1] and low[j] < bodyBottom
         if isSwingLow
             if low[off] <= low[j] and close[off] > low[j]
-                result := true
-                break
+                // Verify the level wasn't already broken (closed through) before the sweep.
+                // Check candles between swing confirmation (j-2) and sweep candle (off+1).
+                levelBroken = false
+                for k = off + 1 to j - 2
+                    if close[k] < low[j]
+                        levelBroken := true
+                        break
+                if not levelBroken
+                    result := true
+                    break
     result
 
 // Check if candle at offset `off` sweeps any CSP swing high within lookback range.
 // A candlestick swing high at bar [j] requires:
 //   1. high[j] > high[j+1] and high[j] > high[j-1] (middle candle's high is highest)
-//   2. body top of [j] < high[j+1] (body is below the left candle's high — wick-formed level)
+//   2. high[j] > max(open[j], close[j]) (the high is a wick, not body — e.g. bearish candle
+//      where open == high is invalid)
 // Sweep = candle's wick reaches at/above swing high, but closes below it.
 doesSweepSwingHigh(int off) =>
     result = false
     maxJ = math.min(off + swingLookback, 4998)
     for j = off + 2 to maxJ
         bodyTop = math.max(open[j], close[j])
-        isSwingHigh = high[j] > high[j + 1] and high[j] > high[j - 1] and bodyTop < high[j + 1]
+        isSwingHigh = high[j] > high[j + 1] and high[j] > high[j - 1] and high[j] > bodyTop
         if isSwingHigh
             if high[off] >= high[j] and close[off] < high[j]
-                result := true
-                break
+                // Verify the level wasn't already broken (closed through) before the sweep.
+                // Check candles between swing confirmation (j-2) and sweep candle (off+1).
+                levelBroken = false
+                for k = off + 1 to j - 2
+                    if close[k] > high[j]
+                        levelBroken := true
+                        break
+                if not levelBroken
+                    result := true
+                    break
     result
 
 // Check if any candle in offset range [startOff..endOff] sweeps a CSP swing low/high
