@@ -1,0 +1,321 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("CISD + CSP Sweep [SB]", shorttitle="CISD+CSP [SB]", overlay=true, max_labels_count=500)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+// Display
+showBullish = input.bool(true, "Show Bullish CISD", group="Display")
+showBearish = input.bool(true, "Show Bearish CISD", group="Display")
+
+// Detection Types
+grpDetection = "Detection Types"
+detectMultiLegIn   = input.bool(true, "2+ Leg-In (Standard)", group=grpDetection, tooltip="2+ leg-in candles engulfed by 1+ leg-out candles")
+detectSingleWithFVG = input.bool(true, "1 Leg-In + FVG", group=grpDetection, tooltip="1 leg-in candle + 2+ leg-out candles with Fair Value Gap")
+detectSingleWithWick = input.bool(true, "1 Leg-In + Wick", group=grpDetection, tooltip="1 leg-in candle + 1 leg-out candle that wicks through leg-in's extreme")
+detectDoubleLegIn  = input.bool(true, "Double Leg-In", group=grpDetection, tooltip="1 leg-in + 2+ leg-out that engulfs two separate leg-in sequences")
+
+// CSP Sweep Settings
+grpCSP = "CSP Sweep Settings"
+swingLookback = input.int(50, "Swing Lookback Bars", minval=5, maxval=200, group=grpCSP, tooltip="How far back from each CISD candle to search for candlestick swing points that can be swept")
+
+// Timeframe 1
+tf1Enabled   = input.bool(true, "Enable", inline="tf1", group="Timeframe 1")
+tf1          = input.timeframe("", "Timeframe", inline="tf1", group="Timeframe 1")
+tf1BullColor = input.color(#089981, "Bullish", inline="tf1c", group="Timeframe 1")
+tf1BearColor = input.color(#f23645, "Bearish", inline="tf1c", group="Timeframe 1")
+
+// Timeframe 2
+tf2Enabled   = input.bool(false, "Enable", inline="tf2", group="Timeframe 2")
+tf2          = input.timeframe("", "Timeframe", inline="tf2", group="Timeframe 2")
+tf2BullColor = input.color(#089981, "Bullish", inline="tf2c", group="Timeframe 2")
+tf2BearColor = input.color(#f23645, "Bearish", inline="tf2c", group="Timeframe 2")
+
+// Timeframe 3
+tf3Enabled   = input.bool(false, "Enable", inline="tf3", group="Timeframe 3")
+tf3          = input.timeframe("", "Timeframe", inline="tf3", group="Timeframe 3")
+tf3BullColor = input.color(#089981, "Bullish", inline="tf3c", group="Timeframe 3")
+tf3BearColor = input.color(#f23645, "Bearish", inline="tf3c", group="Timeframe 3")
+
+// Timeframe 4
+tf4Enabled   = input.bool(false, "Enable", inline="tf4", group="Timeframe 4")
+tf4          = input.timeframe("", "Timeframe", inline="tf4", group="Timeframe 4")
+tf4BullColor = input.color(#089981, "Bullish", inline="tf4c", group="Timeframe 4")
+tf4BearColor = input.color(#f23645, "Bearish", inline="tf4c", group="Timeframe 4")
+
+// ============================================================================
+// CANDLE HELPERS
+// ============================================================================
+
+isBull(int i) =>
+    close[i] > open[i]
+
+isBear(int i) =>
+    close[i] < open[i]
+
+// ============================================================================
+// CONSECUTIVE CANDLE COUNTING
+// ============================================================================
+
+countConsecBull(int startOff) =>
+    n = 0
+    i = startOff
+    // Include doji (close == open) as part of bullish run
+    while i < 200 and close[i] >= open[i]
+        n += 1
+        i += 1
+    n
+
+countConsecBear(int startOff) =>
+    n = 0
+    i = startOff
+    // Include doji (close == open) as part of bearish run
+    while i < 200 and close[i] <= open[i]
+        n += 1
+        i += 1
+    n
+
+// ============================================================================
+// CSP SWEEP DETECTION
+// ============================================================================
+
+// Check if candle at offset `off` sweeps any CSP swing low within lookback range.
+// A candlestick swing low at bar [j] requires:
+//   1. low[j] < low[j+1] and low[j] < low[j-1] (middle candle's low is lowest)
+//   2. body bottom of [j] > low[j+1] (body is above the left candle's low — wick-formed level)
+// Sweep = candle's wick reaches at/below swing low, but closes above it.
+doesSweepSwingLow(int off) =>
+    result = false
+    maxJ = math.min(off + swingLookback, 4998)
+    for j = off + 2 to maxJ
+        bodyBottom = math.min(open[j], close[j])
+        isSwingLow = low[j] < low[j + 1] and low[j] < low[j - 1] and bodyBottom > low[j + 1]
+        if isSwingLow
+            if low[off] <= low[j] and close[off] > low[j]
+                result := true
+                break
+    result
+
+// Check if candle at offset `off` sweeps any CSP swing high within lookback range.
+// A candlestick swing high at bar [j] requires:
+//   1. high[j] > high[j+1] and high[j] > high[j-1] (middle candle's high is highest)
+//   2. body top of [j] < high[j+1] (body is below the left candle's high — wick-formed level)
+// Sweep = candle's wick reaches at/above swing high, but closes below it.
+doesSweepSwingHigh(int off) =>
+    result = false
+    maxJ = math.min(off + swingLookback, 4998)
+    for j = off + 2 to maxJ
+        bodyTop = math.max(open[j], close[j])
+        isSwingHigh = high[j] > high[j + 1] and high[j] > high[j - 1] and bodyTop < high[j + 1]
+        if isSwingHigh
+            if high[off] >= high[j] and close[off] < high[j]
+                result := true
+                break
+    result
+
+// Check if any candle in offset range [startOff..endOff] sweeps a CSP swing low/high
+anySweepSwingLow(int startOff, int endOff) =>
+    result = false
+    for i = startOff to endOff
+        if doesSweepSwingLow(i)
+            result := true
+            break
+    result
+
+anySweepSwingHigh(int startOff, int endOff) =>
+    result = false
+    for i = startOff to endOff
+        if doesSweepSwingHigh(i)
+            result := true
+            break
+    result
+
+// ============================================================================
+// FVG DETECTION
+// ============================================================================
+
+// Check if a bullish FVG exists in the range [startOff..endOff]
+// Bullish FVG: low of 3rd candle > high of 1st candle (gap up)
+hasBullishFVG(int startOff, int endOff) =>
+    result = false
+    if endOff - startOff >= 2  // Need at least 3 candles
+        for i = startOff to endOff - 2
+            if low[i] > high[i + 2]
+                result := true
+                break
+    result
+
+// Check if a bearish FVG exists in the range [startOff..endOff]
+// Bearish FVG: high of 3rd candle < low of 1st candle (gap down)
+hasBearishFVG(int startOff, int endOff) =>
+    result = false
+    if endOff - startOff >= 2  // Need at least 3 candles
+        for i = startOff to endOff - 2
+            if high[i] < low[i + 2]
+                result := true
+                break
+    result
+
+// ============================================================================
+// CISD DETECTION WITH CSP SWEEP REQUIREMENT
+// ============================================================================
+
+// A CISD is only valid if at least one candle in the CISD sequence sweeps a
+// CSP swing point:
+//   - Bullish CISD requires a CSP swing LOW sweep (liquidity grab below)
+//   - Bearish CISD requires a CSP swing HIGH sweep (liquidity grab above)
+
+detectCISD() =>
+    bullishCISD = false
+    bearishCISD = false
+
+    // ─── Bullish CISD ───────────────────────────────────────────────────
+    // Leg-in: bearish candles (close < open)
+    // Leg-out: bullish candles (close >= open, including doji)
+    if showBullish and close >= open  // Current candle is bullish or doji
+        bullRun  = countConsecBull(0)   // Leg-out length
+        bearRun  = countConsecBear(bullRun)  // Leg-in length
+        preOff   = bullRun + bearRun
+        firstBearOff = bullRun + bearRun - 1
+
+        // Must have at least 1 candle in each leg and pattern preceded by bullish/doji
+        if bearRun >= 1 and bullRun >= 1 and close[preOff] >= open[preOff]
+            // Check engulfment: close above first bearish candle's open
+            if close > open[firstBearOff]
+                if bearRun >= 2 and detectMultiLegIn
+                    // 2+ leg-in candles: valid CISD if CSP sweep exists in sequence
+                    if anySweepSwingLow(0, firstBearOff)
+                        bullishCISD := true
+                else if bearRun == 1 and bullRun >= 2
+                    // 1 leg-in + 2+ leg-out: valid if FVG forms AND CSP sweep
+                    if detectSingleWithFVG and hasBullishFVG(0, firstBearOff)
+                        if anySweepSwingLow(0, firstBearOff)
+                            bullishCISD := true
+                    else if detectDoubleLegIn
+                        // Double leg-in: engulfs two separate leg-in sequences
+                        middleBullRun = countConsecBull(preOff)
+                        if middleBullRun >= 1
+                            bearRun2 = countConsecBear(preOff + middleBullRun)
+                            if bearRun2 >= 1
+                                firstBear1Off = preOff + middleBullRun + bearRun2 - 1
+                                if close > open[firstBear1Off]
+                                    if anySweepSwingLow(0, firstBear1Off)
+                                        bullishCISD := true
+                else if bearRun == 1 and bullRun == 1 and detectSingleWithWick
+                    // 1 leg-in + 1 leg-out: must wick below leg-in's low AND CSP sweep
+                    if low[0] < low[firstBearOff]
+                        if anySweepSwingLow(0, firstBearOff)
+                            bullishCISD := true
+
+    // ─── Bearish CISD ───────────────────────────────────────────────────
+    // Leg-in: bullish candles (close > open)
+    // Leg-out: bearish candles (close <= open, including doji)
+    if showBearish and close <= open  // Current candle is bearish or doji
+        bearRun  = countConsecBear(0)   // Leg-out length
+        bullRun  = countConsecBull(bearRun)  // Leg-in length
+        preOff   = bearRun + bullRun
+        firstBullOff = bearRun + bullRun - 1
+
+        // Must have at least 1 candle in each leg and pattern preceded by bearish/doji
+        if bullRun >= 1 and bearRun >= 1 and close[preOff] <= open[preOff]
+            // Check engulfment: close below first bullish candle's open
+            if close < open[firstBullOff]
+                if bullRun >= 2 and detectMultiLegIn
+                    // 2+ leg-in candles: valid CISD if CSP sweep exists in sequence
+                    if anySweepSwingHigh(0, firstBullOff)
+                        bearishCISD := true
+                else if bullRun == 1 and bearRun >= 2
+                    // 1 leg-in + 2+ leg-out: valid if FVG forms AND CSP sweep
+                    if detectSingleWithFVG and hasBearishFVG(0, firstBullOff)
+                        if anySweepSwingHigh(0, firstBullOff)
+                            bearishCISD := true
+                    else if detectDoubleLegIn
+                        // Double leg-in: engulfs two separate leg-in sequences
+                        middleBearRun = countConsecBear(preOff)
+                        if middleBearRun >= 1
+                            bullRun2 = countConsecBull(preOff + middleBearRun)
+                            if bullRun2 >= 1
+                                firstBull1Off = preOff + middleBearRun + bullRun2 - 1
+                                if close < open[firstBull1Off]
+                                    if anySweepSwingHigh(0, firstBull1Off)
+                                        bearishCISD := true
+                else if bullRun == 1 and bearRun == 1 and detectSingleWithWick
+                    // 1 leg-in + 1 leg-out: must wick above leg-in's high AND CSP sweep
+                    if high[0] > high[firstBullOff]
+                        if anySweepSwingHigh(0, firstBullOff)
+                            bearishCISD := true
+
+    [bullishCISD, bearishCISD]
+
+// ============================================================================
+// MULTI-TIMEFRAME DETECTION
+// ============================================================================
+
+// Direct call for chart timeframe (no one-bar delay from request.security)
+[chartBull, chartBear] = detectCISD()
+
+// Security calls for HTF support (lookahead_off returns last completed HTF bar)
+[secBull1, secBear1] = request.security(syminfo.tickerid, tf1, detectCISD())
+[secBull2, secBear2] = request.security(syminfo.tickerid, tf2, detectCISD())
+[secBull3, secBear3] = request.security(syminfo.tickerid, tf3, detectCISD())
+[secBull4, secBear4] = request.security(syminfo.tickerid, tf4, detectCISD())
+
+// Use direct result for chart TF to avoid the one-bar delay that
+// request.security() introduces for the chart's own timeframe.
+rawBull1 = tf1 == "" ? chartBull : secBull1
+rawBear1 = tf1 == "" ? chartBear : secBear1
+rawBull2 = tf2 == "" ? chartBull : secBull2
+rawBear2 = tf2 == "" ? chartBear : secBear2
+rawBull3 = tf3 == "" ? chartBull : secBull3
+rawBear3 = tf3 == "" ? chartBear : secBear3
+rawBull4 = tf4 == "" ? chartBull : secBull4
+rawBear4 = tf4 == "" ? chartBear : secBear4
+
+// Edge detection: signal only on the first chart bar where the value transitions to true.
+// Prevents duplicate signals across consecutive bars / HTF bar spans.
+bull1 = tf1Enabled and rawBull1 and not nz(rawBull1[1])
+bear1 = tf1Enabled and rawBear1 and not nz(rawBear1[1])
+bull2 = tf2Enabled and rawBull2 and not nz(rawBull2[1])
+bear2 = tf2Enabled and rawBear2 and not nz(rawBear2[1])
+bull3 = tf3Enabled and rawBull3 and not nz(rawBull3[1])
+bear3 = tf3Enabled and rawBear3 and not nz(rawBear3[1])
+bull4 = tf4Enabled and rawBull4 and not nz(rawBull4[1])
+bear4 = tf4Enabled and rawBear4 and not nz(rawBear4[1])
+
+// ============================================================================
+// VISUALIZATION
+// ============================================================================
+
+// Build label text: append timeframe for non-chart timeframes
+tf1Text = tf1 == "" ? "CISD" : "CISD\n" + tf1
+tf2Text = tf2 == "" ? "CISD" : "CISD\n" + tf2
+tf3Text = tf3 == "" ? "CISD" : "CISD\n" + tf3
+tf4Text = tf4 == "" ? "CISD" : "CISD\n" + tf4
+
+if bull1
+    label.new(bar_index, low, tf1Text, style=label.style_label_up, color=tf1BullColor, textcolor=color.white, size=size.small)
+if bear1
+    label.new(bar_index, high, tf1Text, style=label.style_label_down, color=tf1BearColor, textcolor=color.white, size=size.small)
+if bull2
+    label.new(bar_index, low, tf2Text, style=label.style_label_up, color=tf2BullColor, textcolor=color.white, size=size.small)
+if bear2
+    label.new(bar_index, high, tf2Text, style=label.style_label_down, color=tf2BearColor, textcolor=color.white, size=size.small)
+if bull3
+    label.new(bar_index, low, tf3Text, style=label.style_label_up, color=tf3BullColor, textcolor=color.white, size=size.small)
+if bear3
+    label.new(bar_index, high, tf3Text, style=label.style_label_down, color=tf3BearColor, textcolor=color.white, size=size.small)
+if bull4
+    label.new(bar_index, low, tf4Text, style=label.style_label_up, color=tf4BullColor, textcolor=color.white, size=size.small)
+if bear4
+    label.new(bar_index, high, tf4Text, style=label.style_label_down, color=tf4BearColor, textcolor=color.white, size=size.small)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+alertcondition(bull1 or bull2 or bull3 or bull4, "Bullish CISD + CSP Sweep", "Bullish CISD with CSP sweep detected")
+alertcondition(bear1 or bear2 or bear3 or bear4, "Bearish CISD + CSP Sweep", "Bearish CISD with CSP sweep detected")
