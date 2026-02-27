@@ -22,8 +22,9 @@ ifvgBullCol = input.color(color.new(#2196f3, 80), "IFVG Bullish", inline="ifvgc"
 ifvgBearCol = input.color(color.new(#ffeb3b, 80), "IFVG Bearish", inline="ifvgc", group=grpColors)
 labelCol    = input.color(color.black, "Box Label Color", group=grpColors)
 
-grpTF1 = "Timeframe 1 (Chart)"
-tf1Enabled  = input.bool(true, "Enable", group=grpTF1)
+grpTF1 = "Timeframe 1"
+tf1Enabled  = input.bool(true, "Enable", inline="tf1", group=grpTF1)
+tf1TF       = input.timeframe("", "Timeframe", inline="tf1", group=grpTF1)
 
 grpTF2 = "Timeframe 2"
 tf2Enabled  = input.bool(false, "Enable", inline="tf2", group=grpTF2)
@@ -32,6 +33,10 @@ tf2TF       = input.timeframe("15", "Timeframe", inline="tf2", group=grpTF2)
 grpTF3 = "Timeframe 3"
 tf3Enabled  = input.bool(false, "Enable", inline="tf3", group=grpTF3)
 tf3TF       = input.timeframe("60", "Timeframe", inline="tf3", group=grpTF3)
+
+grpTF4 = "Timeframe 4"
+tf4Enabled  = input.bool(false, "Enable", inline="tf4", group=grpTF4)
+tf4TF       = input.timeframe("240", "Timeframe", inline="tf4", group=grpTF4)
 
 // ============================================================================
 // TYPES
@@ -137,6 +142,9 @@ sendIfvg(_ary, string tfLabel) =>
             for stuff in value.labs
                 labelMaker(stuff.x, stuff.y, stuff.dir)
 
+getTFLabel(string tf) =>
+    tf == "" ? timeframe.period : tf
+
 // ============================================================================
 // DATA ARRAYS
 // ============================================================================
@@ -156,6 +164,11 @@ var tf3BearFvg = array.new<fvg>(na)
 var tf3BullInv = array.new<fvg>(na)
 var tf3BearInv = array.new<fvg>(na)
 
+var tf4BullFvg = array.new<fvg>(na)
+var tf4BearFvg = array.new<fvg>(na)
+var tf4BullInv = array.new<fvg>(na)
+var tf4BearInv = array.new<fvg>(na)
+
 // ============================================================================
 // DELETE DRAWINGS (redrawn on barstate.islast)
 // ============================================================================
@@ -168,19 +181,55 @@ for lb in label.all
     label.delete(lb)
 
 // ============================================================================
-// TF1 DETECTION (Chart Timeframe)
+// TF1 DETECTION
 // ============================================================================
+
+[tf1H, tf1L, tf1C, tf1Time, tf1Atr] = request.security(syminfo.tickerid, tf1TF, [high, low, close, time, atrCalc])
+tf1New = ta.change(tf1Time) != 0
+
+var float tf1H0 = na
+var float tf1H1 = na
+var float tf1H2 = na
+var float tf1L0 = na
+var float tf1L1 = na
+var float tf1L2 = na
+var float tf1C0 = na
+var float tf1C1 = na
+var float tf1C2 = na
+var int tf1T0 = na
+var int tf1T1 = na
+var int tf1T2 = na
 
 if tf1Enabled
-    fvgUp = low > high[2] and close[1] > high[2]
-    fvgDown = high < low[2] and close[1] < low[2]
-    if fvgUp and math.abs(low - high[2]) > atrVal
-        tf1BullFvg.push(fvg.new(time[1], low, time, high[2], math.avg(low, high[2]), 1, 0, array.new<lab>(na), na))
-    if fvgDown and math.abs(low[2] - high) > atrVal
-        tf1BearFvg.push(fvg.new(time[1], low[2], time, high, math.avg(high, low[2]), -1, 0, array.new<lab>(na), na))
+    if tf1TF == ""
+        fvgUp = low > high[2] and close[1] > high[2]
+        fvgDown = high < low[2] and close[1] < low[2]
+        if fvgUp and math.abs(low - high[2]) > atrVal
+            tf1BullFvg.push(fvg.new(time[1], low, time, high[2], math.avg(low, high[2]), 1, 0, array.new<lab>(na), na))
+        if fvgDown and math.abs(low[2] - high) > atrVal
+            tf1BearFvg.push(fvg.new(time[1], low[2], time, high, math.avg(high, low[2]), -1, 0, array.new<lab>(na), na))
+    else if tf1New
+        tf1H2 := tf1H1
+        tf1L2 := tf1L1
+        tf1C2 := tf1C1
+        tf1T2 := tf1T1
+        tf1H1 := tf1H0
+        tf1L1 := tf1L0
+        tf1C1 := tf1C0
+        tf1T1 := tf1T0
+        tf1H0 := tf1H
+        tf1L0 := tf1L
+        tf1C0 := tf1C
+        tf1T0 := time
+        if not na(tf1L0) and not na(tf1H2)
+            tf1AtrV = nz(tf1Atr, atrVal)
+            if tf1L0 > tf1H2 and tf1C1 > tf1H2 and math.abs(tf1L0 - tf1H2) > tf1AtrV
+                tf1BullFvg.push(fvg.new(tf1T2, tf1L0, tf1T1, tf1H2, math.avg(tf1L0, tf1H2), 1, 0, array.new<lab>(na), na))
+            if tf1H0 < tf1L2 and tf1C1 < tf1L2 and math.abs(tf1L2 - tf1H0) > tf1AtrV
+                tf1BearFvg.push(fvg.new(tf1T2, tf1L2, tf1T1, tf1H0, math.avg(tf1H0, tf1L2), -1, 0, array.new<lab>(na), na))
 
 // ============================================================================
-// TF2 DETECTION (HTF)
+// TF2 DETECTION
 // ============================================================================
 
 [tf2H, tf2L, tf2C, tf2Time, tf2Atr] = request.security(syminfo.tickerid, tf2TF, [high, low, close, time, atrCalc])
@@ -199,29 +248,36 @@ var int tf2T0 = na
 var int tf2T1 = na
 var int tf2T2 = na
 
-if tf2New and tf2Enabled
-    tf2H2 := tf2H1
-    tf2L2 := tf2L1
-    tf2C2 := tf2C1
-    tf2T2 := tf2T1
-    tf2H1 := tf2H0
-    tf2L1 := tf2L0
-    tf2C1 := tf2C0
-    tf2T1 := tf2T0
-    tf2H0 := tf2H
-    tf2L0 := tf2L
-    tf2C0 := tf2C
-    tf2T0 := time
-
-    if not na(tf2L0) and not na(tf2H2)
-        tf2AtrV = nz(tf2Atr, atrVal)
-        if tf2L0 > tf2H2 and tf2C1 > tf2H2 and math.abs(tf2L0 - tf2H2) > tf2AtrV
-            tf2BullFvg.push(fvg.new(tf2T2, tf2L0, tf2T1, tf2H2, math.avg(tf2L0, tf2H2), 1, 0, array.new<lab>(na), na))
-        if tf2H0 < tf2L2 and tf2C1 < tf2L2 and math.abs(tf2L2 - tf2H0) > tf2AtrV
-            tf2BearFvg.push(fvg.new(tf2T2, tf2L2, tf2T1, tf2H0, math.avg(tf2H0, tf2L2), -1, 0, array.new<lab>(na), na))
+if tf2Enabled
+    if tf2TF == ""
+        fvgUp = low > high[2] and close[1] > high[2]
+        fvgDown = high < low[2] and close[1] < low[2]
+        if fvgUp and math.abs(low - high[2]) > atrVal
+            tf2BullFvg.push(fvg.new(time[1], low, time, high[2], math.avg(low, high[2]), 1, 0, array.new<lab>(na), na))
+        if fvgDown and math.abs(low[2] - high) > atrVal
+            tf2BearFvg.push(fvg.new(time[1], low[2], time, high, math.avg(high, low[2]), -1, 0, array.new<lab>(na), na))
+    else if tf2New
+        tf2H2 := tf2H1
+        tf2L2 := tf2L1
+        tf2C2 := tf2C1
+        tf2T2 := tf2T1
+        tf2H1 := tf2H0
+        tf2L1 := tf2L0
+        tf2C1 := tf2C0
+        tf2T1 := tf2T0
+        tf2H0 := tf2H
+        tf2L0 := tf2L
+        tf2C0 := tf2C
+        tf2T0 := time
+        if not na(tf2L0) and not na(tf2H2)
+            tf2AtrV = nz(tf2Atr, atrVal)
+            if tf2L0 > tf2H2 and tf2C1 > tf2H2 and math.abs(tf2L0 - tf2H2) > tf2AtrV
+                tf2BullFvg.push(fvg.new(tf2T2, tf2L0, tf2T1, tf2H2, math.avg(tf2L0, tf2H2), 1, 0, array.new<lab>(na), na))
+            if tf2H0 < tf2L2 and tf2C1 < tf2L2 and math.abs(tf2L2 - tf2H0) > tf2AtrV
+                tf2BearFvg.push(fvg.new(tf2T2, tf2L2, tf2T1, tf2H0, math.avg(tf2H0, tf2L2), -1, 0, array.new<lab>(na), na))
 
 // ============================================================================
-// TF3 DETECTION (HTF)
+// TF3 DETECTION
 // ============================================================================
 
 [tf3H, tf3L, tf3C, tf3Time, tf3Atr] = request.security(syminfo.tickerid, tf3TF, [high, low, close, time, atrCalc])
@@ -240,26 +296,81 @@ var int tf3T0 = na
 var int tf3T1 = na
 var int tf3T2 = na
 
-if tf3New and tf3Enabled
-    tf3H2 := tf3H1
-    tf3L2 := tf3L1
-    tf3C2 := tf3C1
-    tf3T2 := tf3T1
-    tf3H1 := tf3H0
-    tf3L1 := tf3L0
-    tf3C1 := tf3C0
-    tf3T1 := tf3T0
-    tf3H0 := tf3H
-    tf3L0 := tf3L
-    tf3C0 := tf3C
-    tf3T0 := time
+if tf3Enabled
+    if tf3TF == ""
+        fvgUp = low > high[2] and close[1] > high[2]
+        fvgDown = high < low[2] and close[1] < low[2]
+        if fvgUp and math.abs(low - high[2]) > atrVal
+            tf3BullFvg.push(fvg.new(time[1], low, time, high[2], math.avg(low, high[2]), 1, 0, array.new<lab>(na), na))
+        if fvgDown and math.abs(low[2] - high) > atrVal
+            tf3BearFvg.push(fvg.new(time[1], low[2], time, high, math.avg(high, low[2]), -1, 0, array.new<lab>(na), na))
+    else if tf3New
+        tf3H2 := tf3H1
+        tf3L2 := tf3L1
+        tf3C2 := tf3C1
+        tf3T2 := tf3T1
+        tf3H1 := tf3H0
+        tf3L1 := tf3L0
+        tf3C1 := tf3C0
+        tf3T1 := tf3T0
+        tf3H0 := tf3H
+        tf3L0 := tf3L
+        tf3C0 := tf3C
+        tf3T0 := time
+        if not na(tf3L0) and not na(tf3H2)
+            tf3AtrV = nz(tf3Atr, atrVal)
+            if tf3L0 > tf3H2 and tf3C1 > tf3H2 and math.abs(tf3L0 - tf3H2) > tf3AtrV
+                tf3BullFvg.push(fvg.new(tf3T2, tf3L0, tf3T1, tf3H2, math.avg(tf3L0, tf3H2), 1, 0, array.new<lab>(na), na))
+            if tf3H0 < tf3L2 and tf3C1 < tf3L2 and math.abs(tf3L2 - tf3H0) > tf3AtrV
+                tf3BearFvg.push(fvg.new(tf3T2, tf3L2, tf3T1, tf3H0, math.avg(tf3H0, tf3L2), -1, 0, array.new<lab>(na), na))
 
-    if not na(tf3L0) and not na(tf3H2)
-        tf3AtrV = nz(tf3Atr, atrVal)
-        if tf3L0 > tf3H2 and tf3C1 > tf3H2 and math.abs(tf3L0 - tf3H2) > tf3AtrV
-            tf3BullFvg.push(fvg.new(tf3T2, tf3L0, tf3T1, tf3H2, math.avg(tf3L0, tf3H2), 1, 0, array.new<lab>(na), na))
-        if tf3H0 < tf3L2 and tf3C1 < tf3L2 and math.abs(tf3L2 - tf3H0) > tf3AtrV
-            tf3BearFvg.push(fvg.new(tf3T2, tf3L2, tf3T1, tf3H0, math.avg(tf3H0, tf3L2), -1, 0, array.new<lab>(na), na))
+// ============================================================================
+// TF4 DETECTION
+// ============================================================================
+
+[tf4H, tf4L, tf4C, tf4Time, tf4Atr] = request.security(syminfo.tickerid, tf4TF, [high, low, close, time, atrCalc])
+tf4New = ta.change(tf4Time) != 0
+
+var float tf4H0 = na
+var float tf4H1 = na
+var float tf4H2 = na
+var float tf4L0 = na
+var float tf4L1 = na
+var float tf4L2 = na
+var float tf4C0 = na
+var float tf4C1 = na
+var float tf4C2 = na
+var int tf4T0 = na
+var int tf4T1 = na
+var int tf4T2 = na
+
+if tf4Enabled
+    if tf4TF == ""
+        fvgUp = low > high[2] and close[1] > high[2]
+        fvgDown = high < low[2] and close[1] < low[2]
+        if fvgUp and math.abs(low - high[2]) > atrVal
+            tf4BullFvg.push(fvg.new(time[1], low, time, high[2], math.avg(low, high[2]), 1, 0, array.new<lab>(na), na))
+        if fvgDown and math.abs(low[2] - high) > atrVal
+            tf4BearFvg.push(fvg.new(time[1], low[2], time, high, math.avg(high, low[2]), -1, 0, array.new<lab>(na), na))
+    else if tf4New
+        tf4H2 := tf4H1
+        tf4L2 := tf4L1
+        tf4C2 := tf4C1
+        tf4T2 := tf4T1
+        tf4H1 := tf4H0
+        tf4L1 := tf4L0
+        tf4C1 := tf4C0
+        tf4T1 := tf4T0
+        tf4H0 := tf4H
+        tf4L0 := tf4L
+        tf4C0 := tf4C
+        tf4T0 := time
+        if not na(tf4L0) and not na(tf4H2)
+            tf4AtrV = nz(tf4Atr, atrVal)
+            if tf4L0 > tf4H2 and tf4C1 > tf4H2 and math.abs(tf4L0 - tf4H2) > tf4AtrV
+                tf4BullFvg.push(fvg.new(tf4T2, tf4L0, tf4T1, tf4H2, math.avg(tf4L0, tf4H2), 1, 0, array.new<lab>(na), na))
+            if tf4H0 < tf4L2 and tf4C1 < tf4L2 and math.abs(tf4L2 - tf4H0) > tf4AtrV
+                tf4BearFvg.push(fvg.new(tf4T2, tf4L2, tf4T1, tf4H0, math.avg(tf4H0, tf4L2), -1, 0, array.new<lab>(na), na))
 
 // ============================================================================
 // MANAGEMENT (runs every bar — CTF price mitigates all TF zones)
@@ -280,13 +391,19 @@ fvgManage(tf3BearFvg, tf3BearInv)
 tf3BearSig = invManage(tf3BullInv)
 tf3BullSig = invManage(tf3BearInv)
 
+fvgManage(tf4BullFvg, tf4BullInv)
+fvgManage(tf4BearFvg, tf4BearInv)
+tf4BearSig = invManage(tf4BullInv)
+tf4BullSig = invManage(tf4BearInv)
+
 // ============================================================================
 // DRAWING (redraw on last bar only)
 // ============================================================================
 
-tf1Label = timeframe.period
-tf2Label = tf2TF
-tf3Label = tf3TF
+tf1Label = getTFLabel(tf1TF)
+tf2Label = getTFLabel(tf2TF)
+tf3Label = getTFLabel(tf3TF)
+tf4Label = getTFLabel(tf4TF)
 
 if barstate.islast
     if tf1Enabled
@@ -310,10 +427,17 @@ if barstate.islast
         if showIFVG
             sendIfvg(tf3BullInv, tf3Label)
             sendIfvg(tf3BearInv, tf3Label)
+    if tf4Enabled
+        if showFVG
+            sendFvg(tf4BullFvg, tf4Label)
+            sendFvg(tf4BearFvg, tf4Label)
+        if showIFVG
+            sendIfvg(tf4BullInv, tf4Label)
+            sendIfvg(tf4BearInv, tf4Label)
 
 // ============================================================================
 // ALERTS
 // ============================================================================
 
-alertcondition(tf1BullSig or tf2BullSig or tf3BullSig, "Bullish IFVG Signal")
-alertcondition(tf1BearSig or tf2BearSig or tf3BearSig, "Bearish IFVG Signal")
+alertcondition(tf1BullSig or tf2BullSig or tf3BullSig or tf4BullSig, "Bullish IFVG Signal")
+alertcondition(tf1BearSig or tf2BearSig or tf3BearSig or tf4BearSig, "Bearish IFVG Signal")
