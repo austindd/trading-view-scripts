@@ -1,0 +1,304 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Inversion Fair Value Gaps MTF [SB]", "IFVG MTF [SB]", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+grpDetect = "Detection"
+dispNum     = input.int(5, "Show Last", minval=1, maxval=50, group=grpDetect, tooltip="Number of most recent IFVGs to display per direction per timeframe")
+signalPref  = input.string("Close", "Signal Preference", options=["Close", "Wick"], group=grpDetect, tooltip="Send signals based on Wicks or Close Price")
+atrMulti    = input.float(0.25, "ATR Multiplier", step=0.25, minval=0, group=grpDetect, tooltip="Minimum FVG size as ATR * Multiplier. Only inversions of FVGs larger than this are displayed.")
+
+grpTF1 = "Timeframe 1 (Chart)"
+tf1Enabled  = input.bool(true, "Enable", group=grpTF1)
+tf1Bull     = input.color(color.new(#089981, 80), "Bullish", inline="tf1c", group=grpTF1)
+tf1Bear     = input.color(color.new(#f23645, 80), "Bearish", inline="tf1c", group=grpTF1)
+
+grpTF2 = "Timeframe 2"
+tf2Enabled  = input.bool(false, "Enable", inline="tf2", group=grpTF2)
+tf2TF       = input.timeframe("15", "Timeframe", inline="tf2", group=grpTF2)
+tf2Bull     = input.color(color.new(#26a69a, 80), "Bullish", inline="tf2c", group=grpTF2)
+tf2Bear     = input.color(color.new(#ef5350, 80), "Bearish", inline="tf2c", group=grpTF2)
+
+grpTF3 = "Timeframe 3"
+tf3Enabled  = input.bool(false, "Enable", inline="tf3", group=grpTF3)
+tf3TF       = input.timeframe("60", "Timeframe", inline="tf3", group=grpTF3)
+tf3Bull     = input.color(color.new(#2196f3, 80), "Bullish", inline="tf3c", group=grpTF3)
+tf3Bear     = input.color(color.new(#ff5722, 80), "Bearish", inline="tf3c", group=grpTF3)
+
+midCol = input.color(#787b86, "Midline Color", group="Colors")
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+type lab
+    int x
+    float y
+    int dir
+
+type fvg
+    int left = na
+    float top = na
+    int right = na
+    float bot = na
+    float mid = na
+    int dir = na
+    int state = na
+    array<lab> labs = na
+    int x_val = na
+
+// ============================================================================
+// CONSTANTS & CALCS
+// ============================================================================
+
+BUFFER = 100
+c_top = math.max(open, close)
+c_bot = math.min(open, close)
+wt = signalPref == "Wick"
+invis = color.rgb(0, 0, 0, 100)
+atrVal = nz(ta.atr(200) * atrMulti, ta.cum(high - low) / (bar_index + 1))
+atrCalc = ta.atr(200) * atrMulti
+
+// ============================================================================
+// FUNCTIONS
+// ============================================================================
+
+labelMaker(_x, _y, _dir, bullCol, bearCol) =>
+    switch
+        _dir == 1 => label.new(_x, _y, "\n▲", style=label.style_text_outline, color=invis, textcolor=color.new(bullCol, 0), size=size.small, xloc=xloc.bar_time)
+        _dir == -1 => label.new(_x, _y, "▼\n", style=label.style_text_outline, color=invis, textcolor=color.new(bearCol, 0), size=size.small, xloc=xloc.bar_time)
+
+fvgManage(_ary, _invAry) =>
+    if _ary.size() >= BUFFER
+        _ary.shift()
+    if _ary.size() > 0
+        for i = _ary.size() - 1 to 0
+            value = _ary.get(i)
+            _dir = value.dir
+            if _dir == 1 and c_bot < value.bot
+                value.x_val := time
+                _invAry.push(_ary.remove(i))
+            if _dir == -1 and c_top > value.top
+                value.x_val := time
+                _invAry.push(_ary.remove(i))
+
+invManage(_ary) =>
+    fire = false
+    if _ary.size() >= BUFFER
+        _ary.shift()
+    if _ary.size() > 0
+        for i = _ary.size() - 1 to 0
+            value = _ary.get(i)
+            bxTop = value.top
+            bxBot = value.bot
+            _dir = value.dir
+            st = value.state
+            if st == 0 and _dir == 1
+                value.state := 1
+                value.dir := -1
+            if _dir == -1 and st == 0
+                value.state := 1
+                value.dir := 1
+            if st >= 1
+                value.right := time
+            if _dir == -1 and st == 1 and close < bxBot and (wt ? high : close[1]) >= bxBot and (wt ? high : close[1]) < bxTop
+                value.labs.push(lab.new(time, bxTop, -1))
+                fire := true
+            if _dir == 1 and st == 1 and close > bxTop and (wt ? low : close[1]) <= bxTop and (wt ? low : close[1]) > bxBot
+                value.labs.push(lab.new(time, bxBot, 1))
+                fire := true
+            if st >= 1 and ((_dir == -1 and c_top > bxTop) or (_dir == 1 and c_bot < bxBot))
+                _ary.remove(i)
+    fire
+
+sendIt(_ary, bullCol, bearCol, _midCol) =>
+    lastIdx = _ary.size() - 1
+    for [index, value] in _ary
+        if index > lastIdx - dispNum
+            bxTop = value.top
+            bxBot = value.bot
+            bxLeft = value.left
+            xval = value.x_val
+            mid = value.mid
+            col = value.dir == -1 ? bullCol : bearCol
+            oCol = value.dir == -1 ? bearCol : bullCol
+            box.new(bxLeft, bxTop, xval, bxBot, bgcolor=col, border_color=invis, xloc=xloc.bar_time)
+            box.new(xval, bxTop, time, bxBot, bgcolor=oCol, border_color=invis, xloc=xloc.bar_time)
+            line.new(bxLeft, mid, time, mid, color=_midCol, style=line.style_dashed, xloc=xloc.bar_time)
+            box.new(bar_index, bxTop, bar_index + 50, bxBot, bgcolor=oCol, border_color=invis)
+            line.new(bar_index, mid, bar_index + 50, mid, color=_midCol, style=line.style_dashed)
+            for stuff in value.labs
+                labelMaker(stuff.x, stuff.y, stuff.dir, bullCol, bearCol)
+
+// ============================================================================
+// DATA ARRAYS
+// ============================================================================
+
+var tf1BullFvg = array.new<fvg>(na)
+var tf1BearFvg = array.new<fvg>(na)
+var tf1BullInv = array.new<fvg>(na)
+var tf1BearInv = array.new<fvg>(na)
+
+var tf2BullFvg = array.new<fvg>(na)
+var tf2BearFvg = array.new<fvg>(na)
+var tf2BullInv = array.new<fvg>(na)
+var tf2BearInv = array.new<fvg>(na)
+
+var tf3BullFvg = array.new<fvg>(na)
+var tf3BearFvg = array.new<fvg>(na)
+var tf3BullInv = array.new<fvg>(na)
+var tf3BearInv = array.new<fvg>(na)
+
+// ============================================================================
+// DELETE DRAWINGS (redrawn on barstate.islast)
+// ============================================================================
+
+for bx in box.all
+    box.delete(bx)
+for ln in line.all
+    line.delete(ln)
+for lb in label.all
+    label.delete(lb)
+
+// ============================================================================
+// TF1 DETECTION (Chart Timeframe)
+// ============================================================================
+
+if tf1Enabled
+    fvgUp = low > high[2] and close[1] > high[2]
+    fvgDown = high < low[2] and close[1] < low[2]
+    if fvgUp and math.abs(low - high[2]) > atrVal
+        tf1BullFvg.push(fvg.new(time[1], low, time, high[2], math.avg(low, high[2]), 1, 0, array.new<lab>(na), na))
+    if fvgDown and math.abs(low[2] - high) > atrVal
+        tf1BearFvg.push(fvg.new(time[1], low[2], time, high, math.avg(high, low[2]), -1, 0, array.new<lab>(na), na))
+
+// ============================================================================
+// TF2 DETECTION (HTF)
+// ============================================================================
+
+[tf2H, tf2L, tf2C, tf2Time, tf2Atr] = request.security(syminfo.tickerid, tf2TF, [high, low, close, time, atrCalc])
+tf2New = ta.change(tf2Time) != 0
+
+var float tf2H0 = na
+var float tf2H1 = na
+var float tf2H2 = na
+var float tf2L0 = na
+var float tf2L1 = na
+var float tf2L2 = na
+var float tf2C0 = na
+var float tf2C1 = na
+var float tf2C2 = na
+var int tf2T0 = na
+var int tf2T1 = na
+var int tf2T2 = na
+
+if tf2New and tf2Enabled
+    tf2H2 := tf2H1
+    tf2L2 := tf2L1
+    tf2C2 := tf2C1
+    tf2T2 := tf2T1
+    tf2H1 := tf2H0
+    tf2L1 := tf2L0
+    tf2C1 := tf2C0
+    tf2T1 := tf2T0
+    // On newHTFCandle, htfHigh = just-completed candle (per CLAUDE.md)
+    tf2H0 := tf2H
+    tf2L0 := tf2L
+    tf2C0 := tf2C
+    tf2T0 := time
+
+    if not na(tf2L0) and not na(tf2H2)
+        tf2AtrV = nz(tf2Atr, atrVal)
+        // Bullish FVG: candle 0 low > candle 2 high, candle 1 close > candle 2 high
+        if tf2L0 > tf2H2 and tf2C1 > tf2H2 and math.abs(tf2L0 - tf2H2) > tf2AtrV
+            tf2BullFvg.push(fvg.new(tf2T2, tf2L0, tf2T1, tf2H2, math.avg(tf2L0, tf2H2), 1, 0, array.new<lab>(na), na))
+        // Bearish FVG: candle 0 high < candle 2 low, candle 1 close < candle 2 low
+        if tf2H0 < tf2L2 and tf2C1 < tf2L2 and math.abs(tf2L2 - tf2H0) > tf2AtrV
+            tf2BearFvg.push(fvg.new(tf2T2, tf2L2, tf2T1, tf2H0, math.avg(tf2H0, tf2L2), -1, 0, array.new<lab>(na), na))
+
+// ============================================================================
+// TF3 DETECTION (HTF)
+// ============================================================================
+
+[tf3H, tf3L, tf3C, tf3Time, tf3Atr] = request.security(syminfo.tickerid, tf3TF, [high, low, close, time, atrCalc])
+tf3New = ta.change(tf3Time) != 0
+
+var float tf3H0 = na
+var float tf3H1 = na
+var float tf3H2 = na
+var float tf3L0 = na
+var float tf3L1 = na
+var float tf3L2 = na
+var float tf3C0 = na
+var float tf3C1 = na
+var float tf3C2 = na
+var int tf3T0 = na
+var int tf3T1 = na
+var int tf3T2 = na
+
+if tf3New and tf3Enabled
+    tf3H2 := tf3H1
+    tf3L2 := tf3L1
+    tf3C2 := tf3C1
+    tf3T2 := tf3T1
+    tf3H1 := tf3H0
+    tf3L1 := tf3L0
+    tf3C1 := tf3C0
+    tf3T1 := tf3T0
+    tf3H0 := tf3H
+    tf3L0 := tf3L
+    tf3C0 := tf3C
+    tf3T0 := time
+
+    if not na(tf3L0) and not na(tf3H2)
+        tf3AtrV = nz(tf3Atr, atrVal)
+        if tf3L0 > tf3H2 and tf3C1 > tf3H2 and math.abs(tf3L0 - tf3H2) > tf3AtrV
+            tf3BullFvg.push(fvg.new(tf3T2, tf3L0, tf3T1, tf3H2, math.avg(tf3L0, tf3H2), 1, 0, array.new<lab>(na), na))
+        if tf3H0 < tf3L2 and tf3C1 < tf3L2 and math.abs(tf3L2 - tf3H0) > tf3AtrV
+            tf3BearFvg.push(fvg.new(tf3T2, tf3L2, tf3T1, tf3H0, math.avg(tf3H0, tf3L2), -1, 0, array.new<lab>(na), na))
+
+// ============================================================================
+// MANAGEMENT (runs every bar — CTF price mitigates all TF zones)
+// ============================================================================
+
+fvgManage(tf1BullFvg, tf1BullInv)
+fvgManage(tf1BearFvg, tf1BearInv)
+tf1BearSig = invManage(tf1BullInv)
+tf1BullSig = invManage(tf1BearInv)
+
+fvgManage(tf2BullFvg, tf2BullInv)
+fvgManage(tf2BearFvg, tf2BearInv)
+tf2BearSig = invManage(tf2BullInv)
+tf2BullSig = invManage(tf2BearInv)
+
+fvgManage(tf3BullFvg, tf3BullInv)
+fvgManage(tf3BearFvg, tf3BearInv)
+tf3BearSig = invManage(tf3BullInv)
+tf3BullSig = invManage(tf3BearInv)
+
+// ============================================================================
+// DRAWING (redraw on last bar only)
+// ============================================================================
+
+if barstate.islast
+    if tf1Enabled
+        sendIt(tf1BullInv, tf1Bull, tf1Bear, midCol)
+        sendIt(tf1BearInv, tf1Bull, tf1Bear, midCol)
+    if tf2Enabled
+        sendIt(tf2BullInv, tf2Bull, tf2Bear, midCol)
+        sendIt(tf2BearInv, tf2Bull, tf2Bear, midCol)
+    if tf3Enabled
+        sendIt(tf3BullInv, tf3Bull, tf3Bear, midCol)
+        sendIt(tf3BearInv, tf3Bull, tf3Bear, midCol)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+alertcondition(tf1BullSig or tf2BullSig or tf3BullSig, "Bullish IFVG Signal")
+alertcondition(tf1BearSig or tf2BearSig or tf3BearSig, "Bearish IFVG Signal")
