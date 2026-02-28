@@ -96,14 +96,12 @@ fvgManage(_ary, _invAry, int _candleCount, _brokenFvgAry) =>
         for i = _ary.size() - 1 to 0
             value = _ary.get(i)
             _dir = value.dir
-            expired = maxIfvgBars > 0 and not na(value.birthCandle) and (_candleCount - value.birthCandle) > maxIfvgBars
-            if expired
+            tooOld = maxIfvgBars > 0 and not na(value.birthCandle) and (_candleCount - value.birthCandle) > maxIfvgBars
+            mitigated = (_dir == 1 and c_bot < value.bot) or (_dir == -1 and c_top > value.top)
+            if mitigated and (tooOld or not showIFVG)
                 _brokenFvgAry.push(fvg.new(value.left, value.top, time, value.bot, value.mid, value.dir, 0, array.new<lab>(na), na))
                 _ary.remove(i)
-            if not expired and _dir == 1 and c_bot < value.bot
-                value.x_val := time
-                _invAry.push(_ary.remove(i))
-            if not expired and _dir == -1 and c_top > value.top
+            if mitigated and not tooOld and showIFVG
                 value.x_val := time
                 _invAry.push(_ary.remove(i))
     if _brokenFvgAry.size() > BUFFER
