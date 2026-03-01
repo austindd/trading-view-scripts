@@ -10,11 +10,12 @@ indicator("Fair Value Gaps MTF [SB]", "FVG MTF [SB]", overlay=true, max_boxes_co
 
 grpDisplay = "Display"
 maxZones    = input.int(100, "Max Number of Zones", minval=1, group=grpDisplay, tooltip="Maximum number of zones to keep in memory per direction per timeframe. Oldest zones are removed when this limit is exceeded. Keep in mind the maximum number of boxes that can be plotted by a single indicator is 500.")
-dispNum     = input.int(50, "Show Last", minval=1, maxval=200, group=grpDisplay, tooltip="Number of most recent zones to display per direction per timeframe")
+dispNum     = input.int(100, "Show Last", minval=1, maxval=250, group=grpDisplay, tooltip="Number of most recent zones to display per direction per timeframe")
 showFVG     = input.bool(true, "Show FVGs", group=grpDisplay)
 showIFVG    = input.bool(true, "Show IFVGs", group=grpDisplay)
 showBrokenFvg  = input.bool(true, "Show Broken FVGs", group=grpDisplay, tooltip="Keep expired FVGs visible on the chart, cut off at the point where they expired")
 showBrokenIfvg = input.bool(true, "Show Broken IFVGs", group=grpDisplay, tooltip="Keep broken IFVGs visible on the chart, cut off at the point where they were broken")
+fvgBreakPref = input.string("Body", "FVG Break Preference", options=["Body", "Wick"], group=grpDisplay, tooltip="Choose whether FVGs are broken (mitigated) by candle bodies or wicks")
 signalPref  = input.string("Close", "Signal Preference", options=["Close", "Wick"], group=grpDisplay, tooltip="Send signals based on Wicks or Close Price")
 atrMulti    = input.float(0.25, "ATR Multiplier", step=0.25, minval=0, group=grpDisplay, tooltip="Minimum FVG size as ATR * Multiplier. Only FVGs larger than this are tracked.")
 maxIfvgBars = input.int(0, "Max Candles for IFVG", minval=0, group=grpDisplay, tooltip="Maximum number of candles (in the FVG's timeframe) for a valid inversion. FVGs older than this are discarded. 0 = no limit.")
@@ -70,6 +71,9 @@ type fvg
 c_top = math.max(open, close)
 c_bot = math.min(open, close)
 wt = signalPref == "Wick"
+fvgBreakByWick = fvgBreakPref == "Wick"
+fvgBreakHi = fvgBreakByWick ? high : c_top
+fvgBreakLo = fvgBreakByWick ? low : c_bot
 invis = color.rgb(0, 0, 0, 100)
 atrVal = nz(ta.atr(200) * atrMulti, ta.cum(high - low) / (bar_index + 1))
 atrCalc = ta.atr(200) * atrMulti
@@ -97,7 +101,7 @@ fvgManage(_ary, _invAry, int _candleCount, _brokenFvgAry) =>
             value = _ary.get(i)
             _dir = value.dir
             tooOld = maxIfvgBars > 0 and not na(value.birthCandle) and (_candleCount - value.birthCandle) > maxIfvgBars
-            mitigated = (_dir == 1 and c_bot < value.bot) or (_dir == -1 and c_top > value.top)
+            mitigated = (_dir == 1 and fvgBreakLo < value.bot) or (_dir == -1 and fvgBreakHi > value.top)
             if mitigated and (tooOld or not showIFVG)
                 _brokenFvgAry.push(fvg.new(value.left, value.top, time, value.bot, value.mid, value.dir, 0, array.new<lab>(na), na))
                 _ary.remove(i)
