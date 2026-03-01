@@ -133,7 +133,7 @@ invManage(_ary, _brokenAry) =>
                 value.labs.push(lab.new(time, bxBot, 1))
                 fire := true
             if st >= 1 and ((_dir == -1 and c_top > bxTop) or (_dir == 1 and c_bot < bxBot))
-                _brokenAry.push(fvg.new(value.left, value.top, time, value.bot, value.mid, value.dir, 0, array.new<lab>(na), na))
+                _brokenAry.push(fvg.new(value.left, value.top, time, value.bot, value.mid, value.dir, 0, array.new<lab>(na), value.x_val))
                 _ary.remove(i)
     if _brokenAry.size() > BUFFER
         _brokenAry.shift()
@@ -152,10 +152,11 @@ sendIfvg(_ary, string tfLabel) =>
     lastIdx = _ary.size() - 1
     for [index, value] in _ary
         if index > lastIdx - dispNum
-            col = value.dir == 1 ? ifvgBullCol : ifvgBearCol
-            txt = tfLabel + " IFVG"
-            box.new(value.left, value.top, time, value.bot, bgcolor=col, border_color=invis, text=txt, text_halign=text.align_left, text_valign=text.align_center, text_color=labelCol, text_size=size.small, xloc=xloc.bar_time)
-            box.new(bar_index, value.top, bar_index + 50, value.bot, bgcolor=col, border_color=invis)
+            ifvgCol = value.dir == 1 ? ifvgBullCol : ifvgBearCol
+            fvgCol = value.dir == 1 ? fvgBearCol : fvgBullCol
+            box.new(value.left, value.top, value.x_val, value.bot, bgcolor=fvgCol, border_color=invis, text=tfLabel + " FVG", text_halign=text.align_left, text_valign=text.align_center, text_color=labelCol, text_size=size.small, xloc=xloc.bar_time)
+            box.new(value.x_val, value.top, time, value.bot, bgcolor=ifvgCol, border_color=invis, text=tfLabel + " IFVG", text_halign=text.align_left, text_valign=text.align_center, text_color=labelCol, text_size=size.small, xloc=xloc.bar_time)
+            box.new(bar_index, value.top, bar_index + 50, value.bot, bgcolor=ifvgCol, border_color=invis)
             for stuff in value.labs
                 labelMaker(stuff.x, stuff.y, stuff.dir)
 
@@ -163,9 +164,13 @@ sendBrokenIfvg(_ary, string tfLabel) =>
     lastIdx = _ary.size() - 1
     for [index, value] in _ary
         if index > lastIdx - dispNum
-            col = value.dir == 1 ? ifvgBullCol : ifvgBearCol
-            txt = tfLabel + " IFVG"
-            box.new(value.left, value.top, value.right, value.bot, bgcolor=col, border_color=invis, text=txt, text_halign=text.align_left, text_valign=text.align_center, text_color=labelCol, text_size=size.small, xloc=xloc.bar_time)
+            ifvgCol = value.dir == 1 ? ifvgBullCol : ifvgBearCol
+            fvgCol = value.dir == 1 ? fvgBearCol : fvgBullCol
+            if not na(value.x_val)
+                box.new(value.left, value.top, value.x_val, value.bot, bgcolor=fvgCol, border_color=invis, text=tfLabel + " FVG", text_halign=text.align_left, text_valign=text.align_center, text_color=labelCol, text_size=size.small, xloc=xloc.bar_time)
+                box.new(value.x_val, value.top, value.right, value.bot, bgcolor=ifvgCol, border_color=invis, text=tfLabel + " IFVG", text_halign=text.align_left, text_valign=text.align_center, text_color=labelCol, text_size=size.small, xloc=xloc.bar_time)
+            else
+                box.new(value.left, value.top, value.right, value.bot, bgcolor=ifvgCol, border_color=invis, text=tfLabel + " IFVG", text_halign=text.align_left, text_valign=text.align_center, text_color=labelCol, text_size=size.small, xloc=xloc.bar_time)
 
 sendBrokenFvg(_ary, string tfLabel) =>
     lastIdx = _ary.size() - 1
