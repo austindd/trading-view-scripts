@@ -1,0 +1,368 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("IFVG Detector MTF [SB]", "IFVG Detector MTF [SB]", overlay=true, max_boxes_count=500, max_labels_count=500)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+grpDisplay = "Display"
+maxZones    = input.int(100, "Max Number of Zones", minval=1, group=grpDisplay, tooltip="Maximum number of zones to keep in memory per timeframe. Oldest zones are removed when this limit is exceeded.")
+dispNum     = input.int(100, "Show Last", minval=1, maxval=250, group=grpDisplay, tooltip="Number of most recent IFVGs to display per timeframe")
+fvgBreakPref = input.string("Body", "FVG Break Preference", options=["Body", "Wick"], group=grpDisplay, tooltip="Choose whether FVGs are broken (mitigated) by candle bodies or wicks")
+atrMulti    = input.float(0.25, "ATR Multiplier", step=0.25, minval=0, group=grpDisplay, tooltip="Minimum FVG size as ATR * Multiplier. Only FVGs larger than this are tracked.")
+maxIfvgBars = input.int(0, "Max Candles for IFVG", minval=0, group=grpDisplay, tooltip="Maximum number of candles (in the FVG's timeframe) for a valid inversion. FVGs older than this are discarded. 0 = no limit.")
+
+grpColors = "Colors"
+ifvgBullCol = input.color(color.new(#2196f3, 80), "IFVG Bullish", inline="ifvgc", group=grpColors)
+ifvgBearCol = input.color(color.new(#ffeb3b, 80), "IFVG Bearish", inline="ifvgc", group=grpColors)
+labelCol    = input.color(color.black, "Label Color", group=grpColors)
+
+grpTF1 = "Timeframe 1"
+tf1Enabled  = input.bool(true, "Enable", inline="tf1", group=grpTF1)
+tf1TF       = input.timeframe("", "Timeframe", inline="tf1", group=grpTF1)
+
+grpTF2 = "Timeframe 2"
+tf2Enabled  = input.bool(false, "Enable", inline="tf2", group=grpTF2)
+tf2TF       = input.timeframe("15", "Timeframe", inline="tf2", group=grpTF2)
+
+grpTF3 = "Timeframe 3"
+tf3Enabled  = input.bool(false, "Enable", inline="tf3", group=grpTF3)
+tf3TF       = input.timeframe("60", "Timeframe", inline="tf3", group=grpTF3)
+
+grpTF4 = "Timeframe 4"
+tf4Enabled  = input.bool(false, "Enable", inline="tf4", group=grpTF4)
+tf4TF       = input.timeframe("240", "Timeframe", inline="tf4", group=grpTF4)
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+type zone
+    int left = na
+    float top = na
+    int right = na
+    float bot = na
+    int dir = na
+    int birthCandle = na
+
+// ============================================================================
+// CONSTANTS & CALCS
+// ============================================================================
+
+c_top = math.max(open, close)
+c_bot = math.min(open, close)
+fvgBreakByWick = fvgBreakPref == "Wick"
+fvgBreakHi = fvgBreakByWick ? high : c_top
+fvgBreakLo = fvgBreakByWick ? low : c_bot
+invis = color.rgb(0, 0, 0, 100)
+atrVal = nz(ta.atr(200) * atrMulti, ta.cum(high - low) / (bar_index + 1))
+atrCalc = ta.atr(200) * atrMulti
+
+var int tf1Candles = 0
+var int tf2Candles = 0
+var int tf3Candles = 0
+var int tf4Candles = 0
+
+// ============================================================================
+// FUNCTIONS
+// ============================================================================
+
+fvgManage(_ary, _ifvgAry, int _candleCount) =>
+    if _ary.size() >= maxZones
+        _ary.shift()
+    if _ary.size() > 0
+        for i = _ary.size() - 1 to 0
+            value = _ary.get(i)
+            _dir = value.dir
+            tooOld = maxIfvgBars > 0 and not na(value.birthCandle) and (_candleCount - value.birthCandle) > maxIfvgBars
+            mitigated = (_dir == 1 and fvgBreakLo < value.bot) or (_dir == -1 and fvgBreakHi > value.top)
+            if mitigated and tooOld
+                _ary.remove(i)
+            if mitigated and not tooOld
+                _ifvgAry.push(zone.new(value.left, value.top, time, value.bot, _dir == 1 ? -1 : 1))
+                _ary.remove(i)
+            if not mitigated and tooOld
+                _ary.remove(i)
+    if _ifvgAry.size() > maxZones
+        _ifvgAry.shift()
+
+sendIfvg(_ary, string tfLabel) =>
+    lastIdx = _ary.size() - 1
+    for [index, value] in _ary
+        if index > lastIdx - dispNum
+            col = value.dir == 1 ? ifvgBullCol : ifvgBearCol
+            box.new(value.left, value.top, value.right, value.bot, bgcolor=col, border_color=invis, xloc=xloc.bar_time)
+            if value.dir == 1
+                label.new(value.right, value.bot, tfLabel, style=label.style_label_up, color=invis, textcolor=labelCol, size=size.small, xloc=xloc.bar_time)
+            else
+                label.new(value.right, value.top, tfLabel, style=label.style_label_down, color=invis, textcolor=labelCol, size=size.small, xloc=xloc.bar_time)
+
+getTFLabel(string tf) =>
+    tf == "" ? timeframe.period : tf
+
+// ============================================================================
+// DATA ARRAYS
+// ============================================================================
+
+var tf1BullFvg = array.new<zone>(na)
+var tf1BearFvg = array.new<zone>(na)
+var tf1Ifvg    = array.new<zone>(na)
+
+var tf2BullFvg = array.new<zone>(na)
+var tf2BearFvg = array.new<zone>(na)
+var tf2Ifvg    = array.new<zone>(na)
+
+var tf3BullFvg = array.new<zone>(na)
+var tf3BearFvg = array.new<zone>(na)
+var tf3Ifvg    = array.new<zone>(na)
+
+var tf4BullFvg = array.new<zone>(na)
+var tf4BearFvg = array.new<zone>(na)
+var tf4Ifvg    = array.new<zone>(na)
+
+// ============================================================================
+// DELETE DRAWINGS (redrawn on barstate.islast)
+// ============================================================================
+
+for bx in box.all
+    box.delete(bx)
+for lb in label.all
+    label.delete(lb)
+
+// ============================================================================
+// TF1 DETECTION
+// ============================================================================
+
+[tf1H, tf1L, tf1C, tf1Time, tf1Atr] = request.security(syminfo.tickerid, tf1TF, [high, low, close, time, atrCalc])
+tf1New = ta.change(tf1Time) != 0
+
+var float tf1H0 = na
+var float tf1H1 = na
+var float tf1H2 = na
+var float tf1L0 = na
+var float tf1L1 = na
+var float tf1L2 = na
+var float tf1C0 = na
+var float tf1C1 = na
+var float tf1C2 = na
+var int tf1T0 = na
+var int tf1T1 = na
+var int tf1T2 = na
+
+if tf1Enabled
+    if tf1TF == ""
+        tf1Candles += 1
+        fvgUp = low > high[2] and close[1] > high[2]
+        fvgDown = high < low[2] and close[1] < low[2]
+        if fvgUp and math.abs(low - high[2]) > atrVal
+            tf1BullFvg.push(zone.new(time[2], low, time, high[2], 1, tf1Candles))
+        if fvgDown and math.abs(low[2] - high) > atrVal
+            tf1BearFvg.push(zone.new(time[2], low[2], time, high, -1, tf1Candles))
+    else if tf1New
+        tf1Candles += 1
+        tf1H2 := tf1H1
+        tf1L2 := tf1L1
+        tf1C2 := tf1C1
+        tf1T2 := tf1T1
+        tf1H1 := tf1H0
+        tf1L1 := tf1L0
+        tf1C1 := tf1C0
+        tf1T1 := tf1T0
+        tf1H0 := tf1H
+        tf1L0 := tf1L
+        tf1C0 := tf1C
+        tf1T0 := time
+        if not na(tf1L0) and not na(tf1H2)
+            tf1AtrV = nz(tf1Atr, atrVal)
+            if tf1L0 > tf1H2 and tf1C1 > tf1H2 and math.abs(tf1L0 - tf1H2) > tf1AtrV
+                tf1BullFvg.push(zone.new(tf1T2, tf1L0, tf1T0, tf1H2, 1, tf1Candles))
+            if tf1H0 < tf1L2 and tf1C1 < tf1L2 and math.abs(tf1L2 - tf1H0) > tf1AtrV
+                tf1BearFvg.push(zone.new(tf1T2, tf1L2, tf1T0, tf1H0, -1, tf1Candles))
+
+// ============================================================================
+// TF2 DETECTION
+// ============================================================================
+
+[tf2H, tf2L, tf2C, tf2Time, tf2Atr] = request.security(syminfo.tickerid, tf2TF, [high, low, close, time, atrCalc])
+tf2New = ta.change(tf2Time) != 0
+
+var float tf2H0 = na
+var float tf2H1 = na
+var float tf2H2 = na
+var float tf2L0 = na
+var float tf2L1 = na
+var float tf2L2 = na
+var float tf2C0 = na
+var float tf2C1 = na
+var float tf2C2 = na
+var int tf2T0 = na
+var int tf2T1 = na
+var int tf2T2 = na
+
+if tf2Enabled
+    if tf2TF == ""
+        tf2Candles += 1
+        fvgUp = low > high[2] and close[1] > high[2]
+        fvgDown = high < low[2] and close[1] < low[2]
+        if fvgUp and math.abs(low - high[2]) > atrVal
+            tf2BullFvg.push(zone.new(time[2], low, time, high[2], 1, tf2Candles))
+        if fvgDown and math.abs(low[2] - high) > atrVal
+            tf2BearFvg.push(zone.new(time[2], low[2], time, high, -1, tf2Candles))
+    else if tf2New
+        tf2Candles += 1
+        tf2H2 := tf2H1
+        tf2L2 := tf2L1
+        tf2C2 := tf2C1
+        tf2T2 := tf2T1
+        tf2H1 := tf2H0
+        tf2L1 := tf2L0
+        tf2C1 := tf2C0
+        tf2T1 := tf2T0
+        tf2H0 := tf2H
+        tf2L0 := tf2L
+        tf2C0 := tf2C
+        tf2T0 := time
+        if not na(tf2L0) and not na(tf2H2)
+            tf2AtrV = nz(tf2Atr, atrVal)
+            if tf2L0 > tf2H2 and tf2C1 > tf2H2 and math.abs(tf2L0 - tf2H2) > tf2AtrV
+                tf2BullFvg.push(zone.new(tf2T2, tf2L0, tf2T0, tf2H2, 1, tf2Candles))
+            if tf2H0 < tf2L2 and tf2C1 < tf2L2 and math.abs(tf2L2 - tf2H0) > tf2AtrV
+                tf2BearFvg.push(zone.new(tf2T2, tf2L2, tf2T0, tf2H0, -1, tf2Candles))
+
+// ============================================================================
+// TF3 DETECTION
+// ============================================================================
+
+[tf3H, tf3L, tf3C, tf3Time, tf3Atr] = request.security(syminfo.tickerid, tf3TF, [high, low, close, time, atrCalc])
+tf3New = ta.change(tf3Time) != 0
+
+var float tf3H0 = na
+var float tf3H1 = na
+var float tf3H2 = na
+var float tf3L0 = na
+var float tf3L1 = na
+var float tf3L2 = na
+var float tf3C0 = na
+var float tf3C1 = na
+var float tf3C2 = na
+var int tf3T0 = na
+var int tf3T1 = na
+var int tf3T2 = na
+
+if tf3Enabled
+    if tf3TF == ""
+        tf3Candles += 1
+        fvgUp = low > high[2] and close[1] > high[2]
+        fvgDown = high < low[2] and close[1] < low[2]
+        if fvgUp and math.abs(low - high[2]) > atrVal
+            tf3BullFvg.push(zone.new(time[2], low, time, high[2], 1, tf3Candles))
+        if fvgDown and math.abs(low[2] - high) > atrVal
+            tf3BearFvg.push(zone.new(time[2], low[2], time, high, -1, tf3Candles))
+    else if tf3New
+        tf3Candles += 1
+        tf3H2 := tf3H1
+        tf3L2 := tf3L1
+        tf3C2 := tf3C1
+        tf3T2 := tf3T1
+        tf3H1 := tf3H0
+        tf3L1 := tf3L0
+        tf3C1 := tf3C0
+        tf3T1 := tf3T0
+        tf3H0 := tf3H
+        tf3L0 := tf3L
+        tf3C0 := tf3C
+        tf3T0 := time
+        if not na(tf3L0) and not na(tf3H2)
+            tf3AtrV = nz(tf3Atr, atrVal)
+            if tf3L0 > tf3H2 and tf3C1 > tf3H2 and math.abs(tf3L0 - tf3H2) > tf3AtrV
+                tf3BullFvg.push(zone.new(tf3T2, tf3L0, tf3T0, tf3H2, 1, tf3Candles))
+            if tf3H0 < tf3L2 and tf3C1 < tf3L2 and math.abs(tf3L2 - tf3H0) > tf3AtrV
+                tf3BearFvg.push(zone.new(tf3T2, tf3L2, tf3T0, tf3H0, -1, tf3Candles))
+
+// ============================================================================
+// TF4 DETECTION
+// ============================================================================
+
+[tf4H, tf4L, tf4C, tf4Time, tf4Atr] = request.security(syminfo.tickerid, tf4TF, [high, low, close, time, atrCalc])
+tf4New = ta.change(tf4Time) != 0
+
+var float tf4H0 = na
+var float tf4H1 = na
+var float tf4H2 = na
+var float tf4L0 = na
+var float tf4L1 = na
+var float tf4L2 = na
+var float tf4C0 = na
+var float tf4C1 = na
+var float tf4C2 = na
+var int tf4T0 = na
+var int tf4T1 = na
+var int tf4T2 = na
+
+if tf4Enabled
+    if tf4TF == ""
+        tf4Candles += 1
+        fvgUp = low > high[2] and close[1] > high[2]
+        fvgDown = high < low[2] and close[1] < low[2]
+        if fvgUp and math.abs(low - high[2]) > atrVal
+            tf4BullFvg.push(zone.new(time[2], low, time, high[2], 1, tf4Candles))
+        if fvgDown and math.abs(low[2] - high) > atrVal
+            tf4BearFvg.push(zone.new(time[2], low[2], time, high, -1, tf4Candles))
+    else if tf4New
+        tf4Candles += 1
+        tf4H2 := tf4H1
+        tf4L2 := tf4L1
+        tf4C2 := tf4C1
+        tf4T2 := tf4T1
+        tf4H1 := tf4H0
+        tf4L1 := tf4L0
+        tf4C1 := tf4C0
+        tf4T1 := tf4T0
+        tf4H0 := tf4H
+        tf4L0 := tf4L
+        tf4C0 := tf4C
+        tf4T0 := time
+        if not na(tf4L0) and not na(tf4H2)
+            tf4AtrV = nz(tf4Atr, atrVal)
+            if tf4L0 > tf4H2 and tf4C1 > tf4H2 and math.abs(tf4L0 - tf4H2) > tf4AtrV
+                tf4BullFvg.push(zone.new(tf4T2, tf4L0, tf4T0, tf4H2, 1, tf4Candles))
+            if tf4H0 < tf4L2 and tf4C1 < tf4L2 and math.abs(tf4L2 - tf4H0) > tf4AtrV
+                tf4BearFvg.push(zone.new(tf4T2, tf4L2, tf4T0, tf4H0, -1, tf4Candles))
+
+// ============================================================================
+// MANAGEMENT
+// ============================================================================
+
+fvgManage(tf1BullFvg, tf1Ifvg, tf1Candles)
+fvgManage(tf1BearFvg, tf1Ifvg, tf1Candles)
+
+fvgManage(tf2BullFvg, tf2Ifvg, tf2Candles)
+fvgManage(tf2BearFvg, tf2Ifvg, tf2Candles)
+
+fvgManage(tf3BullFvg, tf3Ifvg, tf3Candles)
+fvgManage(tf3BearFvg, tf3Ifvg, tf3Candles)
+
+fvgManage(tf4BullFvg, tf4Ifvg, tf4Candles)
+fvgManage(tf4BearFvg, tf4Ifvg, tf4Candles)
+
+// ============================================================================
+// DRAWING (redraw on last bar only)
+// ============================================================================
+
+tf1Label = getTFLabel(tf1TF)
+tf2Label = getTFLabel(tf2TF)
+tf3Label = getTFLabel(tf3TF)
+tf4Label = getTFLabel(tf4TF)
+
+if barstate.islast
+    if tf1Enabled
+        sendIfvg(tf1Ifvg, tf1Label)
+    if tf2Enabled
+        sendIfvg(tf2Ifvg, tf2Label)
+    if tf3Enabled
+        sendIfvg(tf3Ifvg, tf3Label)
+    if tf4Enabled
+        sendIfvg(tf4Ifvg, tf4Label)
