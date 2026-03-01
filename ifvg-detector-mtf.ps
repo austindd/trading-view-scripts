@@ -47,6 +47,9 @@ type zone
     float bot = na
     int dir = na
     int birthCandle = na
+    int mitTime = na
+    float rangeHigh = na
+    float rangeLow = na
 
 // ============================================================================
 // CONSTANTS & CALCS
@@ -77,12 +80,14 @@ fvgManage(_ary, _ifvgAry, int _candleCount) =>
         for i = _ary.size() - 1 to 0
             value = _ary.get(i)
             _dir = value.dir
+            value.rangeHigh := math.max(value.rangeHigh, high)
+            value.rangeLow := math.min(value.rangeLow, low)
             tooOld = maxIfvgBars > 0 and not na(value.birthCandle) and (_candleCount - value.birthCandle) > maxIfvgBars
             mitigated = (_dir == 1 and fvgBreakLo < value.bot) or (_dir == -1 and fvgBreakHi > value.top)
             if mitigated and tooOld
                 _ary.remove(i)
             if mitigated and not tooOld
-                _ifvgAry.push(zone.new(value.left, value.top, time, value.bot, _dir == 1 ? -1 : 1))
+                _ifvgAry.push(zone.new(value.left, value.top, value.right, value.bot, _dir == 1 ? -1 : 1, na, time, value.rangeHigh, value.rangeLow))
                 _ary.remove(i)
             if not mitigated and tooOld
                 _ary.remove(i)
@@ -94,11 +99,11 @@ sendIfvg(_ary, string tfLabel) =>
     for [index, value] in _ary
         if index > lastIdx - dispNum
             col = value.dir == 1 ? ifvgBullCol : ifvgBearCol
-            box.new(value.left, value.top, value.right, value.bot, bgcolor=col, border_color=invis, xloc=xloc.bar_time)
+            box.new(value.left, value.rangeHigh, value.mitTime, value.rangeLow, bgcolor=col, border_color=invis, xloc=xloc.bar_time)
             if value.dir == 1
-                label.new(value.right, value.bot, tfLabel, style=label.style_label_up, color=invis, textcolor=labelCol, size=size.small, xloc=xloc.bar_time)
+                label.new(value.mitTime, value.rangeLow, tfLabel, style=label.style_label_up, color=invis, textcolor=labelCol, size=size.small, xloc=xloc.bar_time)
             else
-                label.new(value.right, value.top, tfLabel, style=label.style_label_down, color=invis, textcolor=labelCol, size=size.small, xloc=xloc.bar_time)
+                label.new(value.mitTime, value.rangeHigh, tfLabel, style=label.style_label_down, color=invis, textcolor=labelCol, size=size.small, xloc=xloc.bar_time)
 
 getTFLabel(string tf) =>
     tf == "" ? timeframe.period : tf
@@ -158,9 +163,9 @@ if tf1Enabled
         fvgUp = low > high[2] and close[1] > high[2]
         fvgDown = high < low[2] and close[1] < low[2]
         if fvgUp and math.abs(low - high[2]) > atrVal
-            tf1BullFvg.push(zone.new(time[2], low, time, high[2], 1, tf1Candles))
+            tf1BullFvg.push(zone.new(time[2], low, time, high[2], 1, tf1Candles, na, math.max(high[2], high[1], high), math.min(low[2], low[1], low)))
         if fvgDown and math.abs(low[2] - high) > atrVal
-            tf1BearFvg.push(zone.new(time[2], low[2], time, high, -1, tf1Candles))
+            tf1BearFvg.push(zone.new(time[2], low[2], time, high, -1, tf1Candles, na, math.max(high[2], high[1], high), math.min(low[2], low[1], low)))
     else if tf1New
         tf1Candles += 1
         tf1H2 := tf1H1
@@ -178,9 +183,9 @@ if tf1Enabled
         if not na(tf1L0) and not na(tf1H2)
             tf1AtrV = nz(tf1Atr, atrVal)
             if tf1L0 > tf1H2 and tf1C1 > tf1H2 and math.abs(tf1L0 - tf1H2) > tf1AtrV
-                tf1BullFvg.push(zone.new(tf1T2, tf1L0, tf1T0, tf1H2, 1, tf1Candles))
+                tf1BullFvg.push(zone.new(tf1T2, tf1L0, tf1T0, tf1H2, 1, tf1Candles, na, math.max(tf1H2, tf1H1, tf1H0), math.min(tf1L2, tf1L1, tf1L0)))
             if tf1H0 < tf1L2 and tf1C1 < tf1L2 and math.abs(tf1L2 - tf1H0) > tf1AtrV
-                tf1BearFvg.push(zone.new(tf1T2, tf1L2, tf1T0, tf1H0, -1, tf1Candles))
+                tf1BearFvg.push(zone.new(tf1T2, tf1L2, tf1T0, tf1H0, -1, tf1Candles, na, math.max(tf1H2, tf1H1, tf1H0), math.min(tf1L2, tf1L1, tf1L0)))
 
 // ============================================================================
 // TF2 DETECTION
@@ -208,9 +213,9 @@ if tf2Enabled
         fvgUp = low > high[2] and close[1] > high[2]
         fvgDown = high < low[2] and close[1] < low[2]
         if fvgUp and math.abs(low - high[2]) > atrVal
-            tf2BullFvg.push(zone.new(time[2], low, time, high[2], 1, tf2Candles))
+            tf2BullFvg.push(zone.new(time[2], low, time, high[2], 1, tf2Candles, na, math.max(high[2], high[1], high), math.min(low[2], low[1], low)))
         if fvgDown and math.abs(low[2] - high) > atrVal
-            tf2BearFvg.push(zone.new(time[2], low[2], time, high, -1, tf2Candles))
+            tf2BearFvg.push(zone.new(time[2], low[2], time, high, -1, tf2Candles, na, math.max(high[2], high[1], high), math.min(low[2], low[1], low)))
     else if tf2New
         tf2Candles += 1
         tf2H2 := tf2H1
@@ -228,9 +233,9 @@ if tf2Enabled
         if not na(tf2L0) and not na(tf2H2)
             tf2AtrV = nz(tf2Atr, atrVal)
             if tf2L0 > tf2H2 and tf2C1 > tf2H2 and math.abs(tf2L0 - tf2H2) > tf2AtrV
-                tf2BullFvg.push(zone.new(tf2T2, tf2L0, tf2T0, tf2H2, 1, tf2Candles))
+                tf2BullFvg.push(zone.new(tf2T2, tf2L0, tf2T0, tf2H2, 1, tf2Candles, na, math.max(tf2H2, tf2H1, tf2H0), math.min(tf2L2, tf2L1, tf2L0)))
             if tf2H0 < tf2L2 and tf2C1 < tf2L2 and math.abs(tf2L2 - tf2H0) > tf2AtrV
-                tf2BearFvg.push(zone.new(tf2T2, tf2L2, tf2T0, tf2H0, -1, tf2Candles))
+                tf2BearFvg.push(zone.new(tf2T2, tf2L2, tf2T0, tf2H0, -1, tf2Candles, na, math.max(tf2H2, tf2H1, tf2H0), math.min(tf2L2, tf2L1, tf2L0)))
 
 // ============================================================================
 // TF3 DETECTION
@@ -258,9 +263,9 @@ if tf3Enabled
         fvgUp = low > high[2] and close[1] > high[2]
         fvgDown = high < low[2] and close[1] < low[2]
         if fvgUp and math.abs(low - high[2]) > atrVal
-            tf3BullFvg.push(zone.new(time[2], low, time, high[2], 1, tf3Candles))
+            tf3BullFvg.push(zone.new(time[2], low, time, high[2], 1, tf3Candles, na, math.max(high[2], high[1], high), math.min(low[2], low[1], low)))
         if fvgDown and math.abs(low[2] - high) > atrVal
-            tf3BearFvg.push(zone.new(time[2], low[2], time, high, -1, tf3Candles))
+            tf3BearFvg.push(zone.new(time[2], low[2], time, high, -1, tf3Candles, na, math.max(high[2], high[1], high), math.min(low[2], low[1], low)))
     else if tf3New
         tf3Candles += 1
         tf3H2 := tf3H1
@@ -278,9 +283,9 @@ if tf3Enabled
         if not na(tf3L0) and not na(tf3H2)
             tf3AtrV = nz(tf3Atr, atrVal)
             if tf3L0 > tf3H2 and tf3C1 > tf3H2 and math.abs(tf3L0 - tf3H2) > tf3AtrV
-                tf3BullFvg.push(zone.new(tf3T2, tf3L0, tf3T0, tf3H2, 1, tf3Candles))
+                tf3BullFvg.push(zone.new(tf3T2, tf3L0, tf3T0, tf3H2, 1, tf3Candles, na, math.max(tf3H2, tf3H1, tf3H0), math.min(tf3L2, tf3L1, tf3L0)))
             if tf3H0 < tf3L2 and tf3C1 < tf3L2 and math.abs(tf3L2 - tf3H0) > tf3AtrV
-                tf3BearFvg.push(zone.new(tf3T2, tf3L2, tf3T0, tf3H0, -1, tf3Candles))
+                tf3BearFvg.push(zone.new(tf3T2, tf3L2, tf3T0, tf3H0, -1, tf3Candles, na, math.max(tf3H2, tf3H1, tf3H0), math.min(tf3L2, tf3L1, tf3L0)))
 
 // ============================================================================
 // TF4 DETECTION
@@ -308,9 +313,9 @@ if tf4Enabled
         fvgUp = low > high[2] and close[1] > high[2]
         fvgDown = high < low[2] and close[1] < low[2]
         if fvgUp and math.abs(low - high[2]) > atrVal
-            tf4BullFvg.push(zone.new(time[2], low, time, high[2], 1, tf4Candles))
+            tf4BullFvg.push(zone.new(time[2], low, time, high[2], 1, tf4Candles, na, math.max(high[2], high[1], high), math.min(low[2], low[1], low)))
         if fvgDown and math.abs(low[2] - high) > atrVal
-            tf4BearFvg.push(zone.new(time[2], low[2], time, high, -1, tf4Candles))
+            tf4BearFvg.push(zone.new(time[2], low[2], time, high, -1, tf4Candles, na, math.max(high[2], high[1], high), math.min(low[2], low[1], low)))
     else if tf4New
         tf4Candles += 1
         tf4H2 := tf4H1
@@ -328,9 +333,9 @@ if tf4Enabled
         if not na(tf4L0) and not na(tf4H2)
             tf4AtrV = nz(tf4Atr, atrVal)
             if tf4L0 > tf4H2 and tf4C1 > tf4H2 and math.abs(tf4L0 - tf4H2) > tf4AtrV
-                tf4BullFvg.push(zone.new(tf4T2, tf4L0, tf4T0, tf4H2, 1, tf4Candles))
+                tf4BullFvg.push(zone.new(tf4T2, tf4L0, tf4T0, tf4H2, 1, tf4Candles, na, math.max(tf4H2, tf4H1, tf4H0), math.min(tf4L2, tf4L1, tf4L0)))
             if tf4H0 < tf4L2 and tf4C1 < tf4L2 and math.abs(tf4L2 - tf4H0) > tf4AtrV
-                tf4BearFvg.push(zone.new(tf4T2, tf4L2, tf4T0, tf4H0, -1, tf4Candles))
+                tf4BearFvg.push(zone.new(tf4T2, tf4L2, tf4T0, tf4H0, -1, tf4Candles, na, math.max(tf4H2, tf4H1, tf4H0), math.min(tf4L2, tf4L1, tf4L0)))
 
 // ============================================================================
 // MANAGEMENT
