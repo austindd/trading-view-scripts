@@ -11,9 +11,10 @@ indicator("IFVG Detector MTF [SB]", "IFVG Detector MTF [SB]", overlay=true, max_
 grpDisplay = "Display"
 maxZones    = input.int(100, "Max Number of Zones", minval=1, group=grpDisplay, tooltip="Maximum number of zones to keep in memory per timeframe. Oldest zones are removed when this limit is exceeded.")
 dispNum     = input.int(100, "Show Last", minval=1, maxval=250, group=grpDisplay, tooltip="Number of most recent IFVGs to display per timeframe")
-fvgBreakPref = input.string("Body", "FVG Break Preference", options=["Body", "Wick"], group=grpDisplay, tooltip="Choose whether FVGs are broken (mitigated) by candle bodies or wicks")
+fvgBreakPref = input.string("Wick", "FVG Break Preference", options=["Wick", "Body"], group=grpDisplay, tooltip="Choose whether FVGs are broken (mitigated) by candle bodies or wicks")
+boxStyle    = input.string("IFVG Boundary", "Box Style", options=["Full Range", "IFVG Boundary", "FVG Zone"], group=grpDisplay, tooltip="Full Range: box wraps the full high/low of all candles. IFVG Boundary: for bullish IFVGs the box top is capped at the IFVG zone top; for bearish the bottom is capped. FVG Zone: box top and bottom match the original FVG zone boundaries.")
 atrMulti    = input.float(0.25, "ATR Multiplier", step=0.25, minval=0, group=grpDisplay, tooltip="Minimum FVG size as ATR * Multiplier. Only FVGs larger than this are tracked.")
-maxIfvgBars = input.int(0, "Max Candles for IFVG", minval=0, group=grpDisplay, tooltip="Maximum number of candles (in the FVG's timeframe) for a valid inversion. FVGs older than this are discarded. 0 = no limit.")
+maxIfvgBars = input.int(6, "Max Candles for IFVG", minval=0, group=grpDisplay, tooltip="Maximum number of candles (in the FVG's timeframe) for a valid inversion. FVGs older than this are discarded. 0 = no limit.")
 
 grpColors = "Colors"
 ifvgBullCol = input.color(color.new(#2196f3, 80), "IFVG Bullish", inline="ifvgc", group=grpColors)
@@ -94,16 +95,21 @@ fvgManage(_ary, _ifvgAry, int _candleCount) =>
     if _ifvgAry.size() > maxZones
         _ifvgAry.shift()
 
+useFvgZone = boxStyle == "FVG Zone"
+useIfvgBoundary = boxStyle == "IFVG Boundary"
+
 sendIfvg(_ary, string tfLabel) =>
     lastIdx = _ary.size() - 1
     for [index, value] in _ary
         if index > lastIdx - dispNum
             col = value.dir == 1 ? ifvgBullCol : ifvgBearCol
-            box.new(value.left, value.rangeHigh, value.mitTime, value.rangeLow, bgcolor=col, border_color=invis, xloc=xloc.bar_time)
+            bxTop = useFvgZone ? value.top : value.dir == 1 and useIfvgBoundary ? value.top : value.rangeHigh
+            bxBot = useFvgZone ? value.bot : value.dir == -1 and useIfvgBoundary ? value.bot : value.rangeLow
+            box.new(value.left, bxTop, value.mitTime, bxBot, bgcolor=col, border_color=invis, xloc=xloc.bar_time)
             if value.dir == 1
-                label.new(value.mitTime, value.rangeLow, tfLabel, style=label.style_label_up, color=invis, textcolor=labelCol, size=size.small, xloc=xloc.bar_time)
+                label.new(value.mitTime, bxBot, tfLabel, style=label.style_label_up, color=invis, textcolor=labelCol, size=size.small, xloc=xloc.bar_time)
             else
-                label.new(value.mitTime, value.rangeHigh, tfLabel, style=label.style_label_down, color=invis, textcolor=labelCol, size=size.small, xloc=xloc.bar_time)
+                label.new(value.mitTime, bxTop, tfLabel, style=label.style_label_down, color=invis, textcolor=labelCol, size=size.small, xloc=xloc.bar_time)
 
 getTFLabel(string tf) =>
     tf == "" ? timeframe.period : tf
