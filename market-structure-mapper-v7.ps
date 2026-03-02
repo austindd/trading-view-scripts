@@ -12,68 +12,68 @@ max_bars_back(close, 5000)
 max_bars_back(time, 5000)
 
 // ============================================================================
-// CURRENT TIMEFRAME (CTF) SETTINGS
+// CURRENT TIMEFRAME (TF1) SETTINGS
 // ============================================================================
-ctfEnabled = input.bool(true, "Enable CTF Structure", group="Current Timeframe")
-ctfTimeframe = input.timeframe("", "CTF Timeframe", group="Current Timeframe")
-showCtfPeaksValleys = input.bool(true, "Show CTF Peaks/Valleys (Lines)", group="Current Timeframe")
-showCtfLabels = input.bool(false, "Show CTF Labels", group="Current Timeframe")
-showCtfBosLabels = input.bool(true, "Show CTF BOS Labels", group="Current Timeframe")
-showCtfZones = input.bool(true, "Show CTF Zones", group="Current Timeframe")
-ctfZonesUseFullSwings = input.bool(false, "CTF Zones: Use Full Swings", group="Current Timeframe")
+tf1Enabled = input.bool(true, "Enable TF1 Structure", group="Timeframe 1")
+tf1Timeframe = input.timeframe("", "TF1 Timeframe", group="Timeframe 1")
+showTf1PeaksValleys = input.bool(true, "Show TF1 Peaks/Valleys (Lines)", group="Timeframe 1")
+showTf1Labels = input.bool(false, "Show TF1 Labels", group="Timeframe 1")
+showTf1BosLabels = input.bool(true, "Show TF1 BOS Labels", group="Timeframe 1")
+showTf1Zones = input.bool(true, "Show TF1 Zones", group="Timeframe 1")
+tf1ZonesUseFullSwings = input.bool(false, "TF1 Zones: Use Full Swings", group="Timeframe 1")
 
-// CTF Colors
-highColor = input.color(color.new(color.red, 0), "CTF High Color", group="Current Timeframe")
-lowColor = input.color(color.new(color.green, 0), "CTF Low Color", group="Current Timeframe")
-bosColor = input.color(color.new(color.black, 0), "CTF BOS Color", group="Current Timeframe")
-ctfDemandZoneColor = input.color(color.new(color.green, 85), "CTF Demand Zone Color", group="Current Timeframe")
-ctfDemandZoneBorderColor = input.color(color.new(color.green, 50), "CTF Demand Zone Border", group="Current Timeframe")
-ctfSupplyZoneColor = input.color(color.new(color.red, 85), "CTF Supply Zone Color", group="Current Timeframe")
-ctfSupplyZoneBorderColor = input.color(color.new(color.red, 50), "CTF Supply Zone Border", group="Current Timeframe")
-
-// ============================================================================
-// HIGHER TIMEFRAME (HTF) SETTINGS
-// ============================================================================
-htfEnabled = input.bool(true, "Enable HTF Structure", group="Higher Timeframe")
-htfTimeframe = input.timeframe("60", "HTF Timeframe", group="Higher Timeframe")
-showHtfPeaksValleys = input.bool(true, "Show HTF Peaks/Valleys (Lines)", group="Higher Timeframe")
-showHtfLabels = input.bool(true, "Show HTF Labels", group="Higher Timeframe")
-showHtfBosLabels = input.bool(true, "Show HTF BOS Labels", group="Higher Timeframe")
-showHtfZones = input.bool(true, "Show HTF Zones", group="Higher Timeframe")
-
-// HTF Colors
-htfHighColor = input.color(color.new(color.orange, 0), "HTF High Color", group="Higher Timeframe")
-htfLowColor = input.color(color.new(color.blue, 0), "HTF Low Color", group="Higher Timeframe")
-htfBosColor = input.color(color.new(color.black, 0), "HTF BOS Color", group="Higher Timeframe")
-demandZoneColor = input.color(color.new(color.blue, 85), "HTF Demand Zone Color", group="Higher Timeframe")
-demandZoneBorderColorInput = input.color(color.new(color.blue, 50), "HTF Demand Zone Border", group="Higher Timeframe")
-supplyZoneColor = input.color(color.new(color.orange, 85), "HTF Supply Zone Color", group="Higher Timeframe")
-supplyZoneBorderColorInput = input.color(color.new(color.orange, 50), "HTF Supply Zone Border", group="Higher Timeframe")
+// TF1 Colors
+highColor = input.color(color.new(color.red, 0), "TF1 High Color", group="Timeframe 1")
+lowColor = input.color(color.new(color.green, 0), "TF1 Low Color", group="Timeframe 1")
+bosColor = input.color(color.new(color.black, 0), "TF1 BOS Color", group="Timeframe 1")
+tf1DemandZoneColor = input.color(color.new(color.green, 85), "TF1 Demand Zone Color", group="Timeframe 1")
+tf1DemandZoneBorderColor = input.color(color.new(color.green, 50), "TF1 Demand Zone Border", group="Timeframe 1")
+tf1SupplyZoneColor = input.color(color.new(color.red, 85), "TF1 Supply Zone Color", group="Timeframe 1")
+tf1SupplyZoneBorderColor = input.color(color.new(color.red, 50), "TF1 Supply Zone Border", group="Timeframe 1")
 
 // ============================================================================
-// TRADING RANGE TIMEFRAME (HTF2) SETTINGS
+// HIGHER TIMEFRAME (TF2) SETTINGS
 // ============================================================================
-htf2Enabled = input.bool(true, "Enable HTF2 Structure", group="Trading Range TF")
-htf2Timeframe = input.timeframe("D", "HTF2 Timeframe", group="Trading Range TF")
-showHtf2PeaksValleys = input.bool(true, "Show HTF2 Peaks/Valleys (Lines)", group="Trading Range TF")
-showHtf2Labels = input.bool(true, "Show HTF2 Labels", group="Trading Range TF")
-showHtf2BosLabels = input.bool(true, "Show HTF2 BOS Labels", group="Trading Range TF")
-showHtf2Zones = input.bool(true, "Show HTF2 Zones", group="Trading Range TF")
+tf2Enabled = input.bool(true, "Enable TF2 Structure", group="Timeframe 2")
+tf2Timeframe = input.timeframe("60", "TF2 Timeframe", group="Timeframe 2")
+showTf2PeaksValleys = input.bool(true, "Show TF2 Peaks/Valleys (Lines)", group="Timeframe 2")
+showTf2Labels = input.bool(true, "Show TF2 Labels", group="Timeframe 2")
+showTf2BosLabels = input.bool(true, "Show TF2 BOS Labels", group="Timeframe 2")
+showTf2Zones = input.bool(true, "Show TF2 Zones", group="Timeframe 2")
 
-// HTF2 Colors
-htf2HighColor = input.color(color.new(color.purple, 0), "HTF2 High Color", group="Trading Range TF")
-htf2LowColor = input.color(color.new(color.teal, 0), "HTF2 Low Color", group="Trading Range TF")
-htf2DemandZoneColor = input.color(color.new(color.teal, 85), "HTF2 Demand Zone Color", group="Trading Range TF")
-htf2DemandZoneBorderColor = input.color(color.new(color.teal, 50), "HTF2 Demand Zone Border", group="Trading Range TF")
-htf2SupplyZoneColor = input.color(color.new(color.purple, 85), "HTF2 Supply Zone Color", group="Trading Range TF")
-htf2SupplyZoneBorderColor = input.color(color.new(color.purple, 50), "HTF2 Supply Zone Border", group="Trading Range TF")
+// TF2 Colors
+tf2HighColor = input.color(color.new(color.orange, 0), "TF2 High Color", group="Timeframe 2")
+tf2LowColor = input.color(color.new(color.blue, 0), "TF2 Low Color", group="Timeframe 2")
+tf2BosColor = input.color(color.new(color.black, 0), "TF2 BOS Color", group="Timeframe 2")
+demandZoneColor = input.color(color.new(color.blue, 85), "TF2 Demand Zone Color", group="Timeframe 2")
+demandZoneBorderColorInput = input.color(color.new(color.blue, 50), "TF2 Demand Zone Border", group="Timeframe 2")
+supplyZoneColor = input.color(color.new(color.orange, 85), "TF2 Supply Zone Color", group="Timeframe 2")
+supplyZoneBorderColorInput = input.color(color.new(color.orange, 50), "TF2 Supply Zone Border", group="Timeframe 2")
+
+// ============================================================================
+// TRADING RANGE TIMEFRAME (TF3) SETTINGS
+// ============================================================================
+tf3Enabled = input.bool(true, "Enable TF3 Structure", group="Timeframe 3")
+tf3Timeframe = input.timeframe("D", "TF3 Timeframe", group="Timeframe 3")
+showTf3PeaksValleys = input.bool(true, "Show TF3 Peaks/Valleys (Lines)", group="Timeframe 3")
+showTf3Labels = input.bool(true, "Show TF3 Labels", group="Timeframe 3")
+showTf3BosLabels = input.bool(true, "Show TF3 BOS Labels", group="Timeframe 3")
+showTf3Zones = input.bool(true, "Show TF3 Zones", group="Timeframe 3")
+
+// TF3 Colors
+tf3HighColor = input.color(color.new(color.purple, 0), "TF3 High Color", group="Timeframe 3")
+tf3LowColor = input.color(color.new(color.teal, 0), "TF3 Low Color", group="Timeframe 3")
+tf3DemandZoneColor = input.color(color.new(color.teal, 85), "TF3 Demand Zone Color", group="Timeframe 3")
+tf3DemandZoneBorderColor = input.color(color.new(color.teal, 50), "TF3 Demand Zone Border", group="Timeframe 3")
+tf3SupplyZoneColor = input.color(color.new(color.purple, 85), "TF3 Supply Zone Color", group="Timeframe 3")
+tf3SupplyZoneBorderColor = input.color(color.new(color.purple, 50), "TF3 Supply Zone Border", group="Timeframe 3")
 
 // ============================================================================
 // ZONE SETTINGS
 // ============================================================================
-showBrokenCtfZones = input.bool(false, "Show Broken CTF Zones", group="Zone Settings")
-showBrokenHtfZones = input.bool(false, "Show Broken HTF Zones", group="Zone Settings")
-showBrokenHtf2Zones = input.bool(false, "Show Broken HTF2 Zones", group="Zone Settings")
+showBrokenTf1Zones = input.bool(false, "Show Broken TF1 Zones", group="Zone Settings")
+showBrokenTf2Zones = input.bool(false, "Show Broken TF2 Zones", group="Zone Settings")
+showBrokenTf3Zones = input.bool(false, "Show Broken TF3 Zones", group="Zone Settings")
 extendBrokenZones = input.bool(false, "Extend Broken Zones to Current Bar", group="Zone Settings")
 minZoneHeightAtr = input.float(0.01, "Min Zone Height (ATR multiplier)", minval=0.01, maxval=5.0, step=0.01, group="Zone Settings")
 maxZonesPerSide = input.int(20, "Max Zones Per Side", minval=10, maxval=250, group="Zone Settings")
@@ -87,8 +87,8 @@ zoneBreakOnTouchAfterCreation = input.bool(false, "Break Zones on Touch After Cr
 lineWidth = input.int(2, "Line Width", minval=1, maxval=5, group="Display")
 showDebugLabel = input.bool(false, "Show Debug Info", group="Display")
 
-// CTF display string for labels
-string ctfDisplayTF = ctfTimeframe == "" ? timeframe.period : ctfTimeframe
+// TF1 display string for labels
+string tf1DisplayTF = tf1Timeframe == "" ? timeframe.period : tf1Timeframe
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -124,35 +124,35 @@ type Zone
 // ARRAYS TO STORE LEVELS AND ZONES
 // ============================================================================
 
-// Current Timeframe - All highs in one array, all lows in another
+// Timeframe 1 - All highs in one array, all lows in another
 var array<HighLevel> highs = array.new<HighLevel>()
 var array<LowLevel> lows = array.new<LowLevel>()
 
-// Higher Timeframe (Middle TF)
-var array<HighLevel> htfHighs = array.new<HighLevel>()
-var array<LowLevel> htfLows = array.new<LowLevel>()
+// Timeframe 2 (Middle TF)
+var array<HighLevel> tf2Highs = array.new<HighLevel>()
+var array<LowLevel> tf2Lows = array.new<LowLevel>()
 
-// Trading Range Timeframe (HTF2 - highest TF)
-var array<HighLevel> htf2Highs = array.new<HighLevel>()
-var array<LowLevel> htf2Lows = array.new<LowLevel>()
+// Trading Range Timeframe (TF3 - highest TF)
+var array<HighLevel> tf3Highs = array.new<HighLevel>()
+var array<LowLevel> tf3Lows = array.new<LowLevel>()
 
-// CTF Zones
-var array<Zone> ctfDemandZones = array.new<Zone>()
-var array<Zone> ctfSupplyZones = array.new<Zone>()
+// TF1 Zones
+var array<Zone> tf1DemandZones = array.new<Zone>()
+var array<Zone> tf1SupplyZones = array.new<Zone>()
 
-// HTF Zones
+// TF2 Zones
 var array<Zone> demandZones = array.new<Zone>()
 var array<Zone> supplyZones = array.new<Zone>()
 
-// HTF2 Zones
-var array<Zone> htf2DemandZones = array.new<Zone>()
-var array<Zone> htf2SupplyZones = array.new<Zone>()
+// TF3 Zones
+var array<Zone> tf3DemandZones = array.new<Zone>()
+var array<Zone> tf3SupplyZones = array.new<Zone>()
 
 // ============================================================================
 // MARKET STRUCTURE STATE VARIABLES
 // ============================================================================
 
-// Current Timeframe
+// Timeframe 1
 var float currentValidHigh = na
 var float currentValidLow = na
 var int currentValidHighBar = na
@@ -180,110 +180,110 @@ var int nearestUnbrokenLowIndex = -1
 var line nearestUnbrokenHighLine = na
 var line nearestUnbrokenLowLine = na
 
-// Higher Timeframe
-var float htfCurrentValidHigh = na
-var float htfCurrentValidLow = na
-var int htfCurrentValidHighBar = na
-var int htfCurrentValidLowBar = na
-var bool htfInitialized = false
-var bool htfLookingForLow = false
-var bool htfLookingForHigh = false
-var bool htfCurrentHighIsBroken = false
-var bool htfCurrentLowIsBroken = false
-var string htfLastBosDirection = "none"
+// Timeframe 2
+var float tf2CurrentValidHigh = na
+var float tf2CurrentValidLow = na
+var int tf2CurrentValidHighBar = na
+var int tf2CurrentValidLowBar = na
+var bool tf2Initialized = false
+var bool tf2LookingForLow = false
+var bool tf2LookingForHigh = false
+var bool tf2CurrentHighIsBroken = false
+var bool tf2CurrentLowIsBroken = false
+var string tf2LastBosDirection = "none"
 
-// HTF swing tracking
-var float htfSwingLow = na
-var int htfSwingLowBar = na
-var float htfSwingHigh = na
-var int htfSwingHighBar = na
+// TF2 swing tracking
+var float tf2SwingLow = na
+var int tf2SwingLowBar = na
+var float tf2SwingHigh = na
+var int tf2SwingHighBar = na
 
-// HTF Track indices
-var int htfMostRecentHighIndex = -1
-var int htfMostRecentLowIndex = -1
+// TF2 Track indices
+var int tf2MostRecentHighIndex = -1
+var int tf2MostRecentLowIndex = -1
 
-// HTF previous valid levels
-var float htfPreviousValidHigh = na
-var float htfPreviousValidLow = na
-var int htfPreviousValidHighBar = na
-var int htfPreviousValidLowBar = na
+// TF2 previous valid levels
+var float tf2PreviousValidHigh = na
+var float tf2PreviousValidLow = na
+var int tf2PreviousValidHighBar = na
+var int tf2PreviousValidLowBar = na
 
-// HTF Track nearest unbroken high/low (structure boundaries)
-var int htfNearestUnbrokenHighIndex = -1
-var int htfNearestUnbrokenLowIndex = -1
-var line htfNearestUnbrokenHighLine = na
-var line htfNearestUnbrokenLowLine = na
+// TF2 Track nearest unbroken high/low (structure boundaries)
+var int tf2NearestUnbrokenHighIndex = -1
+var int tf2NearestUnbrokenLowIndex = -1
+var line tf2NearestUnbrokenHighLine = na
+var line tf2NearestUnbrokenLowLine = na
 
-// Trading Range Timeframe (HTF2) State Variables
-var float htf2CurrentValidHigh = na
-var float htf2CurrentValidLow = na
-var int htf2CurrentValidHighBar = na
-var int htf2CurrentValidLowBar = na
-var bool htf2Initialized = false
-var bool htf2LookingForLow = false
-var bool htf2LookingForHigh = false
-var bool htf2CurrentHighIsBroken = false
-var bool htf2CurrentLowIsBroken = false
-var string htf2LastBosDirection = "none"
+// Trading Range Timeframe (TF3) State Variables
+var float tf3CurrentValidHigh = na
+var float tf3CurrentValidLow = na
+var int tf3CurrentValidHighBar = na
+var int tf3CurrentValidLowBar = na
+var bool tf3Initialized = false
+var bool tf3LookingForLow = false
+var bool tf3LookingForHigh = false
+var bool tf3CurrentHighIsBroken = false
+var bool tf3CurrentLowIsBroken = false
+var string tf3LastBosDirection = "none"
 
-// HTF2 swing tracking
-var float htf2SwingLow = na
-var int htf2SwingLowBar = na
-var float htf2SwingHigh = na
-var int htf2SwingHighBar = na
+// TF3 swing tracking
+var float tf3SwingLow = na
+var int tf3SwingLowBar = na
+var float tf3SwingHigh = na
+var int tf3SwingHighBar = na
 
-// HTF2 Track indices
-var int htf2MostRecentHighIndex = -1
-var int htf2MostRecentLowIndex = -1
+// TF3 Track indices
+var int tf3MostRecentHighIndex = -1
+var int tf3MostRecentLowIndex = -1
 
-// HTF2 previous valid levels
-var float htf2PreviousValidHigh = na
-var float htf2PreviousValidLow = na
-var int htf2PreviousValidHighBar = na
-var int htf2PreviousValidLowBar = na
+// TF3 previous valid levels
+var float tf3PreviousValidHigh = na
+var float tf3PreviousValidLow = na
+var int tf3PreviousValidHighBar = na
+var int tf3PreviousValidLowBar = na
 
-// HTF2 Track nearest unbroken high/low (structure boundaries)
-var int htf2NearestUnbrokenHighIndex = -1
-var int htf2NearestUnbrokenLowIndex = -1
-var line htf2NearestUnbrokenHighLine = na
-var line htf2NearestUnbrokenLowLine = na
+// TF3 Track nearest unbroken high/low (structure boundaries)
+var int tf3NearestUnbrokenHighIndex = -1
+var int tf3NearestUnbrokenLowIndex = -1
+var line tf3NearestUnbrokenHighLine = na
+var line tf3NearestUnbrokenLowLine = na
 
 // Labels
 var label currentHighLabel = na
 var label currentLowLabel = na
-var label htfCurrentHighLabel = na
-var label htfCurrentLowLabel = na
-var label htf2CurrentHighLabel = na
-var label htf2CurrentLowLabel = na
+var label tf2CurrentHighLabel = na
+var label tf2CurrentLowLabel = na
+var label tf3CurrentHighLabel = na
+var label tf3CurrentLowLabel = na
 
 // Labels for nearest unbroken levels (structure boundaries)
 var label nearestUnbrokenHighLabel = na
 var label nearestUnbrokenLowLabel = na
-var label htfNearestUnbrokenHighLabel = na
-var label htfNearestUnbrokenLowLabel = na
-var label htf2NearestUnbrokenHighLabel = na
-var label htf2NearestUnbrokenLowLabel = na
+var label tf2NearestUnbrokenHighLabel = na
+var label tf2NearestUnbrokenLowLabel = na
+var label tf3NearestUnbrokenHighLabel = na
+var label tf3NearestUnbrokenLowLabel = na
 
 var array<label> sweptHighLabels = array.new<label>()
 var array<label> sweptLowLabels = array.new<label>()
-var array<label> htfSweptHighLabels = array.new<label>()
-var array<label> htfSweptLowLabels = array.new<label>()
+var array<label> tf2SweptHighLabels = array.new<label>()
+var array<label> tf2SweptLowLabels = array.new<label>()
 
 // Debug counters
-var int ctfBullishBOS = 0
-var int ctfBearishBOS = 0
-var int htfBullishBOS = 0
-var int htfBearishBOS = 0
-var int htfBullishLabels = 0  // BOS labels created by checkBrokenLevelsHTF
-var int htfBearishLabels = 0  // BOS labels created by checkBrokenLevelsHTF
+var int tf1BullishBOS = 0
+var int tf1BearishBOS = 0
+var int tf2BullishBOS = 0
+var int tf2BearishBOS = 0
+var int tf2BullishLabels = 0  // BOS labels created by checkBrokenLevelsTF2
+var int tf2BearishLabels = 0  // BOS labels created by checkBrokenLevelsTF2
 var int demandZonesCreated = 0
 var int supplyZonesCreated = 0
 var int demandZonesBlocked = 0
 var int supplyZonesBlocked = 0
-var int ctfDemandZonesCreated = 0
-var int ctfSupplyZonesCreated = 0
-var int ctfDemandSkippedNa = 0
-var int ctfDemandSkippedDupe = 0
+var int tf1DemandZonesCreated = 0
+var int tf1SupplyZonesCreated = 0
+var int tf1DemandSkippedNa = 0
+var int tf1DemandSkippedDupe = 0
 var int lastDemandBarsWalked = 0
 var float lastDemandHighFound = 0.0
 var int swingNaCount = 0
@@ -293,11 +293,11 @@ var int calcNaCount = 0
 // NOTIFICATION FLAGS (for alerts)
 // ============================================================================
 
-// HTF Alert condition flags (set at HTF candle close, reset on next LTF bar)
-var bool htfBosFlag = false
-var bool htfBosLtfBosFlag = false
-var bool htfSweptFlag = false
-var bool htfSweptLtfBosFlag = false
+// TF2 Alert condition flags (set at TF2 candle close, reset on next LTF bar)
+var bool tf2BosFlag = false
+var bool tf2BosLtfBosFlag = false
+var bool tf2SweptFlag = false
+var bool tf2SweptLtfBosFlag = false
 var bool pullback50Flag = false
 
 // LTF Alert condition flags (set when LTF conditions occur)
@@ -306,94 +306,94 @@ var bool ltfSweptFlag = false
 var bool ltfBosAtExtremeFlag = false
 var bool pullback25Flag = false
 
-// CTF BOS alert flags
-var bool ctfBullishBosFlag = false
-var bool ctfBearishBosFlag = false
+// TF1 BOS alert flags
+var bool tf1BullishBosFlag = false
+var bool tf1BearishBosFlag = false
 
-// HTF BOS direction-specific flags
-var bool htfBullishBosFlag = false
-var bool htfBearishBosFlag = false
+// TF2 BOS direction-specific flags
+var bool tf2BullishBosFlag = false
+var bool tf2BearishBosFlag = false
 
-// HTF2 BOS alert flags
-var bool htf2BullishBosFlag = false
-var bool htf2BearishBosFlag = false
+// TF3 BOS alert flags
+var bool tf3BullishBosFlag = false
+var bool tf3BearishBosFlag = false
 
 // Zone entry alert flags
-var bool ctfDemandEntryFlag = false
-var bool ctfSupplyEntryFlag = false
-var bool htfDemandEntryFlag = false
-var bool htfSupplyEntryFlag = false
-var bool htf2DemandEntryFlag = false
-var bool htf2SupplyEntryFlag = false
+var bool tf1DemandEntryFlag = false
+var bool tf1SupplyEntryFlag = false
+var bool tf2DemandEntryFlag = false
+var bool tf2SupplyEntryFlag = false
+var bool tf3DemandEntryFlag = false
+var bool tf3SupplyEntryFlag = false
 
 // State tracking for "BOS after entering zone" alerts
-var bool inHtfDemandZone = false
-var bool inHtfSupplyZone = false
-var bool inHtf2DemandZone = false
-var bool inHtf2SupplyZone = false
-var int activeHtfDemandZoneIdx = -1   // Index of the HTF demand zone we entered
-var int activeHtfSupplyZoneIdx = -1   // Index of the HTF supply zone we entered
-var int activeHtf2DemandZoneIdx = -1  // Index of the HTF2 demand zone we entered
-var int activeHtf2SupplyZoneIdx = -1  // Index of the HTF2 supply zone we entered
-var int ctfBullishBosCountSinceHtfDemand = 0
-var int ctfBearishBosCountSinceHtfSupply = 0
-var int ctfBullishBosCountSinceHtf2Demand = 0
-var int ctfBearishBosCountSinceHtf2Supply = 0
-var int htfBullishBosCountSinceHtf2Demand = 0
-var int htfBearishBosCountSinceHtf2Supply = 0
+var bool inTf2DemandZone = false
+var bool inTf2SupplyZone = false
+var bool inTf3DemandZone = false
+var bool inTf3SupplyZone = false
+var int activeTf2DemandZoneIdx = -1   // Index of the TF2 demand zone we entered
+var int activeTf2SupplyZoneIdx = -1   // Index of the TF2 supply zone we entered
+var int activeTf3DemandZoneIdx = -1  // Index of the TF3 demand zone we entered
+var int activeTf3SupplyZoneIdx = -1  // Index of the TF3 supply zone we entered
+var int tf1BullishBosCountSinceTf2Demand = 0
+var int tf1BearishBosCountSinceTf2Supply = 0
+var int tf1BullishBosCountSinceTf3Demand = 0
+var int tf1BearishBosCountSinceTf3Supply = 0
+var int tf2BullishBosCountSinceTf3Demand = 0
+var int tf2BearishBosCountSinceTf3Supply = 0
 
 // Flags for "BOS after zone entry" alerts
-// CTF BOS after HTF zone entry
-var bool firstCtfBullishBosAfterHtfDemandFlag = false
-var bool firstCtfBearishBosAfterHtfSupplyFlag = false
-var bool secondCtfBullishBosAfterHtfDemandFlag = false
-var bool secondCtfBearishBosAfterHtfSupplyFlag = false
-// CTF BOS after HTF2 zone entry
-var bool firstCtfBullishBosAfterHtf2DemandFlag = false
-var bool firstCtfBearishBosAfterHtf2SupplyFlag = false
-var bool secondCtfBullishBosAfterHtf2DemandFlag = false
-var bool secondCtfBearishBosAfterHtf2SupplyFlag = false
-// HTF BOS after HTF2 zone entry
-var bool firstHtfBullishBosAfterHtf2DemandFlag = false
-var bool firstHtfBearishBosAfterHtf2SupplyFlag = false
+// TF1 BOS after TF2 zone entry
+var bool firstTf1BullishBosAfterTf2DemandFlag = false
+var bool firstTf1BearishBosAfterTf2SupplyFlag = false
+var bool secondTf1BullishBosAfterTf2DemandFlag = false
+var bool secondTf1BearishBosAfterTf2SupplyFlag = false
+// TF1 BOS after TF3 zone entry
+var bool firstTf1BullishBosAfterTf3DemandFlag = false
+var bool firstTf1BearishBosAfterTf3SupplyFlag = false
+var bool secondTf1BullishBosAfterTf3DemandFlag = false
+var bool secondTf1BearishBosAfterTf3SupplyFlag = false
+// TF2 BOS after TF3 zone entry
+var bool firstTf2BullishBosAfterTf3DemandFlag = false
+var bool firstTf2BearishBosAfterTf3SupplyFlag = false
 
 // State tracking for alert conditions
-var bool ltfBosBullishSinceLastHTF = false
-var bool ltfBosBearishSinceLastHTF = false
+var bool ltfBosBullishSinceLastTF2 = false
+var bool ltfBosBearishSinceLastTF2 = false
 var float pullback50Level = na
 var float pullback25Level = na
 
-// Track HTF level state changes to detect when they become swept
-var string htfMostRecentHighPrevType = "strong"
-var string htfMostRecentLowPrevType = "strong"
+// Track TF2 level state changes to detect when they become swept
+var string tf2MostRecentHighPrevType = "strong"
+var string tf2MostRecentLowPrevType = "strong"
 
 // Track LTF level state changes to detect when they become swept
 var string ltfMostRecentHighPrevType = "strong"
 var string ltfMostRecentLowPrevType = "strong"
 
-// Track HTF BOS for current bar (needed for alert logic)
-var bool htfBosBullish = false
-var bool htfBosBearish = false
+// Track TF2 BOS for current bar (needed for alert logic)
+var bool tf2BosBullish = false
+var bool tf2BosBearish = false
 
 // ============================================================================
-// CTF DATA (configurable timeframe)
+// TF1 DATA (configurable timeframe)
 // ============================================================================
 
-[ctfHigh, ctfLow, ctfOpen, ctfClose] = request.security(syminfo.tickerid, ctfTimeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
-ctfTime = request.security(syminfo.tickerid, ctfTimeframe, time, lookahead=barmerge.lookahead_off)
-bool ctfNewCandle = ta.change(ctfTime) != 0
+[tf1High, tf1Low, tf1Open, tf1Close] = request.security(syminfo.tickerid, tf1Timeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
+tf1Time = request.security(syminfo.tickerid, tf1Timeframe, time, lookahead=barmerge.lookahead_off)
+bool tf1NewCandle = ta.change(tf1Time) != 0
 
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
-// Check if current CTF candle is bearish and closes below previous candle's low
+// Check if current TF1 candle is bearish and closes below previous candle's low
 isBearishBreakdown() =>
-    ctfClose < ctfOpen and ctfClose < ctfLow[1]
+    tf1Close < tf1Open and tf1Close < tf1Low[1]
 
-// Check if current CTF candle is bullish and closes above previous candle's high
+// Check if current TF1 candle is bullish and closes above previous candle's high
 isBullishBreakout() =>
-    ctfClose > ctfOpen and ctfClose > ctfHigh[1]
+    tf1Close > tf1Open and tf1Close > tf1High[1]
 
 // Find lowest low between two bar indices
 findLowestBetween(startBar, endBar) =>
@@ -462,8 +462,8 @@ findHighestBetween(startBar, endBar) =>
 // ZONE CALCULATION FUNCTIONS
 // ============================================================================
 
-// These functions find LTF swing structure around an HTF swing point.
-// They first try to use CTF arrays, but fall back to scanning bar data directly.
+// These functions find LTF swing structure around an TF2 swing point.
+// They first try to use TF1 arrays, but fall back to scanning bar data directly.
 
 // Helper: Find a swing high by scanning bar data (high with lower highs on both sides)
 // Returns [price, barIndex] or [na, na] if not found
@@ -539,7 +539,7 @@ findSwingLowAfter(int startBarIndex, int maxBarsToScan) =>
 
     [swingPrice, swingBar]
 
-// Calculate demand zone from an HTF swing low
+// Calculate demand zone from an TF2 swing low
 // Zone bottom = the low price at lowBarIndex
 // Zone top = the LOWER of the two swing highs (before and after)
 // Returns [zoneTop, zoneBottom, leftTime]
@@ -555,13 +555,13 @@ calculateZoneFromLow(int lowBarIndex) =>
         // Zone bottom is the low at the given bar
         zoneBottom := low[barsBack]
 
-        // First try CTF arrays
+        // First try TF1 arrays
         float highBeforePrice = na
         int highBeforeBar = na
         float highAfterPrice = na
         int highAfterBar = na
 
-        // Search CTF highs array for high before this low
+        // Search TF1 highs array for high before this low
         if array.size(highs) > 0
             for i = array.size(highs) - 1 to 0
                 highLevel = array.get(highs, i)
@@ -570,7 +570,7 @@ calculateZoneFromLow(int lowBarIndex) =>
                     highBeforeBar := highLevel.barIndex
                     break
 
-        // Search CTF highs array for high after this low
+        // Search TF1 highs array for high after this low
         if array.size(highs) > 0
             for i = 0 to array.size(highs) - 1
                 highLevel = array.get(highs, i)
@@ -579,7 +579,7 @@ calculateZoneFromLow(int lowBarIndex) =>
                     highAfterBar := highLevel.barIndex
                     break
 
-        // If CTF arrays didn't have results, scan bar data directly
+        // If TF1 arrays didn't have results, scan bar data directly
         if na(highBeforePrice)
             [scanPrice, scanBar] = findSwingHighBefore(lowBarIndex, 50)
             highBeforePrice := scanPrice
@@ -591,7 +591,7 @@ calculateZoneFromLow(int lowBarIndex) =>
             highAfterBar := scanBar
 
         // Use the LOWER of the two valid highs (creates smaller zone)
-        // But always use the leftTime from the "before" high to ensure HTF pivot is included
+        // But always use the leftTime from the "before" high to ensure TF2 pivot is included
         if not na(highBeforePrice) and not na(highAfterPrice)
             if highBeforePrice <= highAfterPrice
                 zoneTop := highBeforePrice
@@ -621,7 +621,7 @@ calculateZoneFromLow(int lowBarIndex) =>
 
     [zoneTop, zoneBottom, leftTime]
 
-// Calculate supply zone from an HTF swing high
+// Calculate supply zone from an TF2 swing high
 // Zone top = the high price at highBarIndex
 // Zone bottom = the HIGHER of the two swing lows (before and after)
 // Returns [zoneTop, zoneBottom, leftTime]
@@ -637,13 +637,13 @@ calculateZoneFromHigh(int highBarIndex) =>
         // Zone top is the high at the given bar
         zoneTop := high[barsBack]
 
-        // First try CTF arrays
+        // First try TF1 arrays
         float lowBeforePrice = na
         int lowBeforeBar = na
         float lowAfterPrice = na
         int lowAfterBar = na
 
-        // Search CTF lows array for low before this high
+        // Search TF1 lows array for low before this high
         if array.size(lows) > 0
             for i = array.size(lows) - 1 to 0
                 lowLevel = array.get(lows, i)
@@ -652,7 +652,7 @@ calculateZoneFromHigh(int highBarIndex) =>
                     lowBeforeBar := lowLevel.barIndex
                     break
 
-        // Search CTF lows array for low after this high
+        // Search TF1 lows array for low after this high
         if array.size(lows) > 0
             for i = 0 to array.size(lows) - 1
                 lowLevel = array.get(lows, i)
@@ -661,7 +661,7 @@ calculateZoneFromHigh(int highBarIndex) =>
                     lowAfterBar := lowLevel.barIndex
                     break
 
-        // If CTF arrays didn't have results, scan bar data directly
+        // If TF1 arrays didn't have results, scan bar data directly
         if na(lowBeforePrice)
             [scanPrice, scanBar] = findSwingLowBefore(highBarIndex, 50)
             lowBeforePrice := scanPrice
@@ -673,7 +673,7 @@ calculateZoneFromHigh(int highBarIndex) =>
             lowAfterBar := scanBar
 
         // Use the HIGHER of the two valid lows (creates smaller zone)
-        // But always use the leftTime from the "before" low to ensure HTF pivot is included
+        // But always use the leftTime from the "before" low to ensure TF2 pivot is included
         if not na(lowBeforePrice) and not na(lowAfterPrice)
             if lowBeforePrice >= lowAfterPrice
                 zoneBottom := lowBeforePrice
@@ -704,13 +704,13 @@ calculateZoneFromHigh(int highBarIndex) =>
     [zoneTop, zoneBottom, leftTime]
 
 // ============================================================================
-// CTF ZONE CALCULATION FUNCTIONS (Walk-back algorithm)
+// TF1 ZONE CALCULATION FUNCTIONS (Walk-back algorithm)
 // ============================================================================
 
-// Calculate CTF demand zone from a valid low
+// Calculate TF1 demand zone from a valid low
 // SIMPLIFIED: Zone top = most recent valid high price, Zone bottom = valid low price
 // Returns [zoneTop, zoneBottom, leftTime, barsWalked]
-calculateCtfDemandZone(int lowBarIndex, float lowPrice) =>
+calculateTf1DemandZone(int lowBarIndex, float lowPrice) =>
     float zoneTop = na
     float zoneBottom = lowPrice
     int leftTime = na
@@ -726,10 +726,10 @@ calculateCtfDemandZone(int lowBarIndex, float lowPrice) =>
 
     [zoneTop, zoneBottom, leftTime, barsWalked]
 
-// Calculate CTF supply zone from a valid high
+// Calculate TF1 supply zone from a valid high
 // SIMPLIFIED: Zone top = valid high price, Zone bottom = most recent valid low price
 // Returns [zoneTop, zoneBottom, leftTime]
-calculateCtfSupplyZone(int highBarIndex, float highPrice) =>
+calculateTf1SupplyZone(int highBarIndex, float highPrice) =>
     float zoneTop = highPrice
     float zoneBottom = na
     int leftTime = na
@@ -757,7 +757,7 @@ addHigh(float price, int barIdx, string levelType, color lineColor) =>
 
     // Create new line only if peaks/valleys are enabled
     line newLine = na
-    if showCtfPeaksValleys
+    if showTf1PeaksValleys
         newLine := line.new(barIdx, price, barIdx + 1, price,
                            color=lineColor,
                            width=lineWidth,
@@ -769,7 +769,7 @@ addHigh(float price, int barIdx, string levelType, color lineColor) =>
     array.push(highs, newHigh)
 
     // Create label if enabled
-    if showCtfLabels
+    if showTf1Labels
         label.new(barIdx, price, "",
                  style=label.style_label_down,
                  color=lineColor,
@@ -788,7 +788,7 @@ addLow(float price, int barIdx, string levelType, color lineColor) =>
 
     // Create new line only if peaks/valleys are enabled
     line newLine = na
-    if showCtfPeaksValleys
+    if showTf1PeaksValleys
         newLine := line.new(barIdx, price, barIdx + 1, price,
                            color=lineColor,
                            width=lineWidth,
@@ -800,7 +800,7 @@ addLow(float price, int barIdx, string levelType, color lineColor) =>
     array.push(lows, newLow)
 
     // Create label if enabled
-    if showCtfLabels
+    if showTf1Labels
         label.new(barIdx, price, "",
                  style=label.style_label_up,
                  color=lineColor,
@@ -809,26 +809,26 @@ addLow(float price, int barIdx, string levelType, color lineColor) =>
 
     true
 
-// HTF versions
-addHighHTF(float price, int barIdx, string levelType, color lineColor) =>
-    if htfMostRecentHighIndex >= 0
-        prevHigh = array.get(htfHighs, htfMostRecentHighIndex)
+// TF2 versions
+addHighTF2(float price, int barIdx, string levelType, color lineColor) =>
+    if tf2MostRecentHighIndex >= 0
+        prevHigh = array.get(tf2Highs, tf2MostRecentHighIndex)
         if prevHigh.levelType != "broken" and prevHigh.levelType != "swept" and not na(prevHigh.levelLine)
             line.delete(prevHigh.levelLine)
 
     // Create new line only if peaks/valleys are enabled
     line newLine = na
-    if showHtfPeaksValleys
+    if showTf2PeaksValleys
         newLine := line.new(barIdx, price, barIdx + 1, price,
                            color=lineColor,
-                           width=lineWidth + 1,  // Thicker for HTF
+                           width=lineWidth + 1,  // Thicker for TF2
                            extend=extend.right,
                            style=line.style_solid)
 
     newHigh = HighLevel.new(price, barIdx, newLine, levelType, false)
-    array.push(htfHighs, newHigh)
+    array.push(tf2Highs, newHigh)
 
-    if showHtfLabels
+    if showTf2Labels
         label.new(barIdx, price, "",
                  style=label.style_label_down,
                  color=lineColor,
@@ -837,25 +837,25 @@ addHighHTF(float price, int barIdx, string levelType, color lineColor) =>
 
     true
 
-addLowHTF(float price, int barIdx, string levelType, color lineColor) =>
-    if htfMostRecentLowIndex >= 0
-        prevLow = array.get(htfLows, htfMostRecentLowIndex)
+addLowTF2(float price, int barIdx, string levelType, color lineColor) =>
+    if tf2MostRecentLowIndex >= 0
+        prevLow = array.get(tf2Lows, tf2MostRecentLowIndex)
         if prevLow.levelType != "broken" and prevLow.levelType != "swept" and not na(prevLow.levelLine)
             line.delete(prevLow.levelLine)
 
     // Create new line only if peaks/valleys are enabled
     line newLine = na
-    if showHtfPeaksValleys
+    if showTf2PeaksValleys
         newLine := line.new(barIdx, price, barIdx + 1, price,
                            color=lineColor,
-                           width=lineWidth + 1,  // Thicker for HTF
+                           width=lineWidth + 1,  // Thicker for TF2
                            extend=extend.right,
                            style=line.style_solid)
 
     newLow = LowLevel.new(price, barIdx, newLine, levelType, false)
-    array.push(htfLows, newLow)
+    array.push(tf2Lows, newLow)
 
-    if showHtfLabels
+    if showTf2Labels
         label.new(barIdx, price, "",
                  style=label.style_label_up,
                  color=lineColor,
@@ -864,60 +864,60 @@ addLowHTF(float price, int barIdx, string levelType, color lineColor) =>
 
     true
 
-// HTF2 (Trading Range) versions - uses htf2HighColor/htf2LowColor with peak/valley labels
-addHighHTF2(float price, int barIdx, string levelType) =>
-    if htf2MostRecentHighIndex >= 0
-        prevHigh = array.get(htf2Highs, htf2MostRecentHighIndex)
+// TF3 (Trading Range) versions - uses tf3HighColor/tf3LowColor with peak/valley labels
+addHighTF3(float price, int barIdx, string levelType) =>
+    if tf3MostRecentHighIndex >= 0
+        prevHigh = array.get(tf3Highs, tf3MostRecentHighIndex)
         if prevHigh.levelType != "broken" and prevHigh.levelType != "swept" and not na(prevHigh.levelLine)
             line.delete(prevHigh.levelLine)
 
     // Create new line only if peaks/valleys are enabled
     line newLine = na
-    if showHtf2PeaksValleys
+    if showTf3PeaksValleys
         newLine := line.new(barIdx, price, barIdx + 1, price,
-                           color=htf2HighColor,
-                           width=lineWidth + 2,  // Thickest for HTF2
+                           color=tf3HighColor,
+                           width=lineWidth + 2,  // Thickest for TF3
                            extend=extend.right,
                            style=line.style_solid)
 
     // Create label at the peak (top label pointing down)
-    if showHtf2Labels
+    if showTf3Labels
         label.new(barIdx, price, levelType == "weak" ? "W" : "S",
                   style=label.style_label_down,
-                  color=htf2HighColor,
+                  color=tf3HighColor,
                   textcolor=color.white,
                   size=size.small)
 
     newHigh = HighLevel.new(price, barIdx, newLine, levelType, false)
-    array.push(htf2Highs, newHigh)
+    array.push(tf3Highs, newHigh)
 
     true
 
-addLowHTF2(float price, int barIdx, string levelType) =>
-    if htf2MostRecentLowIndex >= 0
-        prevLow = array.get(htf2Lows, htf2MostRecentLowIndex)
+addLowTF3(float price, int barIdx, string levelType) =>
+    if tf3MostRecentLowIndex >= 0
+        prevLow = array.get(tf3Lows, tf3MostRecentLowIndex)
         if prevLow.levelType != "broken" and prevLow.levelType != "swept" and not na(prevLow.levelLine)
             line.delete(prevLow.levelLine)
 
     // Create new line only if peaks/valleys are enabled
     line newLine = na
-    if showHtf2PeaksValleys
+    if showTf3PeaksValleys
         newLine := line.new(barIdx, price, barIdx + 1, price,
-                           color=htf2LowColor,
-                           width=lineWidth + 2,  // Thickest for HTF2
+                           color=tf3LowColor,
+                           width=lineWidth + 2,  // Thickest for TF3
                            extend=extend.right,
                            style=line.style_solid)
 
     // Create label at the valley (bottom label pointing up)
-    if showHtf2Labels
+    if showTf3Labels
         label.new(barIdx, price, levelType == "weak" ? "W" : "S",
                   style=label.style_label_up,
-                  color=htf2LowColor,
+                  color=tf3LowColor,
                   textcolor=color.white,
                   size=size.small)
 
     newLow = LowLevel.new(price, barIdx, newLine, levelType, false)
-    array.push(htf2Lows, newLow)
+    array.push(tf3Lows, newLow)
 
     true
 
@@ -951,27 +951,27 @@ checkSupplyZone(Zone zone) =>
 
 // Check and update all broken zones
 checkAllBrokenZones() =>
-    // CTF zones
-    for i = 0 to math.max(0, array.size(ctfDemandZones) - 1)
-        if i < array.size(ctfDemandZones)
-            checkDemandZone(array.get(ctfDemandZones, i))
-    for i = 0 to math.max(0, array.size(ctfSupplyZones) - 1)
-        if i < array.size(ctfSupplyZones)
-            checkSupplyZone(array.get(ctfSupplyZones, i))
-    // HTF zones
+    // TF1 zones
+    for i = 0 to math.max(0, array.size(tf1DemandZones) - 1)
+        if i < array.size(tf1DemandZones)
+            checkDemandZone(array.get(tf1DemandZones, i))
+    for i = 0 to math.max(0, array.size(tf1SupplyZones) - 1)
+        if i < array.size(tf1SupplyZones)
+            checkSupplyZone(array.get(tf1SupplyZones, i))
+    // TF2 zones
     for i = 0 to math.max(0, array.size(demandZones) - 1)
         if i < array.size(demandZones)
             checkDemandZone(array.get(demandZones, i))
     for i = 0 to math.max(0, array.size(supplyZones) - 1)
         if i < array.size(supplyZones)
             checkSupplyZone(array.get(supplyZones, i))
-    // HTF2 zones
-    for i = 0 to math.max(0, array.size(htf2DemandZones) - 1)
-        if i < array.size(htf2DemandZones)
-            checkDemandZone(array.get(htf2DemandZones, i))
-    for i = 0 to math.max(0, array.size(htf2SupplyZones) - 1)
-        if i < array.size(htf2SupplyZones)
-            checkSupplyZone(array.get(htf2SupplyZones, i))
+    // TF3 zones
+    for i = 0 to math.max(0, array.size(tf3DemandZones) - 1)
+        if i < array.size(tf3DemandZones)
+            checkDemandZone(array.get(tf3DemandZones, i))
+    for i = 0 to math.max(0, array.size(tf3SupplyZones) - 1)
+        if i < array.size(tf3SupplyZones)
+            checkSupplyZone(array.get(tf3SupplyZones, i))
     true
 
 // ============================================================================
@@ -1004,7 +1004,7 @@ checkBrokenLevels(float tfHigh, float tfLow, float tfClose) =>
                 // Other highs breaking are just old levels being cleared, not structure breaks
                 if i == mostRecentHighIndex
                     // Create demand zone for valid BOS
-                    if showCtfZones
+                    if showTf1Zones
                         int barsBack = bar_index - highLevel.barIndex
                         if barsBack >= 0 and barsBack < 5000
                             // Find the low between this high and current bar (zone bottom)
@@ -1018,7 +1018,7 @@ checkBrokenLevels(float tfHigh, float tfLow, float tfClose) =>
                             float zoneTop = na
                             int zoneLeftIdx = zoneBottomIdx
 
-                            if ctfZonesUseFullSwings
+                            if tf1ZonesUseFullSwings
                                 // Use full swing: zone top = the broken high's price
                                 zoneTop := highLevel.price
                                 zoneLeftIdx := barsBack
@@ -1055,7 +1055,7 @@ checkBrokenLevels(float tfHigh, float tfLow, float tfClose) =>
                             int zoneLeftTime = time[zoneLeftIdx]
                             if not na(zoneTop) and zoneTop > zoneBottom
                                 newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index)
-                                array.push(ctfDemandZones, newZone)
+                                array.push(tf1DemandZones, newZone)
 
                 // Update the object back in the array
                 array.set(highs, i, highLevel)
@@ -1068,10 +1068,10 @@ checkBrokenLevels(float tfHigh, float tfLow, float tfClose) =>
                         line.set_style(highLevel.levelLine, line.style_dotted)
                         line.set_color(highLevel.levelLine, color.new(bosColor, 30))
 
-                    // Set alert flag for bullish CTF BOS
+                    // Set alert flag for bullish TF1 BOS
                     bullishBos := true
 
-                    if showCtfBosLabels
+                    if showTf1BosLabels
                         centerBar = math.round((highLevel.barIndex + bar_index) / 2)
                         label.new(centerBar, highLevel.price, "BOS↑",
                                  style=label.style_label_center,
@@ -1103,7 +1103,7 @@ checkBrokenLevels(float tfHigh, float tfLow, float tfClose) =>
                 // Other lows breaking are just old levels being cleared, not structure breaks
                 if i == mostRecentLowIndex
                     // Create supply zone for valid BOS
-                    if showCtfZones
+                    if showTf1Zones
                         int barsBack = bar_index - lowLevel.barIndex
                         if barsBack >= 0 and barsBack < 5000
                             // Find the high between this low and current bar (zone top)
@@ -1117,7 +1117,7 @@ checkBrokenLevels(float tfHigh, float tfLow, float tfClose) =>
                             float zoneBottom = na
                             int zoneLeftIdx = zoneTopIdx
 
-                            if ctfZonesUseFullSwings
+                            if tf1ZonesUseFullSwings
                                 // Use full swing: zone bottom = the broken low's price
                                 zoneBottom := lowLevel.price
                                 zoneLeftIdx := barsBack
@@ -1154,7 +1154,7 @@ checkBrokenLevels(float tfHigh, float tfLow, float tfClose) =>
                             int zoneLeftTime = time[zoneLeftIdx]
                             if not na(zoneBottom) and zoneTop > zoneBottom
                                 newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index)
-                                array.push(ctfSupplyZones, newZone)
+                                array.push(tf1SupplyZones, newZone)
 
                 // Update the object back in the array
                 array.set(lows, i, lowLevel)
@@ -1166,10 +1166,10 @@ checkBrokenLevels(float tfHigh, float tfLow, float tfClose) =>
                         line.set_style(lowLevel.levelLine, line.style_dotted)
                         line.set_color(lowLevel.levelLine, color.new(bosColor, 30))
 
-                    // Set alert flag for bearish CTF BOS
+                    // Set alert flag for bearish TF1 BOS
                     bearishBos := true
 
-                    if showCtfBosLabels
+                    if showTf1BosLabels
                         centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
                         label.new(centerBar, lowLevel.price, "BOS↓",
                                  style=label.style_label_center,
@@ -1182,11 +1182,11 @@ checkBrokenLevels(float tfHigh, float tfLow, float tfClose) =>
 
     [bullishBos, bearishBos]
 
-// HTF version - checks for broken/swept levels
+// TF2 version - checks for broken/swept levels
 // Creates zones for immediate BOS (when most recent level is broken, including after sweep)
 // Uses savedHighIdx/savedLowIdx which are captured BEFORE main BOS logic updates them
 // Returns [bullishLabelsCreated, bearishLabelsCreated, demandZonesCreated, supplyZonesCreated, bullishBos, bearishBos]
-checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowIdx) =>
+checkBrokenLevelsTF2(tf2High, tf2Low, tf2Close, int savedHighIdx, int savedLowIdx) =>
     int bullishLabels = 0
     int bearishLabels = 0
     int demandCreated = 0
@@ -1194,16 +1194,16 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowId
     bool bullishBos = false
     bool bearishBos = false
 
-    if array.size(htfHighs) > 0
-        for i = 0 to array.size(htfHighs) - 1
-            highLevel = array.get(htfHighs, i)
+    if array.size(tf2Highs) > 0
+        for i = 0 to array.size(tf2Highs) - 1
+            highLevel = array.get(tf2Highs, i)
 
-            if highLevel.levelType != "swept" and highLevel.levelType != "broken" and htfHigh > highLevel.price and htfClose <= highLevel.price
+            if highLevel.levelType != "swept" and highLevel.levelType != "broken" and tf2High > highLevel.price and tf2Close <= highLevel.price
                 highLevel.levelType := "swept"
                 if not na(highLevel.levelLine)
                     line.set_style(highLevel.levelLine, line.style_dashed)
 
-            else if highLevel.levelType != "broken" and htfClose > highLevel.price
+            else if highLevel.levelType != "broken" and tf2Close > highLevel.price
                 highLevel.levelType := "broken"
 
                 // Style the broken line
@@ -1211,18 +1211,18 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowId
                     line.set_x2(highLevel.levelLine, bar_index)
                     line.set_extend(highLevel.levelLine, extend.none)
                     line.set_style(highLevel.levelLine, line.style_dotted)
-                    line.set_color(highLevel.levelLine, color.new(htfBosColor, 30))
+                    line.set_color(highLevel.levelLine, color.new(tf2BosColor, 30))
 
                 // Set BOS flag
                 bullishBos := true
 
                 // Create BOS label
-                if showHtfBosLabels
+                if showTf2BosLabels
                     centerBar = math.round((highLevel.barIndex + bar_index) / 2)
-                    label.new(centerBar, highLevel.price, htfTimeframe + " BOS↑",
+                    label.new(centerBar, highLevel.price, tf2Timeframe + " BOS↑",
                              style=label.style_label_center,
                              color=color.white,
-                             textcolor=htfBosColor,
+                             textcolor=tf2BosColor,
                              size=size.tiny)
                     bullishLabels := bullishLabels + 1
 
@@ -1246,16 +1246,16 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowId
                                 array.push(demandZones, newZone)
                                 demandCreated := demandCreated + 1
 
-    if array.size(htfLows) > 0
-        for i = 0 to array.size(htfLows) - 1
-            lowLevel = array.get(htfLows, i)
+    if array.size(tf2Lows) > 0
+        for i = 0 to array.size(tf2Lows) - 1
+            lowLevel = array.get(tf2Lows, i)
 
-            if lowLevel.levelType != "swept" and lowLevel.levelType != "broken" and htfLow < lowLevel.price and htfClose >= lowLevel.price
+            if lowLevel.levelType != "swept" and lowLevel.levelType != "broken" and tf2Low < lowLevel.price and tf2Close >= lowLevel.price
                 lowLevel.levelType := "swept"
                 if not na(lowLevel.levelLine)
                     line.set_style(lowLevel.levelLine, line.style_dashed)
 
-            else if lowLevel.levelType != "broken" and htfClose < lowLevel.price
+            else if lowLevel.levelType != "broken" and tf2Close < lowLevel.price
                 lowLevel.levelType := "broken"
 
                 // Style the broken line
@@ -1263,18 +1263,18 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowId
                     line.set_x2(lowLevel.levelLine, bar_index)
                     line.set_extend(lowLevel.levelLine, extend.none)
                     line.set_style(lowLevel.levelLine, line.style_dotted)
-                    line.set_color(lowLevel.levelLine, color.new(htfBosColor, 30))
+                    line.set_color(lowLevel.levelLine, color.new(tf2BosColor, 30))
 
                 // Set BOS flag
                 bearishBos := true
 
                 // Create BOS label
-                if showHtfBosLabels
+                if showTf2BosLabels
                     centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
-                    label.new(centerBar, lowLevel.price, htfTimeframe + " BOS↓",
+                    label.new(centerBar, lowLevel.price, tf2Timeframe + " BOS↓",
                              style=label.style_label_center,
                              color=color.white,
-                             textcolor=htfBosColor,
+                             textcolor=tf2BosColor,
                              size=size.tiny)
                     bearishLabels := bearishLabels + 1
 
@@ -1300,24 +1300,24 @@ checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, int savedHighIdx, int savedLowId
 
     [bullishLabels, bearishLabels, demandCreated, supplyCreated, bullishBos, bearishBos]
 
-// HTF2 (Trading Range) version - checks for broken/swept levels and creates zones
+// TF3 (Trading Range) version - checks for broken/swept levels and creates zones
 // Returns [demandCreated, supplyCreated, bullishBos, bearishBos]
-checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, int savedHighIdx, int savedLowIdx) =>
+checkBrokenLevelsTF3(tf3High, tf3Low, tf3Close, int savedHighIdx, int savedLowIdx) =>
     int demandCreated = 0
     int supplyCreated = 0
     bool bullishBos = false
     bool bearishBos = false
 
-    if array.size(htf2Highs) > 0
-        for i = 0 to array.size(htf2Highs) - 1
-            highLevel = array.get(htf2Highs, i)
+    if array.size(tf3Highs) > 0
+        for i = 0 to array.size(tf3Highs) - 1
+            highLevel = array.get(tf3Highs, i)
 
-            if highLevel.levelType != "swept" and highLevel.levelType != "broken" and htf2High > highLevel.price and htf2Close <= highLevel.price
+            if highLevel.levelType != "swept" and highLevel.levelType != "broken" and tf3High > highLevel.price and tf3Close <= highLevel.price
                 highLevel.levelType := "swept"
                 if not na(highLevel.levelLine)
                     line.set_style(highLevel.levelLine, line.style_dashed)
 
-            else if highLevel.levelType != "broken" and htf2Close > highLevel.price
+            else if highLevel.levelType != "broken" and tf3Close > highLevel.price
                 highLevel.levelType := "broken"
 
                 // Style the broken line - keep it visible but dotted
@@ -1325,48 +1325,48 @@ checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, int savedHighIdx, int savedL
                     line.set_x2(highLevel.levelLine, bar_index)
                     line.set_extend(highLevel.levelLine, extend.none)
                     line.set_style(highLevel.levelLine, line.style_dotted)
-                    line.set_color(highLevel.levelLine, color.new(htf2HighColor, 50))
+                    line.set_color(highLevel.levelLine, color.new(tf3HighColor, 50))
 
                 // Set BOS flag
                 bullishBos := true
 
                 // Create BOS label
-                if showHtf2BosLabels
+                if showTf3BosLabels
                     centerBar = math.round((highLevel.barIndex + bar_index) / 2)
-                    label.new(centerBar, highLevel.price, htf2Timeframe + " BOS↑",
+                    label.new(centerBar, highLevel.price, tf3Timeframe + " BOS↑",
                              style=label.style_label_center,
                              color=color.white,
-                             textcolor=htf2LowColor,
+                             textcolor=tf3LowColor,
                              size=size.tiny)
 
-                // Create HTF2 demand zone if this is the most recent high
+                // Create TF3 demand zone if this is the most recent high
                 if i == savedHighIdx
                     [lowPrice, lowBar] = findLowestBetween(highLevel.barIndex, bar_index)
                     if not na(lowBar)
                         [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromLow(lowBar)
                         if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
                             bool isDuplicate = false
-                            if array.size(htf2DemandZones) > 0
-                                for j = array.size(htf2DemandZones) - 1 to math.max(0, array.size(htf2DemandZones) - 20)
-                                    existingZone = array.get(htf2DemandZones, j)
+                            if array.size(tf3DemandZones) > 0
+                                for j = array.size(tf3DemandZones) - 1 to math.max(0, array.size(tf3DemandZones) - 20)
+                                    existingZone = array.get(tf3DemandZones, j)
                                     if existingZone.leftTime == zoneLeftTime and existingZone.top == zoneTop and existingZone.bottom == zoneBottom
                                         isDuplicate := true
                                         break
                             if not isDuplicate
                                 newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index)
-                                array.push(htf2DemandZones, newZone)
+                                array.push(tf3DemandZones, newZone)
                                 demandCreated := demandCreated + 1
 
-    if array.size(htf2Lows) > 0
-        for i = 0 to array.size(htf2Lows) - 1
-            lowLevel = array.get(htf2Lows, i)
+    if array.size(tf3Lows) > 0
+        for i = 0 to array.size(tf3Lows) - 1
+            lowLevel = array.get(tf3Lows, i)
 
-            if lowLevel.levelType != "swept" and lowLevel.levelType != "broken" and htf2Low < lowLevel.price and htf2Close >= lowLevel.price
+            if lowLevel.levelType != "swept" and lowLevel.levelType != "broken" and tf3Low < lowLevel.price and tf3Close >= lowLevel.price
                 lowLevel.levelType := "swept"
                 if not na(lowLevel.levelLine)
                     line.set_style(lowLevel.levelLine, line.style_dashed)
 
-            else if lowLevel.levelType != "broken" and htf2Close < lowLevel.price
+            else if lowLevel.levelType != "broken" and tf3Close < lowLevel.price
                 lowLevel.levelType := "broken"
 
                 // Style the broken line - keep it visible but dotted
@@ -1374,36 +1374,36 @@ checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, int savedHighIdx, int savedL
                     line.set_x2(lowLevel.levelLine, bar_index)
                     line.set_extend(lowLevel.levelLine, extend.none)
                     line.set_style(lowLevel.levelLine, line.style_dotted)
-                    line.set_color(lowLevel.levelLine, color.new(htf2LowColor, 50))
+                    line.set_color(lowLevel.levelLine, color.new(tf3LowColor, 50))
 
                 // Set BOS flag
                 bearishBos := true
 
                 // Create BOS label
-                if showHtf2BosLabels
+                if showTf3BosLabels
                     centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
-                    label.new(centerBar, lowLevel.price, htf2Timeframe + " BOS↓",
+                    label.new(centerBar, lowLevel.price, tf3Timeframe + " BOS↓",
                              style=label.style_label_center,
                              color=color.white,
-                             textcolor=htf2HighColor,
+                             textcolor=tf3HighColor,
                              size=size.tiny)
 
-                // Create HTF2 supply zone if this is the most recent low
+                // Create TF3 supply zone if this is the most recent low
                 if i == savedLowIdx
                     [highPrice, highBar] = findHighestBetween(lowLevel.barIndex, bar_index)
                     if not na(highBar)
                         [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromHigh(highBar)
                         if not na(zoneTop) and not na(zoneBottom) and not na(zoneLeftTime)
                             bool isDuplicate = false
-                            if array.size(htf2SupplyZones) > 0
-                                for j = array.size(htf2SupplyZones) - 1 to math.max(0, array.size(htf2SupplyZones) - 20)
-                                    existingZone = array.get(htf2SupplyZones, j)
+                            if array.size(tf3SupplyZones) > 0
+                                for j = array.size(tf3SupplyZones) - 1 to math.max(0, array.size(tf3SupplyZones) - 20)
+                                    existingZone = array.get(tf3SupplyZones, j)
                                     if existingZone.leftTime == zoneLeftTime and existingZone.top == zoneTop and existingZone.bottom == zoneBottom
                                         isDuplicate := true
                                         break
                             if not isDuplicate
                                 newZone = Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index)
-                                array.push(htf2SupplyZones, newZone)
+                                array.push(tf3SupplyZones, newZone)
                                 supplyCreated := supplyCreated + 1
 
     [demandCreated, supplyCreated, bullishBos, bearishBos]
@@ -1447,7 +1447,7 @@ findNearestUnbrokenLow(array<LowLevel> lowsArray) =>
 // INITIALIZATION
 // ============================================================================
 
-if not initialized and bar_index > 0 and ctfNewCandle
+if not initialized and bar_index > 0 and tf1NewCandle
     if isBearishBreakdown()
         float localHigh = high
         int localHighBar = bar_index
@@ -1469,31 +1469,31 @@ if not initialized and bar_index > 0 and ctfNewCandle
 // MAIN LOGIC
 // ============================================================================
 
-// CTF structure detection (gated on ctfNewCandle)
-if initialized and ctfNewCandle
+// TF1 structure detection (gated on tf1NewCandle)
+if initialized and tf1NewCandle
     // Check broken/swept levels and zones
-    [ctfBullBos, ctfBearBos] = checkBrokenLevels(ctfHigh, ctfLow, ctfClose)
-    // Set CTF BOS alert flags
-    if ctfBullBos
-        ctfBullishBosFlag := true
-    if ctfBearBos
-        ctfBearishBosFlag := true
+    [tf1BullBos, tf1BearBos] = checkBrokenLevels(tf1High, tf1Low, tf1Close)
+    // Set TF1 BOS alert flags
+    if tf1BullBos
+        tf1BullishBosFlag := true
+    if tf1BearBos
+        tf1BearishBosFlag := true
 
     bool bosBullish = false
     bool bosBearish = false
 
     // Check for Break of Structure
-    if not na(currentValidHigh) and not na(currentValidLow) and ctfClose > currentValidHigh and lookingForLow
+    if not na(currentValidHigh) and not na(currentValidLow) and tf1Close > currentValidHigh and lookingForLow
         bosBullish := true
         currentHighIsBroken := true
         lastBosDirection := "bullish"
-        ctfBullishBOS := ctfBullishBOS + 1
+        tf1BullishBOS := tf1BullishBOS + 1
 
         // First, find the new low that led to this BOS
         [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
 
         if not na(newLow) and not na(newLowBar)
-            // NOTE: CTF zone creation is handled in checkBrokenLevels() to ensure
+            // NOTE: TF1 zone creation is handled in checkBrokenLevels() to ensure
             // zones are created for ALL broken levels, not just the state machine's current level
 
             // Store previous low before updating
@@ -1509,17 +1509,17 @@ if initialized and ctfNewCandle
             addLow(newLow, newLowBar, "strong", lowColor)
             mostRecentLowIndex := array.size(lows) - 1
 
-    if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and ctfClose < currentValidLow and lookingForHigh
+    if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and tf1Close < currentValidLow and lookingForHigh
         bosBearish := true
         currentLowIsBroken := true
         lastBosDirection := "bearish"
-        ctfBearishBOS := ctfBearishBOS + 1
+        tf1BearishBOS := tf1BearishBOS + 1
 
         // First, find the new high that led to this BOS
         [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
 
         if not na(newHigh) and not na(newHighBar)
-            // NOTE: CTF zone creation is handled in checkBrokenLevels() to ensure
+            // NOTE: TF1 zone creation is handled in checkBrokenLevels() to ensure
             // zones are created for ALL broken levels, not just the state machine's current level
 
             // Store previous high before updating
@@ -1567,74 +1567,74 @@ if initialized and ctfNewCandle
                 addHigh(newHigh, newHighBar, levelType, highColor)
                 mostRecentHighIndex := array.size(highs) - 1
 
-    // Track CTF BOS for alert conditions
+    // Track TF1 BOS for alert conditions
     if bosBullish
-        ltfBosBullishSinceLastHTF := true
+        ltfBosBullishSinceLastTF2 := true
         ltfBosFlag := true
 
-        // Check if bullish BOS is below 50% of HTF range
-        if not na(pullback50Level) and ctfClose < pullback50Level
+        // Check if bullish BOS is below 50% of TF2 range
+        if not na(pullback50Level) and tf1Close < pullback50Level
             ltfBosAtExtremeFlag := true
 
     if bosBearish
-        ltfBosBearishSinceLastHTF := true
+        ltfBosBearishSinceLastTF2 := true
         ltfBosFlag := true
 
-        // Check if bearish BOS is above 50% of HTF range
-        if not na(pullback50Level) and ctfClose > pullback50Level
+        // Check if bearish BOS is above 50% of TF2 range
+        if not na(pullback50Level) and tf1Close > pullback50Level
             ltfBosAtExtremeFlag := true
 
-// Ungated CTF logic (runs every bar)
+// Ungated TF1 logic (runs every bar)
 if initialized
     checkAllBrokenZones()
 
-    // Update nearest unbroken levels (structure boundaries) - CTF
-    int ctfNewHighIdx = findNearestUnbrokenHigh(highs)
-    if ctfNewHighIdx != nearestUnbrokenHighIndex or (ctfNewHighIdx >= 0 and na(nearestUnbrokenHighLine))
+    // Update nearest unbroken levels (structure boundaries) - TF1
+    int tf1NewHighIdx = findNearestUnbrokenHigh(highs)
+    if tf1NewHighIdx != nearestUnbrokenHighIndex or (tf1NewHighIdx >= 0 and na(nearestUnbrokenHighLine))
         if not na(nearestUnbrokenHighLine)
             line.delete(nearestUnbrokenHighLine)
             nearestUnbrokenHighLine := na
-        nearestUnbrokenHighIndex := ctfNewHighIdx
-        if ctfNewHighIdx >= 0 and ctfNewHighIdx != mostRecentHighIndex
-            ctfHighLevel = array.get(highs, ctfNewHighIdx)
+        nearestUnbrokenHighIndex := tf1NewHighIdx
+        if tf1NewHighIdx >= 0 and tf1NewHighIdx != mostRecentHighIndex
+            tf1HighLevel = array.get(highs, tf1NewHighIdx)
             // Use bar_index instead of stored barIndex to avoid "too far" error
-            nearestUnbrokenHighLine := line.new(bar_index, ctfHighLevel.price, bar_index + 1, ctfHighLevel.price, color=color.new(highColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
+            nearestUnbrokenHighLine := line.new(bar_index, tf1HighLevel.price, bar_index + 1, tf1HighLevel.price, color=color.new(highColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
     if not na(nearestUnbrokenHighLine)
         line.set_x2(nearestUnbrokenHighLine, bar_index + 1)
 
-    int ctfNewLowIdx = findNearestUnbrokenLow(lows)
-    if ctfNewLowIdx != nearestUnbrokenLowIndex or (ctfNewLowIdx >= 0 and na(nearestUnbrokenLowLine))
+    int tf1NewLowIdx = findNearestUnbrokenLow(lows)
+    if tf1NewLowIdx != nearestUnbrokenLowIndex or (tf1NewLowIdx >= 0 and na(nearestUnbrokenLowLine))
         if not na(nearestUnbrokenLowLine)
             line.delete(nearestUnbrokenLowLine)
             nearestUnbrokenLowLine := na
-        nearestUnbrokenLowIndex := ctfNewLowIdx
-        if ctfNewLowIdx >= 0 and ctfNewLowIdx != mostRecentLowIndex
-            ctfLowLevel = array.get(lows, ctfNewLowIdx)
+        nearestUnbrokenLowIndex := tf1NewLowIdx
+        if tf1NewLowIdx >= 0 and tf1NewLowIdx != mostRecentLowIndex
+            tf1LowLevel = array.get(lows, tf1NewLowIdx)
             // Use bar_index instead of stored barIndex to avoid "too far" error
-            nearestUnbrokenLowLine := line.new(bar_index, ctfLowLevel.price, bar_index + 1, ctfLowLevel.price, color=color.new(lowColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
+            nearestUnbrokenLowLine := line.new(bar_index, tf1LowLevel.price, bar_index + 1, tf1LowLevel.price, color=color.new(lowColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
     if not na(nearestUnbrokenLowLine)
         line.set_x2(nearestUnbrokenLowLine, bar_index + 1)
 
 // ============================================================================
-// HTF DATA AND LOGIC
+// TF2 DATA AND LOGIC
 // ============================================================================
 
-[htfHigh, htfLow, htfOpen, htfClose] = request.security(syminfo.tickerid, htfTimeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
-htfTime = request.security(syminfo.tickerid, htfTimeframe, time, lookahead=barmerge.lookahead_off)
-bool htfNewCandle = ta.change(htfTime) != 0
+[tf2High, tf2Low, tf2Open, tf2Close] = request.security(syminfo.tickerid, tf2Timeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
+tf2Time = request.security(syminfo.tickerid, tf2Timeframe, time, lookahead=barmerge.lookahead_off)
+bool tf2NewCandle = ta.change(tf2Time) != 0
 
-// HTF helper functions (defined here because they need HTF data)
-htfIsBearishBreakdown() =>
-    htfClose < htfOpen and htfClose < htfLow[1]
+// TF2 helper functions (defined here because they need TF2 data)
+tf2IsBearishBreakdown() =>
+    tf2Close < tf2Open and tf2Close < tf2Low[1]
 
-htfIsBullishBreakout() =>
-    htfClose > htfOpen and htfClose > htfHigh[1]
+tf2IsBullishBreakout() =>
+    tf2Close > tf2Open and tf2Close > tf2High[1]
 
-// HTF Initialization
-// IMPORTANT: We need to set BOTH htfCurrentValidHigh AND htfCurrentValidLow
+// TF2 Initialization
+// IMPORTANT: We need to set BOTH tf2CurrentValidHigh AND tf2CurrentValidLow
 // Otherwise BOS detection fails because it requires both to be non-NA
-if htfEnabled and not htfInitialized and bar_index > 0 and htfNewCandle
-    if htfIsBearishBreakdown()
+if tf2Enabled and not tf2Initialized and bar_index > 0 and tf2NewCandle
+    if tf2IsBearishBreakdown()
         // Find the highest high in the lookback period for initial valid high
         float initHigh = high
         int initHighBar = bar_index
@@ -1643,55 +1643,55 @@ if htfEnabled and not htfInitialized and bar_index > 0 and htfNewCandle
                 initHigh := high[i]
                 initHighBar := bar_index - i
 
-        htfCurrentValidHigh := initHigh
-        htfCurrentValidHighBar := initHighBar
+        tf2CurrentValidHigh := initHigh
+        tf2CurrentValidHighBar := initHighBar
 
         // Also set an initial valid low to current bar
         // This allows BOS detection to work immediately
-        htfCurrentValidLow := low
-        htfCurrentValidLowBar := bar_index
+        tf2CurrentValidLow := low
+        tf2CurrentValidLowBar := bar_index
 
-        htfInitialized := true
-        htfLookingForLow := true
+        tf2Initialized := true
+        tf2LookingForLow := true
 
-        // Initialize swing tracking for the NEW HTF candle - start with current bar
-        htfSwingLow := low
-        htfSwingLowBar := bar_index
+        // Initialize swing tracking for the NEW TF2 candle - start with current bar
+        tf2SwingLow := low
+        tf2SwingLowBar := bar_index
 
-        addHighHTF(initHigh, initHighBar, "strong", htfHighColor)
-        htfMostRecentHighIndex := array.size(htfHighs) - 1
+        addHighTF2(initHigh, initHighBar, "strong", tf2HighColor)
+        tf2MostRecentHighIndex := array.size(tf2Highs) - 1
 
         // Also add the initial low level
-        addLowHTF(low, bar_index, "strong", htfLowColor)
-        htfMostRecentLowIndex := array.size(htfLows) - 1
+        addLowTF2(low, bar_index, "strong", tf2LowColor)
+        tf2MostRecentLowIndex := array.size(tf2Lows) - 1
 
-// HTF main logic (only on new HTF candles)
+// TF2 main logic (only on new TF2 candles)
 // IMPORTANT: This must run BEFORE swing tracking updates, so we use the
-// swing values from the PREVIOUS HTF candle, not contaminated by current bar
+// swing values from the PREVIOUS TF2 candle, not contaminated by current bar
 
-// Save the "most recent" indices BEFORE main logic runs, so checkBrokenLevelsHTF can use them
-var int htfMostRecentHighIndexForZones = -1
-var int htfMostRecentLowIndexForZones = -1
+// Save the "most recent" indices BEFORE main logic runs, so checkBrokenLevelsTF2 can use them
+var int tf2MostRecentHighIndexForZones = -1
+var int tf2MostRecentLowIndexForZones = -1
 
-if htfEnabled and htfInitialized and htfNewCandle
+if tf2Enabled and tf2Initialized and tf2NewCandle
     // Capture the indices before any updates
-    htfMostRecentHighIndexForZones := htfMostRecentHighIndex
-    htfMostRecentLowIndexForZones := htfMostRecentLowIndex
+    tf2MostRecentHighIndexForZones := tf2MostRecentHighIndex
+    tf2MostRecentLowIndexForZones := tf2MostRecentLowIndex
 
-    // Reset HTF BOS flags
-    htfBosBullish := false
-    htfBosBearish := false
+    // Reset TF2 BOS flags
+    tf2BosBullish := false
+    tf2BosBearish := false
 
-    // Check HTF BOS - zones are created here for IMMEDIATE breaks only
+    // Check TF2 BOS - zones are created here for IMMEDIATE breaks only
     // Use findLowestBetween/findHighestBetween for accurate swing detection
-    if not na(htfCurrentValidHigh) and not na(htfCurrentValidLow) and htfClose > htfCurrentValidHigh and htfLookingForLow
-        htfBosBullish := true
-        htfCurrentHighIsBroken := true
-        htfLastBosDirection := "bullish"
-        htfBullishBOS := htfBullishBOS + 1
+    if not na(tf2CurrentValidHigh) and not na(tf2CurrentValidLow) and tf2Close > tf2CurrentValidHigh and tf2LookingForLow
+        tf2BosBullish := true
+        tf2CurrentHighIsBroken := true
+        tf2LastBosDirection := "bullish"
+        tf2BullishBOS := tf2BullishBOS + 1
 
         // Find the actual lowest low between the last valid high and now
-        [foundLow, foundLowBar] = findLowestBetween(htfCurrentValidHighBar, bar_index)
+        [foundLow, foundLowBar] = findLowestBetween(tf2CurrentValidHighBar, bar_index)
 
         // Debug: mark that we entered bullish BOS
         if showDebugLabel
@@ -1699,16 +1699,16 @@ if htfEnabled and htfInitialized and htfNewCandle
 
         if not na(foundLow) and not na(foundLowBar)
             // Store previous low
-            htfPreviousValidLow := htfCurrentValidLow
-            htfPreviousValidLowBar := htfCurrentValidLowBar
+            tf2PreviousValidLow := tf2CurrentValidLow
+            tf2PreviousValidLowBar := tf2CurrentValidLowBar
 
-            htfCurrentValidLow := foundLow
-            htfCurrentValidLowBar := foundLowBar
+            tf2CurrentValidLow := foundLow
+            tf2CurrentValidLowBar := foundLowBar
 
-            addLowHTF(foundLow, foundLowBar, "strong", htfLowColor)
-            htfMostRecentLowIndex := array.size(htfLows) - 1
+            addLowTF2(foundLow, foundLowBar, "strong", tf2LowColor)
+            tf2MostRecentLowIndex := array.size(tf2Lows) - 1
 
-            // Create DEMAND zone at this HTF low (immediate BOS)
+            // Create DEMAND zone at this TF2 low (immediate BOS)
             [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromLow(foundLowBar)
 
             // Debug: show zone calculation results
@@ -1732,21 +1732,21 @@ if htfEnabled and htfInitialized and htfNewCandle
                         label.new(bar_index, low * 0.999, "D+", style=label.style_label_up, color=color.lime, textcolor=color.black, size=size.tiny)
 
         // CRITICAL: Always update direction flags after BOS
-        htfLookingForHigh := true
-        htfLookingForLow := false
-        htfCurrentLowIsBroken := false
-        // Reset swing tracking for the NEW HTF candle - start with current bar
-        htfSwingHigh := high
-        htfSwingHighBar := bar_index
+        tf2LookingForHigh := true
+        tf2LookingForLow := false
+        tf2CurrentLowIsBroken := false
+        // Reset swing tracking for the NEW TF2 candle - start with current bar
+        tf2SwingHigh := high
+        tf2SwingHighBar := bar_index
 
-    if not htfBosBullish and not na(htfCurrentValidLow) and not na(htfCurrentValidHigh) and htfClose < htfCurrentValidLow and htfLookingForHigh
-        htfBosBearish := true
-        htfCurrentLowIsBroken := true
-        htfLastBosDirection := "bearish"
-        htfBearishBOS := htfBearishBOS + 1
+    if not tf2BosBullish and not na(tf2CurrentValidLow) and not na(tf2CurrentValidHigh) and tf2Close < tf2CurrentValidLow and tf2LookingForHigh
+        tf2BosBearish := true
+        tf2CurrentLowIsBroken := true
+        tf2LastBosDirection := "bearish"
+        tf2BearishBOS := tf2BearishBOS + 1
 
         // Find the actual highest high between the last valid low and now
-        [foundHigh, foundHighBar] = findHighestBetween(htfCurrentValidLowBar, bar_index)
+        [foundHigh, foundHighBar] = findHighestBetween(tf2CurrentValidLowBar, bar_index)
 
         // Debug: mark that we entered bearish BOS
         if showDebugLabel
@@ -1754,16 +1754,16 @@ if htfEnabled and htfInitialized and htfNewCandle
 
         if not na(foundHigh) and not na(foundHighBar)
             // Store previous high
-            htfPreviousValidHigh := htfCurrentValidHigh
-            htfPreviousValidHighBar := htfCurrentValidHighBar
+            tf2PreviousValidHigh := tf2CurrentValidHigh
+            tf2PreviousValidHighBar := tf2CurrentValidHighBar
 
-            htfCurrentValidHigh := foundHigh
-            htfCurrentValidHighBar := foundHighBar
+            tf2CurrentValidHigh := foundHigh
+            tf2CurrentValidHighBar := foundHighBar
 
-            addHighHTF(foundHigh, foundHighBar, "strong", htfHighColor)
-            htfMostRecentHighIndex := array.size(htfHighs) - 1
+            addHighTF2(foundHigh, foundHighBar, "strong", tf2HighColor)
+            tf2MostRecentHighIndex := array.size(tf2Highs) - 1
 
-            // Create SUPPLY zone at this HTF high (immediate BOS)
+            // Create SUPPLY zone at this TF2 high (immediate BOS)
             [zoneTop, zoneBottom, zoneLeftTime] = calculateZoneFromHigh(foundHighBar)
 
             // Debug: show zone calculation results
@@ -1787,125 +1787,125 @@ if htfEnabled and htfInitialized and htfNewCandle
                         label.new(bar_index, high * 1.001, "S+", style=label.style_label_down, color=color.maroon, textcolor=color.white, size=size.tiny)
 
         // CRITICAL: Always update direction flags after BOS
-        htfLookingForLow := true
-        htfLookingForHigh := false
-        htfCurrentHighIsBroken := false
-        // Reset swing tracking for the NEW HTF candle - start with current bar
-        htfSwingLow := low
-        htfSwingLowBar := bar_index
+        tf2LookingForLow := true
+        tf2LookingForHigh := false
+        tf2CurrentHighIsBroken := false
+        // Reset swing tracking for the NEW TF2 candle - start with current bar
+        tf2SwingLow := low
+        tf2SwingLowBar := bar_index
 
-    // HTF breakout/breakdown
-    // Use findLowestBetween/findHighestBetween like CTF does for accuracy
-    if not htfBosBullish and not htfBosBearish and htfLookingForLow
-        if htfIsBullishBreakout()
+    // TF2 breakout/breakdown
+    // Use findLowestBetween/findHighestBetween like TF1 does for accuracy
+    if not tf2BosBullish and not tf2BosBearish and tf2LookingForLow
+        if tf2IsBullishBreakout()
             // Find the actual lowest low between the last valid high and now
-            [foundLow, foundLowBar] = findLowestBetween(htfCurrentValidHighBar, bar_index)
+            [foundLow, foundLowBar] = findLowestBetween(tf2CurrentValidHighBar, bar_index)
             if not na(foundLow) and not na(foundLowBar)
-                htfCurrentValidLow := foundLow
-                htfCurrentValidLowBar := foundLowBar
-                htfLookingForHigh := true
-                htfLookingForLow := false
-                htfCurrentLowIsBroken := false
+                tf2CurrentValidLow := foundLow
+                tf2CurrentValidLowBar := foundLowBar
+                tf2LookingForHigh := true
+                tf2LookingForLow := false
+                tf2CurrentLowIsBroken := false
 
-                levelType = getLowLevelType(htfLastBosDirection)
-                addLowHTF(foundLow, foundLowBar, levelType, htfLowColor)
-                htfMostRecentLowIndex := array.size(htfLows) - 1
+                levelType = getLowLevelType(tf2LastBosDirection)
+                addLowTF2(foundLow, foundLowBar, levelType, tf2LowColor)
+                tf2MostRecentLowIndex := array.size(tf2Lows) - 1
 
-                // Reset swing tracking for the NEW HTF candle - start with current bar
-                htfSwingHigh := high
-                htfSwingHighBar := bar_index
+                // Reset swing tracking for the NEW TF2 candle - start with current bar
+                tf2SwingHigh := high
+                tf2SwingHighBar := bar_index
 
-    if not htfBosBullish and not htfBosBearish and htfLookingForHigh
-        if htfIsBearishBreakdown()
+    if not tf2BosBullish and not tf2BosBearish and tf2LookingForHigh
+        if tf2IsBearishBreakdown()
             // Find the actual highest high between the last valid low and now
-            [foundHigh, foundHighBar] = findHighestBetween(htfCurrentValidLowBar, bar_index)
+            [foundHigh, foundHighBar] = findHighestBetween(tf2CurrentValidLowBar, bar_index)
             if not na(foundHigh) and not na(foundHighBar)
-                htfCurrentValidHigh := foundHigh
-                htfCurrentValidHighBar := foundHighBar
-                htfLookingForLow := true
-                htfLookingForHigh := false
-                htfCurrentHighIsBroken := false
+                tf2CurrentValidHigh := foundHigh
+                tf2CurrentValidHighBar := foundHighBar
+                tf2LookingForLow := true
+                tf2LookingForHigh := false
+                tf2CurrentHighIsBroken := false
 
-                levelType = getHighLevelType(htfLastBosDirection)
-                addHighHTF(foundHigh, foundHighBar, levelType, htfHighColor)
-                htfMostRecentHighIndex := array.size(htfHighs) - 1
+                levelType = getHighLevelType(tf2LastBosDirection)
+                addHighTF2(foundHigh, foundHighBar, levelType, tf2HighColor)
+                tf2MostRecentHighIndex := array.size(tf2Highs) - 1
 
-                // Reset swing tracking for the NEW HTF candle - start with current bar
-                htfSwingLow := low
-                htfSwingLowBar := bar_index
+                // Reset swing tracking for the NEW TF2 candle - start with current bar
+                tf2SwingLow := low
+                tf2SwingLowBar := bar_index
 
-// Check HTF broken/swept levels - ONLY on new HTF candles
+// Check TF2 broken/swept levels - ONLY on new TF2 candles
 // This now also creates zones for every broken level
-if htfEnabled and htfInitialized and htfNewCandle
-    [bullLabels, bearLabels, demandFromLabels, supplyFromLabels, htfBullBos, htfBearBos] = checkBrokenLevelsHTF(htfHigh, htfLow, htfClose, htfMostRecentHighIndexForZones, htfMostRecentLowIndexForZones)
-    htfBullishLabels := htfBullishLabels + bullLabels
-    htfBearishLabels := htfBearishLabels + bearLabels
+if tf2Enabled and tf2Initialized and tf2NewCandle
+    [bullLabels, bearLabels, demandFromLabels, supplyFromLabels, tf2BullBos, tf2BearBos] = checkBrokenLevelsTF2(tf2High, tf2Low, tf2Close, tf2MostRecentHighIndexForZones, tf2MostRecentLowIndexForZones)
+    tf2BullishLabels := tf2BullishLabels + bullLabels
+    tf2BearishLabels := tf2BearishLabels + bearLabels
     demandZonesCreated := demandZonesCreated + demandFromLabels
     supplyZonesCreated := supplyZonesCreated + supplyFromLabels
-    // Set HTF BOS alert flags
-    if htfBullBos
-        htfBullishBosFlag := true
-    if htfBearBos
-        htfBearishBosFlag := true
+    // Set TF2 BOS alert flags
+    if tf2BullBos
+        tf2BullishBosFlag := true
+    if tf2BearBos
+        tf2BearishBosFlag := true
 
-// HTF swing tracking - track actual LTF bars where HTF extremes occur
-// IMPORTANT: This runs AFTER the htfNewCandle logic so the swing values
-// from the previous HTF candle are used before being updated
-if htfEnabled and htfInitialized
-    if htfLookingForLow
-        if na(htfSwingLow) or low < htfSwingLow
-            htfSwingLow := low
-            htfSwingLowBar := bar_index
+// TF2 swing tracking - track actual LTF bars where TF2 extremes occur
+// IMPORTANT: This runs AFTER the tf2NewCandle logic so the swing values
+// from the previous TF2 candle are used before being updated
+if tf2Enabled and tf2Initialized
+    if tf2LookingForLow
+        if na(tf2SwingLow) or low < tf2SwingLow
+            tf2SwingLow := low
+            tf2SwingLowBar := bar_index
 
-    if htfLookingForHigh
-        if na(htfSwingHigh) or high > htfSwingHigh
-            htfSwingHigh := high
-            htfSwingHighBar := bar_index
+    if tf2LookingForHigh
+        if na(tf2SwingHigh) or high > tf2SwingHigh
+            tf2SwingHigh := high
+            tf2SwingHighBar := bar_index
 
-    // Update nearest unbroken levels (structure boundaries) - HTF
-    int htfNewHighIdx = findNearestUnbrokenHigh(htfHighs)
-    if htfNewHighIdx != htfNearestUnbrokenHighIndex or (htfNewHighIdx >= 0 and na(htfNearestUnbrokenHighLine))
-        if not na(htfNearestUnbrokenHighLine)
-            line.delete(htfNearestUnbrokenHighLine)
-            htfNearestUnbrokenHighLine := na
-        htfNearestUnbrokenHighIndex := htfNewHighIdx
-        if htfNewHighIdx >= 0 and htfNewHighIdx != htfMostRecentHighIndex
-            htfHighLevel = array.get(htfHighs, htfNewHighIdx)
+    // Update nearest unbroken levels (structure boundaries) - TF2
+    int tf2NewHighIdx = findNearestUnbrokenHigh(tf2Highs)
+    if tf2NewHighIdx != tf2NearestUnbrokenHighIndex or (tf2NewHighIdx >= 0 and na(tf2NearestUnbrokenHighLine))
+        if not na(tf2NearestUnbrokenHighLine)
+            line.delete(tf2NearestUnbrokenHighLine)
+            tf2NearestUnbrokenHighLine := na
+        tf2NearestUnbrokenHighIndex := tf2NewHighIdx
+        if tf2NewHighIdx >= 0 and tf2NewHighIdx != tf2MostRecentHighIndex
+            tf2HighLevel = array.get(tf2Highs, tf2NewHighIdx)
             // Use bar_index instead of stored barIndex to avoid "too far" error
-            htfNearestUnbrokenHighLine := line.new(bar_index, htfHighLevel.price, bar_index + 1, htfHighLevel.price, color=color.new(htfHighColor, 50), width=lineWidth + 1, extend=extend.right, style=line.style_dashed)
-    if not na(htfNearestUnbrokenHighLine)
-        line.set_x2(htfNearestUnbrokenHighLine, bar_index + 1)
+            tf2NearestUnbrokenHighLine := line.new(bar_index, tf2HighLevel.price, bar_index + 1, tf2HighLevel.price, color=color.new(tf2HighColor, 50), width=lineWidth + 1, extend=extend.right, style=line.style_dashed)
+    if not na(tf2NearestUnbrokenHighLine)
+        line.set_x2(tf2NearestUnbrokenHighLine, bar_index + 1)
 
-    int htfNewLowIdx = findNearestUnbrokenLow(htfLows)
-    if htfNewLowIdx != htfNearestUnbrokenLowIndex or (htfNewLowIdx >= 0 and na(htfNearestUnbrokenLowLine))
-        if not na(htfNearestUnbrokenLowLine)
-            line.delete(htfNearestUnbrokenLowLine)
-            htfNearestUnbrokenLowLine := na
-        htfNearestUnbrokenLowIndex := htfNewLowIdx
-        if htfNewLowIdx >= 0 and htfNewLowIdx != htfMostRecentLowIndex
-            htfLowLevel = array.get(htfLows, htfNewLowIdx)
+    int tf2NewLowIdx = findNearestUnbrokenLow(tf2Lows)
+    if tf2NewLowIdx != tf2NearestUnbrokenLowIndex or (tf2NewLowIdx >= 0 and na(tf2NearestUnbrokenLowLine))
+        if not na(tf2NearestUnbrokenLowLine)
+            line.delete(tf2NearestUnbrokenLowLine)
+            tf2NearestUnbrokenLowLine := na
+        tf2NearestUnbrokenLowIndex := tf2NewLowIdx
+        if tf2NewLowIdx >= 0 and tf2NewLowIdx != tf2MostRecentLowIndex
+            tf2LowLevel = array.get(tf2Lows, tf2NewLowIdx)
             // Use bar_index instead of stored barIndex to avoid "too far" error
-            htfNearestUnbrokenLowLine := line.new(bar_index, htfLowLevel.price, bar_index + 1, htfLowLevel.price, color=color.new(htfLowColor, 50), width=lineWidth + 1, extend=extend.right, style=line.style_dashed)
-    if not na(htfNearestUnbrokenLowLine)
-        line.set_x2(htfNearestUnbrokenLowLine, bar_index + 1)
+            tf2NearestUnbrokenLowLine := line.new(bar_index, tf2LowLevel.price, bar_index + 1, tf2LowLevel.price, color=color.new(tf2LowColor, 50), width=lineWidth + 1, extend=extend.right, style=line.style_dashed)
+    if not na(tf2NearestUnbrokenLowLine)
+        line.set_x2(tf2NearestUnbrokenLowLine, bar_index + 1)
 
 // ============================================================================
-// HTF2 (TRADING RANGE) DATA AND LOGIC
+// TF3 (TRADING RANGE) DATA AND LOGIC
 // ============================================================================
 
-[htf2High, htf2Low, htf2Open, htf2Close] = request.security(syminfo.tickerid, htf2Timeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
-htf2Time = request.security(syminfo.tickerid, htf2Timeframe, time, lookahead=barmerge.lookahead_off)
-bool htf2NewCandle = ta.change(htf2Time) != 0
+[tf3High, tf3Low, tf3Open, tf3Close] = request.security(syminfo.tickerid, tf3Timeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
+tf3Time = request.security(syminfo.tickerid, tf3Timeframe, time, lookahead=barmerge.lookahead_off)
+bool tf3NewCandle = ta.change(tf3Time) != 0
 
-// HTF2 helper functions
-htf2IsBearishBreakdown() =>
-    htf2Close < htf2Open and htf2Close < htf2Low[1]
+// TF3 helper functions
+tf3IsBearishBreakdown() =>
+    tf3Close < tf3Open and tf3Close < tf3Low[1]
 
-htf2IsBullishBreakout() =>
-    htf2Close > htf2Open and htf2Close > htf2High[1]
+tf3IsBullishBreakout() =>
+    tf3Close > tf3Open and tf3Close > tf3High[1]
 
-// HTF2 Initialization - simplified to initialize on first HTF2 candle with enough history
-if htf2Enabled and not htf2Initialized and bar_index > 200
+// TF3 Initialization - simplified to initialize on first TF3 candle with enough history
+if tf3Enabled and not tf3Initialized and bar_index > 200
     // Find the highest high in the lookback period for initial valid high
     float initHigh = high
     int initHighBar = bar_index
@@ -1922,157 +1922,157 @@ if htf2Enabled and not htf2Initialized and bar_index > 200
             initLow := low[i]
             initLowBar := bar_index - i
 
-    htf2CurrentValidHigh := initHigh
-    htf2CurrentValidHighBar := initHighBar
-    htf2CurrentValidLow := initLow
-    htf2CurrentValidLowBar := initLowBar
+    tf3CurrentValidHigh := initHigh
+    tf3CurrentValidHighBar := initHighBar
+    tf3CurrentValidLow := initLow
+    tf3CurrentValidLowBar := initLowBar
 
-    htf2Initialized := true
-    htf2LookingForLow := true
+    tf3Initialized := true
+    tf3LookingForLow := true
 
     // Initialize swing tracking
-    htf2SwingLow := initLow
-    htf2SwingLowBar := initLowBar
-    htf2SwingHigh := initHigh
-    htf2SwingHighBar := initHighBar
+    tf3SwingLow := initLow
+    tf3SwingLowBar := initLowBar
+    tf3SwingHigh := initHigh
+    tf3SwingHighBar := initHighBar
 
-    addHighHTF2(initHigh, initHighBar, "strong")
-    htf2MostRecentHighIndex := array.size(htf2Highs) - 1
+    addHighTF3(initHigh, initHighBar, "strong")
+    tf3MostRecentHighIndex := array.size(tf3Highs) - 1
 
-    addLowHTF2(initLow, initLowBar, "strong")
-    htf2MostRecentLowIndex := array.size(htf2Lows) - 1
+    addLowTF3(initLow, initLowBar, "strong")
+    tf3MostRecentLowIndex := array.size(tf3Lows) - 1
 
-// HTF2 main logic (only on new HTF2 candles)
-if htf2Enabled and htf2Initialized and htf2NewCandle
-    // Check HTF2 BOS
-    if not na(htf2CurrentValidHigh) and not na(htf2CurrentValidLow) and htf2Close > htf2CurrentValidHigh and htf2LookingForLow
-        htf2CurrentHighIsBroken := true
-        htf2LastBosDirection := "bullish"
+// TF3 main logic (only on new TF3 candles)
+if tf3Enabled and tf3Initialized and tf3NewCandle
+    // Check TF3 BOS
+    if not na(tf3CurrentValidHigh) and not na(tf3CurrentValidLow) and tf3Close > tf3CurrentValidHigh and tf3LookingForLow
+        tf3CurrentHighIsBroken := true
+        tf3LastBosDirection := "bullish"
 
         // Find the actual lowest low between the last valid high and now
-        [foundLow, foundLowBar] = findLowestBetween(htf2CurrentValidHighBar, bar_index)
+        [foundLow, foundLowBar] = findLowestBetween(tf3CurrentValidHighBar, bar_index)
 
         if not na(foundLow) and not na(foundLowBar)
-            htf2PreviousValidLow := htf2CurrentValidLow
-            htf2PreviousValidLowBar := htf2CurrentValidLowBar
+            tf3PreviousValidLow := tf3CurrentValidLow
+            tf3PreviousValidLowBar := tf3CurrentValidLowBar
 
-            htf2CurrentValidLow := foundLow
-            htf2CurrentValidLowBar := foundLowBar
+            tf3CurrentValidLow := foundLow
+            tf3CurrentValidLowBar := foundLowBar
 
-            addLowHTF2(foundLow, foundLowBar, "strong")
-            htf2MostRecentLowIndex := array.size(htf2Lows) - 1
+            addLowTF3(foundLow, foundLowBar, "strong")
+            tf3MostRecentLowIndex := array.size(tf3Lows) - 1
 
-        htf2LookingForHigh := true
-        htf2LookingForLow := false
-        htf2CurrentLowIsBroken := false
-        htf2SwingHigh := high
-        htf2SwingHighBar := bar_index
+        tf3LookingForHigh := true
+        tf3LookingForLow := false
+        tf3CurrentLowIsBroken := false
+        tf3SwingHigh := high
+        tf3SwingHighBar := bar_index
 
-    if not na(htf2CurrentValidLow) and not na(htf2CurrentValidHigh) and htf2Close < htf2CurrentValidLow and htf2LookingForHigh
-        htf2CurrentLowIsBroken := true
-        htf2LastBosDirection := "bearish"
+    if not na(tf3CurrentValidLow) and not na(tf3CurrentValidHigh) and tf3Close < tf3CurrentValidLow and tf3LookingForHigh
+        tf3CurrentLowIsBroken := true
+        tf3LastBosDirection := "bearish"
 
         // Find the actual highest high between the last valid low and now
-        [foundHigh, foundHighBar] = findHighestBetween(htf2CurrentValidLowBar, bar_index)
+        [foundHigh, foundHighBar] = findHighestBetween(tf3CurrentValidLowBar, bar_index)
 
         if not na(foundHigh) and not na(foundHighBar)
-            htf2PreviousValidHigh := htf2CurrentValidHigh
-            htf2PreviousValidHighBar := htf2CurrentValidHighBar
+            tf3PreviousValidHigh := tf3CurrentValidHigh
+            tf3PreviousValidHighBar := tf3CurrentValidHighBar
 
-            htf2CurrentValidHigh := foundHigh
-            htf2CurrentValidHighBar := foundHighBar
+            tf3CurrentValidHigh := foundHigh
+            tf3CurrentValidHighBar := foundHighBar
 
-            addHighHTF2(foundHigh, foundHighBar, "strong")
-            htf2MostRecentHighIndex := array.size(htf2Highs) - 1
+            addHighTF3(foundHigh, foundHighBar, "strong")
+            tf3MostRecentHighIndex := array.size(tf3Highs) - 1
 
-        htf2LookingForLow := true
-        htf2LookingForHigh := false
-        htf2CurrentHighIsBroken := false
-        htf2SwingLow := low
-        htf2SwingLowBar := bar_index
+        tf3LookingForLow := true
+        tf3LookingForHigh := false
+        tf3CurrentHighIsBroken := false
+        tf3SwingLow := low
+        tf3SwingLowBar := bar_index
 
-    // HTF2 breakout/breakdown (no BOS)
-    if htf2LookingForLow
-        if htf2IsBullishBreakout()
-            [foundLow, foundLowBar] = findLowestBetween(htf2CurrentValidHighBar, bar_index)
+    // TF3 breakout/breakdown (no BOS)
+    if tf3LookingForLow
+        if tf3IsBullishBreakout()
+            [foundLow, foundLowBar] = findLowestBetween(tf3CurrentValidHighBar, bar_index)
             if not na(foundLow) and not na(foundLowBar)
-                htf2CurrentValidLow := foundLow
-                htf2CurrentValidLowBar := foundLowBar
-                htf2LookingForHigh := true
-                htf2LookingForLow := false
-                htf2CurrentLowIsBroken := false
+                tf3CurrentValidLow := foundLow
+                tf3CurrentValidLowBar := foundLowBar
+                tf3LookingForHigh := true
+                tf3LookingForLow := false
+                tf3CurrentLowIsBroken := false
 
-                levelType = getLowLevelType(htf2LastBosDirection)
-                addLowHTF2(foundLow, foundLowBar, levelType)
-                htf2MostRecentLowIndex := array.size(htf2Lows) - 1
+                levelType = getLowLevelType(tf3LastBosDirection)
+                addLowTF3(foundLow, foundLowBar, levelType)
+                tf3MostRecentLowIndex := array.size(tf3Lows) - 1
 
-                htf2SwingHigh := high
-                htf2SwingHighBar := bar_index
+                tf3SwingHigh := high
+                tf3SwingHighBar := bar_index
 
-    if htf2LookingForHigh
-        if htf2IsBearishBreakdown()
-            [foundHigh, foundHighBar] = findHighestBetween(htf2CurrentValidLowBar, bar_index)
+    if tf3LookingForHigh
+        if tf3IsBearishBreakdown()
+            [foundHigh, foundHighBar] = findHighestBetween(tf3CurrentValidLowBar, bar_index)
             if not na(foundHigh) and not na(foundHighBar)
-                htf2CurrentValidHigh := foundHigh
-                htf2CurrentValidHighBar := foundHighBar
-                htf2LookingForLow := true
-                htf2LookingForHigh := false
-                htf2CurrentHighIsBroken := false
+                tf3CurrentValidHigh := foundHigh
+                tf3CurrentValidHighBar := foundHighBar
+                tf3LookingForLow := true
+                tf3LookingForHigh := false
+                tf3CurrentHighIsBroken := false
 
-                levelType = getHighLevelType(htf2LastBosDirection)
-                addHighHTF2(foundHigh, foundHighBar, levelType)
-                htf2MostRecentHighIndex := array.size(htf2Highs) - 1
+                levelType = getHighLevelType(tf3LastBosDirection)
+                addHighTF3(foundHigh, foundHighBar, levelType)
+                tf3MostRecentHighIndex := array.size(tf3Highs) - 1
 
-                htf2SwingLow := low
-                htf2SwingLowBar := bar_index
+                tf3SwingLow := low
+                tf3SwingLowBar := bar_index
 
-// Check HTF2 broken/swept levels - ONLY on new HTF2 candles
-if htf2Enabled and htf2Initialized and htf2NewCandle
-    [htf2DemandCreated, htf2SupplyCreated, htf2BullBos, htf2BearBos] = checkBrokenLevelsHTF2(htf2High, htf2Low, htf2Close, htf2MostRecentHighIndex, htf2MostRecentLowIndex)
-    // Set HTF2 BOS alert flags
-    if htf2BullBos
-        htf2BullishBosFlag := true
-    if htf2BearBos
-        htf2BearishBosFlag := true
+// Check TF3 broken/swept levels - ONLY on new TF3 candles
+if tf3Enabled and tf3Initialized and tf3NewCandle
+    [tf3DemandCreated, tf3SupplyCreated, tf3BullBos, tf3BearBos] = checkBrokenLevelsTF3(tf3High, tf3Low, tf3Close, tf3MostRecentHighIndex, tf3MostRecentLowIndex)
+    // Set TF3 BOS alert flags
+    if tf3BullBos
+        tf3BullishBosFlag := true
+    if tf3BearBos
+        tf3BearishBosFlag := true
 
-// HTF2 swing tracking
-if htf2Enabled and htf2Initialized
-    if htf2LookingForLow
-        if na(htf2SwingLow) or low < htf2SwingLow
-            htf2SwingLow := low
-            htf2SwingLowBar := bar_index
+// TF3 swing tracking
+if tf3Enabled and tf3Initialized
+    if tf3LookingForLow
+        if na(tf3SwingLow) or low < tf3SwingLow
+            tf3SwingLow := low
+            tf3SwingLowBar := bar_index
 
-    if htf2LookingForHigh
-        if na(htf2SwingHigh) or high > htf2SwingHigh
-            htf2SwingHigh := high
-            htf2SwingHighBar := bar_index
+    if tf3LookingForHigh
+        if na(tf3SwingHigh) or high > tf3SwingHigh
+            tf3SwingHigh := high
+            tf3SwingHighBar := bar_index
 
-    // Update nearest unbroken levels (structure boundaries) - HTF2
-    int htf2NewHighIdx = findNearestUnbrokenHigh(htf2Highs)
-    if htf2NewHighIdx != htf2NearestUnbrokenHighIndex or (htf2NewHighIdx >= 0 and na(htf2NearestUnbrokenHighLine))
-        if not na(htf2NearestUnbrokenHighLine)
-            line.delete(htf2NearestUnbrokenHighLine)
-            htf2NearestUnbrokenHighLine := na
-        htf2NearestUnbrokenHighIndex := htf2NewHighIdx
-        if htf2NewHighIdx >= 0 and htf2NewHighIdx != htf2MostRecentHighIndex
-            htf2HighLevel = array.get(htf2Highs, htf2NewHighIdx)
+    // Update nearest unbroken levels (structure boundaries) - TF3
+    int tf3NewHighIdx = findNearestUnbrokenHigh(tf3Highs)
+    if tf3NewHighIdx != tf3NearestUnbrokenHighIndex or (tf3NewHighIdx >= 0 and na(tf3NearestUnbrokenHighLine))
+        if not na(tf3NearestUnbrokenHighLine)
+            line.delete(tf3NearestUnbrokenHighLine)
+            tf3NearestUnbrokenHighLine := na
+        tf3NearestUnbrokenHighIndex := tf3NewHighIdx
+        if tf3NewHighIdx >= 0 and tf3NewHighIdx != tf3MostRecentHighIndex
+            tf3HighLevel = array.get(tf3Highs, tf3NewHighIdx)
             // Use bar_index instead of stored barIndex to avoid "too far" error
-            htf2NearestUnbrokenHighLine := line.new(bar_index, htf2HighLevel.price, bar_index + 1, htf2HighLevel.price, color=color.new(htf2HighColor, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
-    if not na(htf2NearestUnbrokenHighLine)
-        line.set_x2(htf2NearestUnbrokenHighLine, bar_index + 1)
+            tf3NearestUnbrokenHighLine := line.new(bar_index, tf3HighLevel.price, bar_index + 1, tf3HighLevel.price, color=color.new(tf3HighColor, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
+    if not na(tf3NearestUnbrokenHighLine)
+        line.set_x2(tf3NearestUnbrokenHighLine, bar_index + 1)
 
-    int htf2NewLowIdx = findNearestUnbrokenLow(htf2Lows)
-    if htf2NewLowIdx != htf2NearestUnbrokenLowIndex or (htf2NewLowIdx >= 0 and na(htf2NearestUnbrokenLowLine))
-        if not na(htf2NearestUnbrokenLowLine)
-            line.delete(htf2NearestUnbrokenLowLine)
-            htf2NearestUnbrokenLowLine := na
-        htf2NearestUnbrokenLowIndex := htf2NewLowIdx
-        if htf2NewLowIdx >= 0 and htf2NewLowIdx != htf2MostRecentLowIndex
-            htf2LowLevel = array.get(htf2Lows, htf2NewLowIdx)
+    int tf3NewLowIdx = findNearestUnbrokenLow(tf3Lows)
+    if tf3NewLowIdx != tf3NearestUnbrokenLowIndex or (tf3NewLowIdx >= 0 and na(tf3NearestUnbrokenLowLine))
+        if not na(tf3NearestUnbrokenLowLine)
+            line.delete(tf3NearestUnbrokenLowLine)
+            tf3NearestUnbrokenLowLine := na
+        tf3NearestUnbrokenLowIndex := tf3NewLowIdx
+        if tf3NewLowIdx >= 0 and tf3NewLowIdx != tf3MostRecentLowIndex
+            tf3LowLevel = array.get(tf3Lows, tf3NewLowIdx)
             // Use bar_index instead of stored barIndex to avoid "too far" error
-            htf2NearestUnbrokenLowLine := line.new(bar_index, htf2LowLevel.price, bar_index + 1, htf2LowLevel.price, color=color.new(htf2LowColor, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
-    if not na(htf2NearestUnbrokenLowLine)
-        line.set_x2(htf2NearestUnbrokenLowLine, bar_index + 1)
+            tf3NearestUnbrokenLowLine := line.new(bar_index, tf3LowLevel.price, bar_index + 1, tf3LowLevel.price, color=color.new(tf3LowColor, 50), width=lineWidth + 2, extend=extend.right, style=line.style_dashed)
+    if not na(tf3NearestUnbrokenLowLine)
+        line.set_x2(tf3NearestUnbrokenLowLine, bar_index + 1)
 
 // ============================================================================
 // ALERT CONDITION CHECKING
@@ -2097,53 +2097,53 @@ if initialized
             ltfSweptFlag := true
         ltfMostRecentLowPrevType := lowLevel.levelType
 
-// HTF alert conditions (set at HTF candle close)
-if htfEnabled and htfInitialized
-    // Detect if HTF levels just became swept this bar
-    bool htfHighJustSwept = false
-    bool htfLowJustSwept = false
+// TF2 alert conditions (set at TF2 candle close)
+if tf2Enabled and tf2Initialized
+    // Detect if TF2 levels just became swept this bar
+    bool tf2HighJustSwept = false
+    bool tf2LowJustSwept = false
 
-    if htfMostRecentHighIndex >= 0
-        highLevel = array.get(htfHighs, htfMostRecentHighIndex)
-        if highLevel.levelType == "swept" and htfMostRecentHighPrevType != "swept"
-            htfHighJustSwept := true
-        htfMostRecentHighPrevType := highLevel.levelType
+    if tf2MostRecentHighIndex >= 0
+        highLevel = array.get(tf2Highs, tf2MostRecentHighIndex)
+        if highLevel.levelType == "swept" and tf2MostRecentHighPrevType != "swept"
+            tf2HighJustSwept := true
+        tf2MostRecentHighPrevType := highLevel.levelType
 
-    if htfMostRecentLowIndex >= 0
-        lowLevel = array.get(htfLows, htfMostRecentLowIndex)
-        if lowLevel.levelType == "swept" and htfMostRecentLowPrevType != "swept"
-            htfLowJustSwept := true
-        htfMostRecentLowPrevType := lowLevel.levelType
+    if tf2MostRecentLowIndex >= 0
+        lowLevel = array.get(tf2Lows, tf2MostRecentLowIndex)
+        if lowLevel.levelType == "swept" and tf2MostRecentLowPrevType != "swept"
+            tf2LowJustSwept := true
+        tf2MostRecentLowPrevType := lowLevel.levelType
 
-    // Always update 50% and 25% levels based on current HTF range
-    if not na(htfCurrentValidHigh) and not na(htfCurrentValidLow)
-        pullback50Level := (htfCurrentValidHigh + htfCurrentValidLow) / 2
-        pullback25Level := htfCurrentValidLow + (htfCurrentValidHigh - htfCurrentValidLow) * 0.25
+    // Always update 50% and 25% levels based on current TF2 range
+    if not na(tf2CurrentValidHigh) and not na(tf2CurrentValidLow)
+        pullback50Level := (tf2CurrentValidHigh + tf2CurrentValidLow) / 2
+        pullback25Level := tf2CurrentValidLow + (tf2CurrentValidHigh - tf2CurrentValidLow) * 0.25
 
-    // Check HTF alert conditions at HTF candle close
-    if htfNewCandle
-        // Store whether HTF BOS occurred
-        bool htfBosOccurred = htfBosBullish or htfBosBearish
+    // Check TF2 alert conditions at TF2 candle close
+    if tf2NewCandle
+        // Store whether TF2 BOS occurred
+        bool tf2BosOccurred = tf2BosBullish or tf2BosBearish
 
-        // HTF Condition 1: HTF BOS
-        if htfBosOccurred
-            htfBosFlag := true
+        // TF2 Condition 1: TF2 BOS
+        if tf2BosOccurred
+            tf2BosFlag := true
 
-            // HTF Condition 2: HTF BOS + LTF BOS same direction
-            if (htfBosBullish and ltfBosBullishSinceLastHTF) or (htfBosBearish and ltfBosBearishSinceLastHTF)
-                htfBosLtfBosFlag := true
+            // TF2 Condition 2: TF2 BOS + LTF BOS same direction
+            if (tf2BosBullish and ltfBosBullishSinceLastTF2) or (tf2BosBearish and ltfBosBearishSinceLastTF2)
+                tf2BosLtfBosFlag := true
 
-        // HTF Condition 3: HTF Swept
-        if htfHighJustSwept or htfLowJustSwept
-            htfSweptFlag := true
+        // TF2 Condition 3: TF2 Swept
+        if tf2HighJustSwept or tf2LowJustSwept
+            tf2SweptFlag := true
 
-            // HTF Condition 4: HTF Swept + LTF BOS in reversal direction
-            if (htfHighJustSwept and ltfBosBearishSinceLastHTF) or (htfLowJustSwept and ltfBosBullishSinceLastHTF)
-                htfSweptLtfBosFlag := true
+            // TF2 Condition 4: TF2 Swept + LTF BOS in reversal direction
+            if (tf2HighJustSwept and ltfBosBearishSinceLastTF2) or (tf2LowJustSwept and ltfBosBullishSinceLastTF2)
+                tf2SweptLtfBosFlag := true
 
-        // Reset LTF BOS tracking flags for next HTF candle
-        ltfBosBullishSinceLastHTF := false
-        ltfBosBearishSinceLastHTF := false
+        // Reset LTF BOS tracking flags for next TF2 candle
+        ltfBosBullishSinceLastTF2 := false
+        ltfBosBearishSinceLastTF2 := false
 
 // Check for 50% pullback
 if not na(pullback50Level)
@@ -2211,93 +2211,93 @@ if initialized
                 if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
                     currentHigh.levelType := "strong"
 
-// Update HTF level states
-if htfEnabled and htfInitialized
-    int htfBrokenHighIdx = -1
-    if array.size(htfHighs) > 0
-        for i = array.size(htfHighs) - 1 to 0
-            highLevel = array.get(htfHighs, i)
+// Update TF2 level states
+if tf2Enabled and tf2Initialized
+    int tf2BrokenHighIdx = -1
+    if array.size(tf2Highs) > 0
+        for i = array.size(tf2Highs) - 1 to 0
+            highLevel = array.get(tf2Highs, i)
             if highLevel.levelType == "broken"
-                htfBrokenHighIdx := i
+                tf2BrokenHighIdx := i
                 break
 
-    int htfBrokenLowIdx = -1
-    if array.size(htfLows) > 0
-        for i = array.size(htfLows) - 1 to 0
-            lowLevel = array.get(htfLows, i)
+    int tf2BrokenLowIdx = -1
+    if array.size(tf2Lows) > 0
+        for i = array.size(tf2Lows) - 1 to 0
+            lowLevel = array.get(tf2Lows, i)
             if lowLevel.levelType == "broken"
-                htfBrokenLowIdx := i
+                tf2BrokenLowIdx := i
                 break
 
-    if htfBrokenHighIdx >= 0 or htfBrokenLowIdx >= 0
-        if htfBrokenHighIdx >= 0 and (htfBrokenLowIdx < 0 or htfBrokenHighIdx > htfBrokenLowIdx)
-            htfLastBosDirection := "bullish"
+    if tf2BrokenHighIdx >= 0 or tf2BrokenLowIdx >= 0
+        if tf2BrokenHighIdx >= 0 and (tf2BrokenLowIdx < 0 or tf2BrokenHighIdx > tf2BrokenLowIdx)
+            tf2LastBosDirection := "bullish"
 
-            if htfMostRecentHighIndex >= 0
-                currentHigh = array.get(htfHighs, htfMostRecentHighIndex)
+            if tf2MostRecentHighIndex >= 0
+                currentHigh = array.get(tf2Highs, tf2MostRecentHighIndex)
                 if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
                     currentHigh.levelType := "weak"
 
-            if htfMostRecentLowIndex >= 0
-                currentLow = array.get(htfLows, htfMostRecentLowIndex)
+            if tf2MostRecentLowIndex >= 0
+                currentLow = array.get(tf2Lows, tf2MostRecentLowIndex)
                 if currentLow.levelType != "broken" and currentLow.levelType != "swept"
                     currentLow.levelType := "strong"
 
-        else if htfBrokenLowIdx >= 0
-            htfLastBosDirection := "bearish"
+        else if tf2BrokenLowIdx >= 0
+            tf2LastBosDirection := "bearish"
 
-            if htfMostRecentLowIndex >= 0
-                currentLow = array.get(htfLows, htfMostRecentLowIndex)
+            if tf2MostRecentLowIndex >= 0
+                currentLow = array.get(tf2Lows, tf2MostRecentLowIndex)
                 if currentLow.levelType != "broken" and currentLow.levelType != "swept"
                     currentLow.levelType := "weak"
 
-            if htfMostRecentHighIndex >= 0
-                currentHigh = array.get(htfHighs, htfMostRecentHighIndex)
+            if tf2MostRecentHighIndex >= 0
+                currentHigh = array.get(tf2Highs, tf2MostRecentHighIndex)
                 if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
                     currentHigh.levelType := "strong"
 
-// Update HTF2 (Trading Range) level states
-if htf2Enabled and htf2Initialized
-    int htf2BrokenHighIdx = -1
-    if array.size(htf2Highs) > 0
-        for i = array.size(htf2Highs) - 1 to 0
-            highLevel = array.get(htf2Highs, i)
+// Update TF3 (Trading Range) level states
+if tf3Enabled and tf3Initialized
+    int tf3BrokenHighIdx = -1
+    if array.size(tf3Highs) > 0
+        for i = array.size(tf3Highs) - 1 to 0
+            highLevel = array.get(tf3Highs, i)
             if highLevel.levelType == "broken"
-                htf2BrokenHighIdx := i
+                tf3BrokenHighIdx := i
                 break
 
-    int htf2BrokenLowIdx = -1
-    if array.size(htf2Lows) > 0
-        for i = array.size(htf2Lows) - 1 to 0
-            lowLevel = array.get(htf2Lows, i)
+    int tf3BrokenLowIdx = -1
+    if array.size(tf3Lows) > 0
+        for i = array.size(tf3Lows) - 1 to 0
+            lowLevel = array.get(tf3Lows, i)
             if lowLevel.levelType == "broken"
-                htf2BrokenLowIdx := i
+                tf3BrokenLowIdx := i
                 break
 
-    if htf2BrokenHighIdx >= 0 or htf2BrokenLowIdx >= 0
-        if htf2BrokenHighIdx >= 0 and (htf2BrokenLowIdx < 0 or htf2BrokenHighIdx > htf2BrokenLowIdx)
-            htf2LastBosDirection := "bullish"
+    if tf3BrokenHighIdx >= 0 or tf3BrokenLowIdx >= 0
+        if tf3BrokenHighIdx >= 0 and (tf3BrokenLowIdx < 0 or tf3BrokenHighIdx > tf3BrokenLowIdx)
+            tf3LastBosDirection := "bullish"
 
-            if htf2MostRecentHighIndex >= 0
-                currentHigh = array.get(htf2Highs, htf2MostRecentHighIndex)
+            if tf3MostRecentHighIndex >= 0
+                currentHigh = array.get(tf3Highs, tf3MostRecentHighIndex)
                 if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
                     currentHigh.levelType := "weak"
 
-            if htf2MostRecentLowIndex >= 0
-                currentLow = array.get(htf2Lows, htf2MostRecentLowIndex)
+            if tf3MostRecentLowIndex >= 0
+                currentLow = array.get(tf3Lows, tf3MostRecentLowIndex)
                 if currentLow.levelType != "broken" and currentLow.levelType != "swept"
                     currentLow.levelType := "strong"
 
-        else if htf2BrokenLowIdx >= 0
-            htf2LastBosDirection := "bearish"
+        else if tf3BrokenLowIdx >= 0
+            tf3LastBosDirection := "bearish"
 
-            if htf2MostRecentLowIndex >= 0
-                currentLow = array.get(htf2Lows, htf2MostRecentLowIndex)
+            if tf3MostRecentLowIndex >= 0
+                currentLow = array.get(tf3Lows, tf3MostRecentLowIndex)
                 if currentLow.levelType != "broken" and currentLow.levelType != "swept"
                     currentLow.levelType := "weak"
 
-            if htf2MostRecentHighIndex >= 0
-                currentHigh = array.get(htf2Highs, htf2MostRecentHighIndex)
+            if tf3MostRecentHighIndex >= 0
+                currentHigh = array.get(tf3Highs, tf3MostRecentHighIndex)
                 if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
                     currentHigh.levelType := "strong"
 
@@ -2305,7 +2305,7 @@ if htf2Enabled and htf2Initialized
 // ARRAY TRUNCATION (Performance)
 // ============================================================================
 
-// CTF Highs truncation
+// TF1 Highs truncation
 if array.size(highs) > 30
     oldHigh = array.get(highs, 0)
     if not na(oldHigh.levelLine)
@@ -2317,7 +2317,7 @@ if array.size(highs) > 30
         line.delete(nearestUnbrokenHighLine)
         nearestUnbrokenHighLine := na
 
-// CTF Lows truncation
+// TF1 Lows truncation
 if array.size(lows) > 30
     oldLow = array.get(lows, 0)
     if not na(oldLow.levelLine)
@@ -2329,53 +2329,53 @@ if array.size(lows) > 30
         line.delete(nearestUnbrokenLowLine)
         nearestUnbrokenLowLine := na
 
-// HTF Highs truncation
-if array.size(htfHighs) > 30
-    oldHigh = array.get(htfHighs, 0)
+// TF2 Highs truncation
+if array.size(tf2Highs) > 30
+    oldHigh = array.get(tf2Highs, 0)
     if not na(oldHigh.levelLine)
         line.delete(oldHigh.levelLine)
-    array.shift(htfHighs)
-    htfMostRecentHighIndex := math.max(-1, htfMostRecentHighIndex - 1)
-    htfNearestUnbrokenHighIndex := math.max(-1, htfNearestUnbrokenHighIndex - 1)
-    if htfNearestUnbrokenHighIndex < 0 and not na(htfNearestUnbrokenHighLine)
-        line.delete(htfNearestUnbrokenHighLine)
-        htfNearestUnbrokenHighLine := na
+    array.shift(tf2Highs)
+    tf2MostRecentHighIndex := math.max(-1, tf2MostRecentHighIndex - 1)
+    tf2NearestUnbrokenHighIndex := math.max(-1, tf2NearestUnbrokenHighIndex - 1)
+    if tf2NearestUnbrokenHighIndex < 0 and not na(tf2NearestUnbrokenHighLine)
+        line.delete(tf2NearestUnbrokenHighLine)
+        tf2NearestUnbrokenHighLine := na
 
-// HTF Lows truncation
-if array.size(htfLows) > 30
-    oldLow = array.get(htfLows, 0)
+// TF2 Lows truncation
+if array.size(tf2Lows) > 30
+    oldLow = array.get(tf2Lows, 0)
     if not na(oldLow.levelLine)
         line.delete(oldLow.levelLine)
-    array.shift(htfLows)
-    htfMostRecentLowIndex := math.max(-1, htfMostRecentLowIndex - 1)
-    htfNearestUnbrokenLowIndex := math.max(-1, htfNearestUnbrokenLowIndex - 1)
-    if htfNearestUnbrokenLowIndex < 0 and not na(htfNearestUnbrokenLowLine)
-        line.delete(htfNearestUnbrokenLowLine)
-        htfNearestUnbrokenLowLine := na
+    array.shift(tf2Lows)
+    tf2MostRecentLowIndex := math.max(-1, tf2MostRecentLowIndex - 1)
+    tf2NearestUnbrokenLowIndex := math.max(-1, tf2NearestUnbrokenLowIndex - 1)
+    if tf2NearestUnbrokenLowIndex < 0 and not na(tf2NearestUnbrokenLowLine)
+        line.delete(tf2NearestUnbrokenLowLine)
+        tf2NearestUnbrokenLowLine := na
 
-// HTF2 Highs truncation
-if array.size(htf2Highs) > 30
-    oldHigh = array.get(htf2Highs, 0)
+// TF3 Highs truncation
+if array.size(tf3Highs) > 30
+    oldHigh = array.get(tf3Highs, 0)
     if not na(oldHigh.levelLine)
         line.delete(oldHigh.levelLine)
-    array.shift(htf2Highs)
-    htf2MostRecentHighIndex := math.max(-1, htf2MostRecentHighIndex - 1)
-    htf2NearestUnbrokenHighIndex := math.max(-1, htf2NearestUnbrokenHighIndex - 1)
-    if htf2NearestUnbrokenHighIndex < 0 and not na(htf2NearestUnbrokenHighLine)
-        line.delete(htf2NearestUnbrokenHighLine)
-        htf2NearestUnbrokenHighLine := na
+    array.shift(tf3Highs)
+    tf3MostRecentHighIndex := math.max(-1, tf3MostRecentHighIndex - 1)
+    tf3NearestUnbrokenHighIndex := math.max(-1, tf3NearestUnbrokenHighIndex - 1)
+    if tf3NearestUnbrokenHighIndex < 0 and not na(tf3NearestUnbrokenHighLine)
+        line.delete(tf3NearestUnbrokenHighLine)
+        tf3NearestUnbrokenHighLine := na
 
-// HTF2 Lows truncation
-if array.size(htf2Lows) > 30
-    oldLow = array.get(htf2Lows, 0)
+// TF3 Lows truncation
+if array.size(tf3Lows) > 30
+    oldLow = array.get(tf3Lows, 0)
     if not na(oldLow.levelLine)
         line.delete(oldLow.levelLine)
-    array.shift(htf2Lows)
-    htf2MostRecentLowIndex := math.max(-1, htf2MostRecentLowIndex - 1)
-    htf2NearestUnbrokenLowIndex := math.max(-1, htf2NearestUnbrokenLowIndex - 1)
-    if htf2NearestUnbrokenLowIndex < 0 and not na(htf2NearestUnbrokenLowLine)
-        line.delete(htf2NearestUnbrokenLowLine)
-        htf2NearestUnbrokenLowLine := na
+    array.shift(tf3Lows)
+    tf3MostRecentLowIndex := math.max(-1, tf3MostRecentLowIndex - 1)
+    tf3NearestUnbrokenLowIndex := math.max(-1, tf3NearestUnbrokenLowIndex - 1)
+    if tf3NearestUnbrokenLowIndex < 0 and not na(tf3NearestUnbrokenLowLine)
+        line.delete(tf3NearestUnbrokenLowLine)
+        tf3NearestUnbrokenLowLine := na
 
 // Remove old broken zones to keep arrays clean
 // NOTE: Disabled automatic removal - let size limit handle cleanup
@@ -2391,17 +2391,17 @@ if array.size(htf2Lows) > 30
 //         if zone.broken and (time - zone.rightTime) > (100 * (time - time[1]))
 //             array.remove(supplyZones, i)
 
-// if array.size(htfDemandZones) > 0
-//     for i = array.size(htfDemandZones) - 1 to 0
-//         zone = array.get(htfDemandZones, i)
+// if array.size(tf2DemandZones) > 0
+//     for i = array.size(tf2DemandZones) - 1 to 0
+//         zone = array.get(tf2DemandZones, i)
 //         if zone.broken and (time - zone.rightTime) > (100 * (time - time[1]))
-//             array.remove(htfDemandZones, i)
+//             array.remove(tf2DemandZones, i)
 
-// if array.size(htfSupplyZones) > 0
-//     for i = array.size(htfSupplyZones) - 1 to 0
-//         zone = array.get(htfSupplyZones, i)
+// if array.size(tf2SupplyZones) > 0
+//     for i = array.size(tf2SupplyZones) - 1 to 0
+//         zone = array.get(tf2SupplyZones, i)
 //         if zone.broken and (time - zone.rightTime) > (100 * (time - time[1]))
-//             array.remove(htfSupplyZones, i)
+//             array.remove(tf2SupplyZones, i)
 
 // Zone array size limiting is now handled at insertion time in addDemandZone/addSupplyZone
 
@@ -2411,8 +2411,8 @@ if array.size(htf2Lows) > 30
 
 plot(currentValidHigh, "Current Valid High", color=color.new(highColor, 80), linewidth=1, style=plot.style_stepline)
 plot(currentValidLow, "Current Valid Low", color=color.new(lowColor, 80), linewidth=1, style=plot.style_stepline)
-plot(htfEnabled ? htfCurrentValidHigh : na, "HTF Valid High", color=color.new(htfHighColor, 80), linewidth=1, style=plot.style_stepline)
-plot(htfEnabled ? htfCurrentValidLow : na, "HTF Valid Low", color=color.new(htfLowColor, 80), linewidth=1, style=plot.style_stepline)
+plot(tf2Enabled ? tf2CurrentValidHigh : na, "TF2 Valid High", color=color.new(tf2HighColor, 80), linewidth=1, style=plot.style_stepline)
+plot(tf2Enabled ? tf2CurrentValidLow : na, "TF2 Valid Low", color=color.new(tf2LowColor, 80), linewidth=1, style=plot.style_stepline)
 
 // Update labels for current levels
 if initialized and not na(currentValidHigh) and mostRecentHighIndex >= 0
@@ -2424,14 +2424,14 @@ if initialized and not na(currentValidHigh) and mostRecentHighIndex >= 0
     color labelColor = highColor
 
     if highLevel.levelType == "broken"
-        labelText := ctfDisplayTF + " Broken High"
+        labelText := tf1DisplayTF + " Broken High"
         labelColor := color.new(color.red, 0)
     else if highLevel.levelType == "weak"
-        labelText := ctfDisplayTF + " Weak High"
+        labelText := tf1DisplayTF + " Weak High"
     else if highLevel.levelType == "swept"
-        labelText := ctfDisplayTF + " Swept High"
+        labelText := tf1DisplayTF + " Swept High"
     else
-        labelText := ctfDisplayTF + " Strong High"
+        labelText := tf1DisplayTF + " Strong High"
 
     currentHighLabel := label.new(bar_index + 5, currentValidHigh,
                                    text=labelText,
@@ -2449,14 +2449,14 @@ if initialized and not na(currentValidLow) and mostRecentLowIndex >= 0
     color labelColor = lowColor
 
     if lowLevel.levelType == "broken"
-        labelText := ctfDisplayTF + " Broken Low"
+        labelText := tf1DisplayTF + " Broken Low"
         labelColor := color.new(color.green, 0)
     else if lowLevel.levelType == "weak"
-        labelText := ctfDisplayTF + " Weak Low"
+        labelText := tf1DisplayTF + " Weak Low"
     else if lowLevel.levelType == "swept"
-        labelText := ctfDisplayTF + " Swept Low"
+        labelText := tf1DisplayTF + " Swept Low"
     else
-        labelText := ctfDisplayTF + " Strong Low"
+        labelText := tf1DisplayTF + " Strong Low"
 
     currentLowLabel := label.new(bar_index + 5, currentValidLow,
                                   text=labelText,
@@ -2465,98 +2465,98 @@ if initialized and not na(currentValidLow) and mostRecentLowIndex >= 0
                                   textcolor=color.white,
                                   size=size.small)
 
-// HTF labels
-if htfEnabled and htfInitialized and not na(htfCurrentValidHigh) and htfMostRecentHighIndex >= 0
-    if not na(htfCurrentHighLabel)
-        label.delete(htfCurrentHighLabel)
+// TF2 labels
+if tf2Enabled and tf2Initialized and not na(tf2CurrentValidHigh) and tf2MostRecentHighIndex >= 0
+    if not na(tf2CurrentHighLabel)
+        label.delete(tf2CurrentHighLabel)
 
-    highLevel = array.get(htfHighs, htfMostRecentHighIndex)
+    highLevel = array.get(tf2Highs, tf2MostRecentHighIndex)
     string labelText = na
-    color labelColor = htfHighColor
+    color labelColor = tf2HighColor
 
     if highLevel.levelType == "broken"
-        labelText := htfTimeframe + " Broken High"
+        labelText := tf2Timeframe + " Broken High"
         labelColor := color.new(color.orange, 0)
     else if highLevel.levelType == "weak"
-        labelText := htfTimeframe + " Weak High"
+        labelText := tf2Timeframe + " Weak High"
     else if highLevel.levelType == "swept"
-        labelText := htfTimeframe + " Swept High"
+        labelText := tf2Timeframe + " Swept High"
     else
-        labelText := htfTimeframe + " Strong High"
+        labelText := tf2Timeframe + " Strong High"
 
-    htfCurrentHighLabel := label.new(bar_index + 20, htfCurrentValidHigh,
+    tf2CurrentHighLabel := label.new(bar_index + 20, tf2CurrentValidHigh,
                                       text=labelText,
                                       style=label.style_label_left,
                                       color=labelColor,
                                       textcolor=color.white,
                                       size=size.small)
 
-if htfEnabled and htfInitialized and not na(htfCurrentValidLow) and htfMostRecentLowIndex >= 0
-    if not na(htfCurrentLowLabel)
-        label.delete(htfCurrentLowLabel)
+if tf2Enabled and tf2Initialized and not na(tf2CurrentValidLow) and tf2MostRecentLowIndex >= 0
+    if not na(tf2CurrentLowLabel)
+        label.delete(tf2CurrentLowLabel)
 
-    lowLevel = array.get(htfLows, htfMostRecentLowIndex)
+    lowLevel = array.get(tf2Lows, tf2MostRecentLowIndex)
     string labelText = na
-    color labelColor = htfLowColor
+    color labelColor = tf2LowColor
 
     if lowLevel.levelType == "broken"
-        labelText := htfTimeframe + " Broken Low"
+        labelText := tf2Timeframe + " Broken Low"
         labelColor := color.new(color.blue, 0)
     else if lowLevel.levelType == "weak"
-        labelText := htfTimeframe + " Weak Low"
+        labelText := tf2Timeframe + " Weak Low"
     else if lowLevel.levelType == "swept"
-        labelText := htfTimeframe + " Swept Low"
+        labelText := tf2Timeframe + " Swept Low"
     else
-        labelText := htfTimeframe + " Strong Low"
+        labelText := tf2Timeframe + " Strong Low"
 
-    htfCurrentLowLabel := label.new(bar_index + 20, htfCurrentValidLow,
+    tf2CurrentLowLabel := label.new(bar_index + 20, tf2CurrentValidLow,
                                      text=labelText,
                                      style=label.style_label_left,
                                      color=labelColor,
                                      textcolor=color.white,
                                      size=size.small)
 
-// HTF2 (Trading Range) labels - black with white text
-if htf2Enabled and htf2Initialized and not na(htf2CurrentValidHigh) and htf2MostRecentHighIndex >= 0 and htf2MostRecentHighIndex < array.size(htf2Highs)
+// TF3 (Trading Range) labels - black with white text
+if tf3Enabled and tf3Initialized and not na(tf3CurrentValidHigh) and tf3MostRecentHighIndex >= 0 and tf3MostRecentHighIndex < array.size(tf3Highs)
     // Delete old label
-    label.delete(htf2CurrentHighLabel)
+    label.delete(tf3CurrentHighLabel)
 
-    highLevel = array.get(htf2Highs, htf2MostRecentHighIndex)
+    highLevel = array.get(tf3Highs, tf3MostRecentHighIndex)
     string labelText = na
 
     if highLevel.levelType == "broken"
-        labelText := htf2Timeframe + " Broken High"
+        labelText := tf3Timeframe + " Broken High"
     else if highLevel.levelType == "weak"
-        labelText := htf2Timeframe + " Weak High"
+        labelText := tf3Timeframe + " Weak High"
     else if highLevel.levelType == "swept"
-        labelText := htf2Timeframe + " Swept High"
+        labelText := tf3Timeframe + " Swept High"
     else
-        labelText := htf2Timeframe + " Strong High"
+        labelText := tf3Timeframe + " Strong High"
 
-    htf2CurrentHighLabel := label.new(bar_index + 5, htf2CurrentValidHigh,
+    tf3CurrentHighLabel := label.new(bar_index + 5, tf3CurrentValidHigh,
                                       text=labelText,
                                       style=label.style_label_down,
                                       color=color.black,
                                       textcolor=color.white,
                                       size=size.normal)
 
-if htf2Enabled and htf2Initialized and not na(htf2CurrentValidLow) and htf2MostRecentLowIndex >= 0 and htf2MostRecentLowIndex < array.size(htf2Lows)
+if tf3Enabled and tf3Initialized and not na(tf3CurrentValidLow) and tf3MostRecentLowIndex >= 0 and tf3MostRecentLowIndex < array.size(tf3Lows)
     // Delete old label
-    label.delete(htf2CurrentLowLabel)
+    label.delete(tf3CurrentLowLabel)
 
-    lowLevel = array.get(htf2Lows, htf2MostRecentLowIndex)
+    lowLevel = array.get(tf3Lows, tf3MostRecentLowIndex)
     string labelText = na
 
     if lowLevel.levelType == "broken"
-        labelText := htf2Timeframe + " Broken Low"
+        labelText := tf3Timeframe + " Broken Low"
     else if lowLevel.levelType == "weak"
-        labelText := htf2Timeframe + " Weak Low"
+        labelText := tf3Timeframe + " Weak Low"
     else if lowLevel.levelType == "swept"
-        labelText := htf2Timeframe + " Swept Low"
+        labelText := tf3Timeframe + " Swept Low"
     else
-        labelText := htf2Timeframe + " Strong Low"
+        labelText := tf3Timeframe + " Strong Low"
 
-    htf2CurrentLowLabel := label.new(bar_index + 5, htf2CurrentValidLow,
+    tf3CurrentLowLabel := label.new(bar_index + 5, tf3CurrentValidLow,
                                      text=labelText,
                                      style=label.style_label_up,
                                      color=color.black,
@@ -2564,15 +2564,15 @@ if htf2Enabled and htf2Initialized and not na(htf2CurrentValidLow) and htf2MostR
                                      size=size.normal)
 
 // Nearest unbroken level labels (structure boundaries)
-// CTF nearest unbroken high
+// TF1 nearest unbroken high
 if nearestUnbrokenHighIndex >= 0 and nearestUnbrokenHighIndex < array.size(highs) and nearestUnbrokenHighIndex != mostRecentHighIndex
     if not na(nearestUnbrokenHighLabel)
         label.delete(nearestUnbrokenHighLabel)
 
     highLevel = array.get(highs, nearestUnbrokenHighIndex)
-    string labelText = ctfDisplayTF + " Unbroken High"
+    string labelText = tf1DisplayTF + " Unbroken High"
     if highLevel.levelType == "swept"
-        labelText := ctfDisplayTF + " Swept High (Unbroken)"
+        labelText := tf1DisplayTF + " Swept High (Unbroken)"
 
     nearestUnbrokenHighLabel := label.new(bar_index + 5, highLevel.price,
                                           text=labelText,
@@ -2585,15 +2585,15 @@ else
         label.delete(nearestUnbrokenHighLabel)
         nearestUnbrokenHighLabel := na
 
-// CTF nearest unbroken low
+// TF1 nearest unbroken low
 if nearestUnbrokenLowIndex >= 0 and nearestUnbrokenLowIndex < array.size(lows) and nearestUnbrokenLowIndex != mostRecentLowIndex
     if not na(nearestUnbrokenLowLabel)
         label.delete(nearestUnbrokenLowLabel)
 
     lowLevel = array.get(lows, nearestUnbrokenLowIndex)
-    string labelText = ctfDisplayTF + " Unbroken Low"
+    string labelText = tf1DisplayTF + " Unbroken Low"
     if lowLevel.levelType == "swept"
-        labelText := ctfDisplayTF + " Swept Low (Unbroken)"
+        labelText := tf1DisplayTF + " Swept Low (Unbroken)"
 
     nearestUnbrokenLowLabel := label.new(bar_index + 5, lowLevel.price,
                                          text=labelText,
@@ -2606,89 +2606,89 @@ else
         label.delete(nearestUnbrokenLowLabel)
         nearestUnbrokenLowLabel := na
 
-// HTF nearest unbroken high
-if htfEnabled and htfNearestUnbrokenHighIndex >= 0 and htfNearestUnbrokenHighIndex < array.size(htfHighs) and htfNearestUnbrokenHighIndex != htfMostRecentHighIndex
-    if not na(htfNearestUnbrokenHighLabel)
-        label.delete(htfNearestUnbrokenHighLabel)
+// TF2 nearest unbroken high
+if tf2Enabled and tf2NearestUnbrokenHighIndex >= 0 and tf2NearestUnbrokenHighIndex < array.size(tf2Highs) and tf2NearestUnbrokenHighIndex != tf2MostRecentHighIndex
+    if not na(tf2NearestUnbrokenHighLabel)
+        label.delete(tf2NearestUnbrokenHighLabel)
 
-    highLevel = array.get(htfHighs, htfNearestUnbrokenHighIndex)
-    string labelText = htfTimeframe + " Unbroken High"
+    highLevel = array.get(tf2Highs, tf2NearestUnbrokenHighIndex)
+    string labelText = tf2Timeframe + " Unbroken High"
     if highLevel.levelType == "swept"
-        labelText := htfTimeframe + " Swept High (Unbroken)"
+        labelText := tf2Timeframe + " Swept High (Unbroken)"
 
-    htfNearestUnbrokenHighLabel := label.new(bar_index + 20, highLevel.price,
+    tf2NearestUnbrokenHighLabel := label.new(bar_index + 20, highLevel.price,
                                               text=labelText,
                                               style=label.style_label_left,
-                                              color=color.new(htfHighColor, 50),
+                                              color=color.new(tf2HighColor, 50),
                                               textcolor=color.white,
                                               size=size.small)
 else
-    if not na(htfNearestUnbrokenHighLabel)
-        label.delete(htfNearestUnbrokenHighLabel)
-        htfNearestUnbrokenHighLabel := na
+    if not na(tf2NearestUnbrokenHighLabel)
+        label.delete(tf2NearestUnbrokenHighLabel)
+        tf2NearestUnbrokenHighLabel := na
 
-// HTF nearest unbroken low
-if htfEnabled and htfNearestUnbrokenLowIndex >= 0 and htfNearestUnbrokenLowIndex < array.size(htfLows) and htfNearestUnbrokenLowIndex != htfMostRecentLowIndex
-    if not na(htfNearestUnbrokenLowLabel)
-        label.delete(htfNearestUnbrokenLowLabel)
+// TF2 nearest unbroken low
+if tf2Enabled and tf2NearestUnbrokenLowIndex >= 0 and tf2NearestUnbrokenLowIndex < array.size(tf2Lows) and tf2NearestUnbrokenLowIndex != tf2MostRecentLowIndex
+    if not na(tf2NearestUnbrokenLowLabel)
+        label.delete(tf2NearestUnbrokenLowLabel)
 
-    lowLevel = array.get(htfLows, htfNearestUnbrokenLowIndex)
-    string labelText = htfTimeframe + " Unbroken Low"
+    lowLevel = array.get(tf2Lows, tf2NearestUnbrokenLowIndex)
+    string labelText = tf2Timeframe + " Unbroken Low"
     if lowLevel.levelType == "swept"
-        labelText := htfTimeframe + " Swept Low (Unbroken)"
+        labelText := tf2Timeframe + " Swept Low (Unbroken)"
 
-    htfNearestUnbrokenLowLabel := label.new(bar_index + 20, lowLevel.price,
+    tf2NearestUnbrokenLowLabel := label.new(bar_index + 20, lowLevel.price,
                                              text=labelText,
                                              style=label.style_label_left,
-                                             color=color.new(htfLowColor, 50),
+                                             color=color.new(tf2LowColor, 50),
                                              textcolor=color.white,
                                              size=size.small)
 else
-    if not na(htfNearestUnbrokenLowLabel)
-        label.delete(htfNearestUnbrokenLowLabel)
-        htfNearestUnbrokenLowLabel := na
+    if not na(tf2NearestUnbrokenLowLabel)
+        label.delete(tf2NearestUnbrokenLowLabel)
+        tf2NearestUnbrokenLowLabel := na
 
-// HTF2 nearest unbroken high
-if htf2Enabled and htf2NearestUnbrokenHighIndex >= 0 and htf2NearestUnbrokenHighIndex < array.size(htf2Highs) and htf2NearestUnbrokenHighIndex != htf2MostRecentHighIndex
-    if not na(htf2NearestUnbrokenHighLabel)
-        label.delete(htf2NearestUnbrokenHighLabel)
+// TF3 nearest unbroken high
+if tf3Enabled and tf3NearestUnbrokenHighIndex >= 0 and tf3NearestUnbrokenHighIndex < array.size(tf3Highs) and tf3NearestUnbrokenHighIndex != tf3MostRecentHighIndex
+    if not na(tf3NearestUnbrokenHighLabel)
+        label.delete(tf3NearestUnbrokenHighLabel)
 
-    highLevel = array.get(htf2Highs, htf2NearestUnbrokenHighIndex)
-    string labelText = htf2Timeframe + " Unbroken High"
+    highLevel = array.get(tf3Highs, tf3NearestUnbrokenHighIndex)
+    string labelText = tf3Timeframe + " Unbroken High"
     if highLevel.levelType == "swept"
-        labelText := htf2Timeframe + " Swept High (Unbroken)"
+        labelText := tf3Timeframe + " Swept High (Unbroken)"
 
-    htf2NearestUnbrokenHighLabel := label.new(bar_index + 35, highLevel.price,
+    tf3NearestUnbrokenHighLabel := label.new(bar_index + 35, highLevel.price,
                                                text=labelText,
                                                style=label.style_label_down,
-                                               color=color.new(htf2HighColor, 50),
+                                               color=color.new(tf3HighColor, 50),
                                                textcolor=color.white,
                                                size=size.small)
 else
-    if not na(htf2NearestUnbrokenHighLabel)
-        label.delete(htf2NearestUnbrokenHighLabel)
-        htf2NearestUnbrokenHighLabel := na
+    if not na(tf3NearestUnbrokenHighLabel)
+        label.delete(tf3NearestUnbrokenHighLabel)
+        tf3NearestUnbrokenHighLabel := na
 
-// HTF2 nearest unbroken low
-if htf2Enabled and htf2NearestUnbrokenLowIndex >= 0 and htf2NearestUnbrokenLowIndex < array.size(htf2Lows) and htf2NearestUnbrokenLowIndex != htf2MostRecentLowIndex
-    if not na(htf2NearestUnbrokenLowLabel)
-        label.delete(htf2NearestUnbrokenLowLabel)
+// TF3 nearest unbroken low
+if tf3Enabled and tf3NearestUnbrokenLowIndex >= 0 and tf3NearestUnbrokenLowIndex < array.size(tf3Lows) and tf3NearestUnbrokenLowIndex != tf3MostRecentLowIndex
+    if not na(tf3NearestUnbrokenLowLabel)
+        label.delete(tf3NearestUnbrokenLowLabel)
 
-    lowLevel = array.get(htf2Lows, htf2NearestUnbrokenLowIndex)
-    string labelText = htf2Timeframe + " Unbroken Low"
+    lowLevel = array.get(tf3Lows, tf3NearestUnbrokenLowIndex)
+    string labelText = tf3Timeframe + " Unbroken Low"
     if lowLevel.levelType == "swept"
-        labelText := htf2Timeframe + " Swept Low (Unbroken)"
+        labelText := tf3Timeframe + " Swept Low (Unbroken)"
 
-    htf2NearestUnbrokenLowLabel := label.new(bar_index + 35, lowLevel.price,
+    tf3NearestUnbrokenLowLabel := label.new(bar_index + 35, lowLevel.price,
                                               text=labelText,
                                               style=label.style_label_up,
-                                              color=color.new(htf2LowColor, 50),
+                                              color=color.new(tf3LowColor, 50),
                                               textcolor=color.white,
                                               size=size.small)
 else
-    if not na(htf2NearestUnbrokenLowLabel)
-        label.delete(htf2NearestUnbrokenLowLabel)
-        htf2NearestUnbrokenLowLabel := na
+    if not na(tf3NearestUnbrokenLowLabel)
+        label.delete(tf3NearestUnbrokenLowLabel)
+        tf3NearestUnbrokenLowLabel := na
 
 // Swept level labels - clear all
 for lbl in sweptHighLabels
@@ -2697,12 +2697,12 @@ array.clear(sweptHighLabels)
 for lbl in sweptLowLabels
     label.delete(lbl)
 array.clear(sweptLowLabels)
-for lbl in htfSweptHighLabels
+for lbl in tf2SweptHighLabels
     label.delete(lbl)
-array.clear(htfSweptHighLabels)
-for lbl in htfSweptLowLabels
+array.clear(tf2SweptHighLabels)
+for lbl in tf2SweptLowLabels
     label.delete(lbl)
-array.clear(htfSweptLowLabels)
+array.clear(tf2SweptLowLabels)
 
 // ============================================================================
 // ZONE ENTRY DETECTION AND BOS COUNTING FOR ALERTS
@@ -2719,99 +2719,99 @@ findZoneContainingPrice(array<Zone> zones) =>
                 break
     result
 
-// Check zone entries and set flags (HTF and HTF2 only - CTF zones less useful for alerts)
-int htfDemandIdx = htfEnabled ? findZoneContainingPrice(demandZones) : -1
-int htfSupplyIdx = htfEnabled ? findZoneContainingPrice(supplyZones) : -1
-int htf2DemandIdx = htf2Enabled ? findZoneContainingPrice(htf2DemandZones) : -1
-int htf2SupplyIdx = htf2Enabled ? findZoneContainingPrice(htf2SupplyZones) : -1
+// Check zone entries and set flags (TF2 and TF3 only - TF1 zones less useful for alerts)
+int tf2DemandIdx = tf2Enabled ? findZoneContainingPrice(demandZones) : -1
+int tf2SupplyIdx = tf2Enabled ? findZoneContainingPrice(supplyZones) : -1
+int tf3DemandIdx = tf3Enabled ? findZoneContainingPrice(tf3DemandZones) : -1
+int tf3SupplyIdx = tf3Enabled ? findZoneContainingPrice(tf3SupplyZones) : -1
 
-// Zone entry tracking - HTF demand
-if htfDemandIdx >= 0 and not inHtfDemandZone
-    inHtfDemandZone := true
-    activeHtfDemandZoneIdx := htfDemandIdx
-    ctfBullishBosCountSinceHtfDemand := 0
-    htfDemandEntryFlag := true
+// Zone entry tracking - TF2 demand
+if tf2DemandIdx >= 0 and not inTf2DemandZone
+    inTf2DemandZone := true
+    activeTf2DemandZoneIdx := tf2DemandIdx
+    tf1BullishBosCountSinceTf2Demand := 0
+    tf2DemandEntryFlag := true
 
-// Zone entry tracking - HTF supply
-if htfSupplyIdx >= 0 and not inHtfSupplyZone
-    inHtfSupplyZone := true
-    activeHtfSupplyZoneIdx := htfSupplyIdx
-    ctfBearishBosCountSinceHtfSupply := 0
-    htfSupplyEntryFlag := true
+// Zone entry tracking - TF2 supply
+if tf2SupplyIdx >= 0 and not inTf2SupplyZone
+    inTf2SupplyZone := true
+    activeTf2SupplyZoneIdx := tf2SupplyIdx
+    tf1BearishBosCountSinceTf2Supply := 0
+    tf2SupplyEntryFlag := true
 
-// Zone entry tracking - HTF2 demand
-if htf2DemandIdx >= 0 and not inHtf2DemandZone
-    inHtf2DemandZone := true
-    activeHtf2DemandZoneIdx := htf2DemandIdx
-    ctfBullishBosCountSinceHtf2Demand := 0
-    htfBullishBosCountSinceHtf2Demand := 0
-    htf2DemandEntryFlag := true
+// Zone entry tracking - TF3 demand
+if tf3DemandIdx >= 0 and not inTf3DemandZone
+    inTf3DemandZone := true
+    activeTf3DemandZoneIdx := tf3DemandIdx
+    tf1BullishBosCountSinceTf3Demand := 0
+    tf2BullishBosCountSinceTf3Demand := 0
+    tf3DemandEntryFlag := true
 
-// Zone entry tracking - HTF2 supply
-if htf2SupplyIdx >= 0 and not inHtf2SupplyZone
-    inHtf2SupplyZone := true
-    activeHtf2SupplyZoneIdx := htf2SupplyIdx
-    ctfBearishBosCountSinceHtf2Supply := 0
-    htfBearishBosCountSinceHtf2Supply := 0
-    htf2SupplyEntryFlag := true
+// Zone entry tracking - TF3 supply
+if tf3SupplyIdx >= 0 and not inTf3SupplyZone
+    inTf3SupplyZone := true
+    activeTf3SupplyZoneIdx := tf3SupplyIdx
+    tf1BearishBosCountSinceTf3Supply := 0
+    tf2BearishBosCountSinceTf3Supply := 0
+    tf3SupplyEntryFlag := true
 
 // Check if active zones got broken - reset tracking
-if inHtfDemandZone and activeHtfDemandZoneIdx >= 0 and activeHtfDemandZoneIdx < array.size(demandZones)
-    if array.get(demandZones, activeHtfDemandZoneIdx).broken
-        inHtfDemandZone := false
-        activeHtfDemandZoneIdx := -1
-        ctfBullishBosCountSinceHtfDemand := 0
-if inHtfSupplyZone and activeHtfSupplyZoneIdx >= 0 and activeHtfSupplyZoneIdx < array.size(supplyZones)
-    if array.get(supplyZones, activeHtfSupplyZoneIdx).broken
-        inHtfSupplyZone := false
-        activeHtfSupplyZoneIdx := -1
-        ctfBearishBosCountSinceHtfSupply := 0
-if inHtf2DemandZone and activeHtf2DemandZoneIdx >= 0 and activeHtf2DemandZoneIdx < array.size(htf2DemandZones)
-    if array.get(htf2DemandZones, activeHtf2DemandZoneIdx).broken
-        inHtf2DemandZone := false
-        activeHtf2DemandZoneIdx := -1
-        ctfBullishBosCountSinceHtf2Demand := 0
-        htfBullishBosCountSinceHtf2Demand := 0
-if inHtf2SupplyZone and activeHtf2SupplyZoneIdx >= 0 and activeHtf2SupplyZoneIdx < array.size(htf2SupplyZones)
-    if array.get(htf2SupplyZones, activeHtf2SupplyZoneIdx).broken
-        inHtf2SupplyZone := false
-        activeHtf2SupplyZoneIdx := -1
-        ctfBearishBosCountSinceHtf2Supply := 0
-        htfBearishBosCountSinceHtf2Supply := 0
+if inTf2DemandZone and activeTf2DemandZoneIdx >= 0 and activeTf2DemandZoneIdx < array.size(demandZones)
+    if array.get(demandZones, activeTf2DemandZoneIdx).broken
+        inTf2DemandZone := false
+        activeTf2DemandZoneIdx := -1
+        tf1BullishBosCountSinceTf2Demand := 0
+if inTf2SupplyZone and activeTf2SupplyZoneIdx >= 0 and activeTf2SupplyZoneIdx < array.size(supplyZones)
+    if array.get(supplyZones, activeTf2SupplyZoneIdx).broken
+        inTf2SupplyZone := false
+        activeTf2SupplyZoneIdx := -1
+        tf1BearishBosCountSinceTf2Supply := 0
+if inTf3DemandZone and activeTf3DemandZoneIdx >= 0 and activeTf3DemandZoneIdx < array.size(tf3DemandZones)
+    if array.get(tf3DemandZones, activeTf3DemandZoneIdx).broken
+        inTf3DemandZone := false
+        activeTf3DemandZoneIdx := -1
+        tf1BullishBosCountSinceTf3Demand := 0
+        tf2BullishBosCountSinceTf3Demand := 0
+if inTf3SupplyZone and activeTf3SupplyZoneIdx >= 0 and activeTf3SupplyZoneIdx < array.size(tf3SupplyZones)
+    if array.get(tf3SupplyZones, activeTf3SupplyZoneIdx).broken
+        inTf3SupplyZone := false
+        activeTf3SupplyZoneIdx := -1
+        tf1BearishBosCountSinceTf3Supply := 0
+        tf2BearishBosCountSinceTf3Supply := 0
 
 // Count BOS events after zone entry
-if inHtfDemandZone and ctfBullishBosFlag
-    ctfBullishBosCountSinceHtfDemand += 1
-    firstCtfBullishBosAfterHtfDemandFlag := ctfBullishBosCountSinceHtfDemand == 1
-    secondCtfBullishBosAfterHtfDemandFlag := ctfBullishBosCountSinceHtfDemand == 2
-if inHtfSupplyZone and ctfBearishBosFlag
-    ctfBearishBosCountSinceHtfSupply += 1
-    firstCtfBearishBosAfterHtfSupplyFlag := ctfBearishBosCountSinceHtfSupply == 1
-    secondCtfBearishBosAfterHtfSupplyFlag := ctfBearishBosCountSinceHtfSupply == 2
-if inHtf2DemandZone and ctfBullishBosFlag
-    ctfBullishBosCountSinceHtf2Demand += 1
-    firstCtfBullishBosAfterHtf2DemandFlag := ctfBullishBosCountSinceHtf2Demand == 1
-    secondCtfBullishBosAfterHtf2DemandFlag := ctfBullishBosCountSinceHtf2Demand == 2
-if inHtf2SupplyZone and ctfBearishBosFlag
-    ctfBearishBosCountSinceHtf2Supply += 1
-    firstCtfBearishBosAfterHtf2SupplyFlag := ctfBearishBosCountSinceHtf2Supply == 1
-    secondCtfBearishBosAfterHtf2SupplyFlag := ctfBearishBosCountSinceHtf2Supply == 2
-if inHtf2DemandZone and htfBullishBosFlag
-    htfBullishBosCountSinceHtf2Demand += 1
-    firstHtfBullishBosAfterHtf2DemandFlag := htfBullishBosCountSinceHtf2Demand == 1
-if inHtf2SupplyZone and htfBearishBosFlag
-    htfBearishBosCountSinceHtf2Supply += 1
-    firstHtfBearishBosAfterHtf2SupplyFlag := htfBearishBosCountSinceHtf2Supply == 1
+if inTf2DemandZone and tf1BullishBosFlag
+    tf1BullishBosCountSinceTf2Demand += 1
+    firstTf1BullishBosAfterTf2DemandFlag := tf1BullishBosCountSinceTf2Demand == 1
+    secondTf1BullishBosAfterTf2DemandFlag := tf1BullishBosCountSinceTf2Demand == 2
+if inTf2SupplyZone and tf1BearishBosFlag
+    tf1BearishBosCountSinceTf2Supply += 1
+    firstTf1BearishBosAfterTf2SupplyFlag := tf1BearishBosCountSinceTf2Supply == 1
+    secondTf1BearishBosAfterTf2SupplyFlag := tf1BearishBosCountSinceTf2Supply == 2
+if inTf3DemandZone and tf1BullishBosFlag
+    tf1BullishBosCountSinceTf3Demand += 1
+    firstTf1BullishBosAfterTf3DemandFlag := tf1BullishBosCountSinceTf3Demand == 1
+    secondTf1BullishBosAfterTf3DemandFlag := tf1BullishBosCountSinceTf3Demand == 2
+if inTf3SupplyZone and tf1BearishBosFlag
+    tf1BearishBosCountSinceTf3Supply += 1
+    firstTf1BearishBosAfterTf3SupplyFlag := tf1BearishBosCountSinceTf3Supply == 1
+    secondTf1BearishBosAfterTf3SupplyFlag := tf1BearishBosCountSinceTf3Supply == 2
+if inTf3DemandZone and tf2BullishBosFlag
+    tf2BullishBosCountSinceTf3Demand += 1
+    firstTf2BullishBosAfterTf3DemandFlag := tf2BullishBosCountSinceTf3Demand == 1
+if inTf3SupplyZone and tf2BearishBosFlag
+    tf2BearishBosCountSinceTf3Supply += 1
+    firstTf2BearishBosAfterTf3SupplyFlag := tf2BearishBosCountSinceTf3Supply == 1
 
 // ============================================================================
 // ALERT CONDITIONS
 // ============================================================================
 
-// HTF Alert Conditions (legacy)
-alertcondition(htfBosFlag, title="HTF BOS", message="HTF Break of Structure occurred on {{ticker}}")
-alertcondition(htfBosLtfBosFlag, title="HTF BOS + LTF BOS Same Direction", message="HTF and LTF both broke structure in same direction on {{ticker}}")
-alertcondition(htfSweptFlag, title="HTF Swept", message="HTF level swept on {{ticker}}")
-alertcondition(htfSweptLtfBosFlag, title="HTF Swept + LTF BOS Reversal", message="HTF level swept followed by LTF reversal BOS on {{ticker}}")
+// TF2 Alert Conditions (legacy)
+alertcondition(tf2BosFlag, title="TF2 BOS", message="TF2 Break of Structure occurred on {{ticker}}")
+alertcondition(tf2BosLtfBosFlag, title="TF2 BOS + LTF BOS Same Direction", message="TF2 and LTF both broke structure in same direction on {{ticker}}")
+alertcondition(tf2SweptFlag, title="TF2 Swept", message="TF2 level swept on {{ticker}}")
+alertcondition(tf2SweptLtfBosFlag, title="TF2 Swept + LTF BOS Reversal", message="TF2 level swept followed by LTF reversal BOS on {{ticker}}")
 
 // Pullback Alert Conditions
 alertcondition(pullback50Flag, title="50% Pullback", message="Price touched 50% level on {{ticker}}")
@@ -2820,61 +2820,61 @@ alertcondition(pullback25Flag, title="25% Pullback (Low 50% Mark)", message="Pri
 // LTF Alert Conditions (legacy)
 alertcondition(ltfBosFlag, title="LTF BOS", message="LTF Break of Structure occurred on {{ticker}}")
 alertcondition(ltfSweptFlag, title="LTF Swept", message="LTF level swept on {{ticker}}")
-alertcondition(ltfBosAtExtremeFlag, title="LTF BOS at HTF Extreme", message="LTF BOS occurred at HTF extreme (bullish below 50% or bearish above 50%) on {{ticker}}")
+alertcondition(ltfBosAtExtremeFlag, title="LTF BOS at TF2 Extreme", message="LTF BOS occurred at TF2 extreme (bullish below 50% or bearish above 50%) on {{ticker}}")
 
 // ============================================================================
 // NEW ALERT CONDITIONS - BOS Events by Timeframe
 // ============================================================================
 
-// CTF BOS Alerts
-alertcondition(ctfBullishBosFlag, title="CTF Bullish BOS", message="CTF Bullish Break of Structure occurred on {{ticker}}")
-alertcondition(ctfBearishBosFlag, title="CTF Bearish BOS", message="CTF Bearish Break of Structure occurred on {{ticker}}")
+// TF1 BOS Alerts
+alertcondition(tf1BullishBosFlag, title="TF1 Bullish BOS", message="TF1 Bullish Break of Structure occurred on {{ticker}}")
+alertcondition(tf1BearishBosFlag, title="TF1 Bearish BOS", message="TF1 Bearish Break of Structure occurred on {{ticker}}")
 
-// HTF BOS Direction-Specific Alerts
-alertcondition(htfBullishBosFlag, title="HTF Bullish BOS", message="HTF Bullish Break of Structure occurred on {{ticker}}")
-alertcondition(htfBearishBosFlag, title="HTF Bearish BOS", message="HTF Bearish Break of Structure occurred on {{ticker}}")
+// TF2 BOS Direction-Specific Alerts
+alertcondition(tf2BullishBosFlag, title="TF2 Bullish BOS", message="TF2 Bullish Break of Structure occurred on {{ticker}}")
+alertcondition(tf2BearishBosFlag, title="TF2 Bearish BOS", message="TF2 Bearish Break of Structure occurred on {{ticker}}")
 
-// HTF2 BOS Alerts
-alertcondition(htf2BullishBosFlag, title="HTF2 Bullish BOS", message="HTF2 Bullish Break of Structure occurred on {{ticker}}")
-alertcondition(htf2BearishBosFlag, title="HTF2 Bearish BOS", message="HTF2 Bearish Break of Structure occurred on {{ticker}}")
+// TF3 BOS Alerts
+alertcondition(tf3BullishBosFlag, title="TF3 Bullish BOS", message="TF3 Bullish Break of Structure occurred on {{ticker}}")
+alertcondition(tf3BearishBosFlag, title="TF3 Bearish BOS", message="TF3 Bearish Break of Structure occurred on {{ticker}}")
 
 // ============================================================================
-// NEW ALERT CONDITIONS - Zone Entry (HTF and HTF2 only)
+// NEW ALERT CONDITIONS - Zone Entry (TF2 and TF3 only)
 // ============================================================================
 
-// HTF Zone Entry Alerts
-alertcondition(htfDemandEntryFlag, title="HTF Demand Zone Entry", message="Price entered HTF Demand Zone on {{ticker}}")
-alertcondition(htfSupplyEntryFlag, title="HTF Supply Zone Entry", message="Price entered HTF Supply Zone on {{ticker}}")
+// TF2 Zone Entry Alerts
+alertcondition(tf2DemandEntryFlag, title="TF2 Demand Zone Entry", message="Price entered TF2 Demand Zone on {{ticker}}")
+alertcondition(tf2SupplyEntryFlag, title="TF2 Supply Zone Entry", message="Price entered TF2 Supply Zone on {{ticker}}")
 
-// HTF2 Zone Entry Alerts
-alertcondition(htf2DemandEntryFlag, title="HTF2 Demand Zone Entry", message="Price entered HTF2 Demand Zone on {{ticker}}")
-alertcondition(htf2SupplyEntryFlag, title="HTF2 Supply Zone Entry", message="Price entered HTF2 Supply Zone on {{ticker}}")
+// TF3 Zone Entry Alerts
+alertcondition(tf3DemandEntryFlag, title="TF3 Demand Zone Entry", message="Price entered TF3 Demand Zone on {{ticker}}")
+alertcondition(tf3SupplyEntryFlag, title="TF3 Supply Zone Entry", message="Price entered TF3 Supply Zone on {{ticker}}")
 
 // ============================================================================
 // NEW ALERT CONDITIONS - BOS After Zone Entry
 // ============================================================================
 
-// CTF BOS after entering HTF zone (bullish for demand, bearish for supply)
-alertcondition(firstCtfBullishBosAfterHtfDemandFlag, title="1st CTF Bull BOS in HTF Demand", message="First CTF Bullish BOS after entering HTF Demand Zone on {{ticker}}")
-alertcondition(secondCtfBullishBosAfterHtfDemandFlag, title="2nd CTF Bull BOS in HTF Demand", message="Second CTF Bullish BOS after entering HTF Demand Zone on {{ticker}}")
-alertcondition(firstCtfBearishBosAfterHtfSupplyFlag, title="1st CTF Bear BOS in HTF Supply", message="First CTF Bearish BOS after entering HTF Supply Zone on {{ticker}}")
-alertcondition(secondCtfBearishBosAfterHtfSupplyFlag, title="2nd CTF Bear BOS in HTF Supply", message="Second CTF Bearish BOS after entering HTF Supply Zone on {{ticker}}")
+// TF1 BOS after entering TF2 zone (bullish for demand, bearish for supply)
+alertcondition(firstTf1BullishBosAfterTf2DemandFlag, title="1st TF1 Bull BOS in TF2 Demand", message="First TF1 Bullish BOS after entering TF2 Demand Zone on {{ticker}}")
+alertcondition(secondTf1BullishBosAfterTf2DemandFlag, title="2nd TF1 Bull BOS in TF2 Demand", message="Second TF1 Bullish BOS after entering TF2 Demand Zone on {{ticker}}")
+alertcondition(firstTf1BearishBosAfterTf2SupplyFlag, title="1st TF1 Bear BOS in TF2 Supply", message="First TF1 Bearish BOS after entering TF2 Supply Zone on {{ticker}}")
+alertcondition(secondTf1BearishBosAfterTf2SupplyFlag, title="2nd TF1 Bear BOS in TF2 Supply", message="Second TF1 Bearish BOS after entering TF2 Supply Zone on {{ticker}}")
 
-// CTF BOS after entering HTF2 zone
-alertcondition(firstCtfBullishBosAfterHtf2DemandFlag, title="1st CTF Bull BOS in HTF2 Demand", message="First CTF Bullish BOS after entering HTF2 Demand Zone on {{ticker}}")
-alertcondition(secondCtfBullishBosAfterHtf2DemandFlag, title="2nd CTF Bull BOS in HTF2 Demand", message="Second CTF Bullish BOS after entering HTF2 Demand Zone on {{ticker}}")
-alertcondition(firstCtfBearishBosAfterHtf2SupplyFlag, title="1st CTF Bear BOS in HTF2 Supply", message="First CTF Bearish BOS after entering HTF2 Supply Zone on {{ticker}}")
-alertcondition(secondCtfBearishBosAfterHtf2SupplyFlag, title="2nd CTF Bear BOS in HTF2 Supply", message="Second CTF Bearish BOS after entering HTF2 Supply Zone on {{ticker}}")
+// TF1 BOS after entering TF3 zone
+alertcondition(firstTf1BullishBosAfterTf3DemandFlag, title="1st TF1 Bull BOS in TF3 Demand", message="First TF1 Bullish BOS after entering TF3 Demand Zone on {{ticker}}")
+alertcondition(secondTf1BullishBosAfterTf3DemandFlag, title="2nd TF1 Bull BOS in TF3 Demand", message="Second TF1 Bullish BOS after entering TF3 Demand Zone on {{ticker}}")
+alertcondition(firstTf1BearishBosAfterTf3SupplyFlag, title="1st TF1 Bear BOS in TF3 Supply", message="First TF1 Bearish BOS after entering TF3 Supply Zone on {{ticker}}")
+alertcondition(secondTf1BearishBosAfterTf3SupplyFlag, title="2nd TF1 Bear BOS in TF3 Supply", message="Second TF1 Bearish BOS after entering TF3 Supply Zone on {{ticker}}")
 
-// HTF BOS after entering HTF2 zone
-alertcondition(firstHtfBullishBosAfterHtf2DemandFlag, title="1st HTF Bull BOS in HTF2 Demand", message="First HTF Bullish BOS after entering HTF2 Demand Zone on {{ticker}}")
-alertcondition(firstHtfBearishBosAfterHtf2SupplyFlag, title="1st HTF Bear BOS in HTF2 Supply", message="First HTF Bearish BOS after entering HTF2 Supply Zone on {{ticker}}")
+// TF2 BOS after entering TF3 zone
+alertcondition(firstTf2BullishBosAfterTf3DemandFlag, title="1st TF2 Bull BOS in TF3 Demand", message="First TF2 Bullish BOS after entering TF3 Demand Zone on {{ticker}}")
+alertcondition(firstTf2BearishBosAfterTf3SupplyFlag, title="1st TF2 Bear BOS in TF3 Supply", message="First TF2 Bearish BOS after entering TF3 Supply Zone on {{ticker}}")
 
 // Reset all alert flags at end of bar
-htfBosFlag := false
-htfBosLtfBosFlag := false
-htfSweptFlag := false
-htfSweptLtfBosFlag := false
+tf2BosFlag := false
+tf2BosLtfBosFlag := false
+tf2SweptFlag := false
+tf2SweptLtfBosFlag := false
 pullback50Flag := false
 pullback25Flag := false
 ltfBosFlag := false
@@ -2882,33 +2882,33 @@ ltfSweptFlag := false
 ltfBosAtExtremeFlag := false
 
 // Reset new BOS alert flags
-ctfBullishBosFlag := false
-ctfBearishBosFlag := false
-htfBullishBosFlag := false
-htfBearishBosFlag := false
-htf2BullishBosFlag := false
-htf2BearishBosFlag := false
+tf1BullishBosFlag := false
+tf1BearishBosFlag := false
+tf2BullishBosFlag := false
+tf2BearishBosFlag := false
+tf3BullishBosFlag := false
+tf3BearishBosFlag := false
 
-// Reset zone entry alert flags (HTF and HTF2 only)
-htfDemandEntryFlag := false
-htfSupplyEntryFlag := false
-htf2DemandEntryFlag := false
-htf2SupplyEntryFlag := false
+// Reset zone entry alert flags (TF2 and TF3 only)
+tf2DemandEntryFlag := false
+tf2SupplyEntryFlag := false
+tf3DemandEntryFlag := false
+tf3SupplyEntryFlag := false
 
 // Reset BOS after zone entry alert flags
-// CTF BOS after HTF zone entry
-firstCtfBullishBosAfterHtfDemandFlag := false
-firstCtfBearishBosAfterHtfSupplyFlag := false
-secondCtfBullishBosAfterHtfDemandFlag := false
-secondCtfBearishBosAfterHtfSupplyFlag := false
-// CTF BOS after HTF2 zone entry
-firstCtfBullishBosAfterHtf2DemandFlag := false
-firstCtfBearishBosAfterHtf2SupplyFlag := false
-secondCtfBullishBosAfterHtf2DemandFlag := false
-secondCtfBearishBosAfterHtf2SupplyFlag := false
-// HTF BOS after HTF2 zone entry
-firstHtfBullishBosAfterHtf2DemandFlag := false
-firstHtfBearishBosAfterHtf2SupplyFlag := false
+// TF1 BOS after TF2 zone entry
+firstTf1BullishBosAfterTf2DemandFlag := false
+firstTf1BearishBosAfterTf2SupplyFlag := false
+secondTf1BullishBosAfterTf2DemandFlag := false
+secondTf1BearishBosAfterTf2SupplyFlag := false
+// TF1 BOS after TF3 zone entry
+firstTf1BullishBosAfterTf3DemandFlag := false
+firstTf1BearishBosAfterTf3SupplyFlag := false
+secondTf1BullishBosAfterTf3DemandFlag := false
+secondTf1BearishBosAfterTf3SupplyFlag := false
+// TF2 BOS after TF3 zone entry
+firstTf2BullishBosAfterTf3DemandFlag := false
+firstTf2BearishBosAfterTf3SupplyFlag := false
 
 // ============================================================================
 // ZONE RENDERING - Only on last bar for performance
@@ -2917,8 +2917,8 @@ firstHtfBearishBosAfterHtf2SupplyFlag := false
 // Render zones only on the last bar
 var int demandZonesRendered = 0
 var int supplyZonesRendered = 0
-var int htfDemandZonesRendered = 0
-var int htfSupplyZonesRendered = 0
+var int tf2DemandZonesRendered = 0
+var int tf2SupplyZonesRendered = 0
 var int demandSkipped = 0
 var int supplySkipped = 0
 var array<int> demandZoneTimes = array.new<int>()
@@ -2954,25 +2954,25 @@ if barstate.islast
         bx.delete()
 
     // Render all zone types
-    int ctfDemandRendered = 0
-    int ctfSupplyRendered = 0
-    int ctfDemandIter = 0
-    int ctfSupplyIter = 0
-    if showCtfZones
-        [r1, i1, s1] = renderZones(ctfDemandZones, ctfDemandZoneColor, ctfDemandZoneBorderColor, 1, maxZonesPerSide, showBrokenCtfZones)
-        ctfDemandRendered := r1
-        ctfDemandIter := i1
-        [r2, i2, s2] = renderZones(ctfSupplyZones, ctfSupplyZoneColor, ctfSupplyZoneBorderColor, 1, maxZonesPerSide, showBrokenCtfZones)
-        ctfSupplyRendered := r2
-        ctfSupplyIter := i2
-    if showHtfZones
-        [r3, i3, s3] = renderZones(demandZones, demandZoneColor, demandZoneBorderColorInput, 1, maxZonesPerSide, showBrokenHtfZones)
+    int tf1DemandRendered = 0
+    int tf1SupplyRendered = 0
+    int tf1DemandIter = 0
+    int tf1SupplyIter = 0
+    if showTf1Zones
+        [r1, i1, s1] = renderZones(tf1DemandZones, tf1DemandZoneColor, tf1DemandZoneBorderColor, 1, maxZonesPerSide, showBrokenTf1Zones)
+        tf1DemandRendered := r1
+        tf1DemandIter := i1
+        [r2, i2, s2] = renderZones(tf1SupplyZones, tf1SupplyZoneColor, tf1SupplyZoneBorderColor, 1, maxZonesPerSide, showBrokenTf1Zones)
+        tf1SupplyRendered := r2
+        tf1SupplyIter := i2
+    if showTf2Zones
+        [r3, i3, s3] = renderZones(demandZones, demandZoneColor, demandZoneBorderColorInput, 1, maxZonesPerSide, showBrokenTf2Zones)
         demandZonesRendered := r3
-        [r4, i4, s4] = renderZones(supplyZones, supplyZoneColor, supplyZoneBorderColorInput, 1, maxZonesPerSide, showBrokenHtfZones)
+        [r4, i4, s4] = renderZones(supplyZones, supplyZoneColor, supplyZoneBorderColorInput, 1, maxZonesPerSide, showBrokenTf2Zones)
         supplyZonesRendered := r4
-    if showHtf2Zones and htf2Enabled
-        renderZones(htf2DemandZones, htf2DemandZoneColor, htf2DemandZoneBorderColor, 2, maxZonesPerSide, showBrokenHtf2Zones)
-        renderZones(htf2SupplyZones, htf2SupplyZoneColor, htf2SupplyZoneBorderColor, 2, maxZonesPerSide, showBrokenHtf2Zones)
+    if showTf3Zones and tf3Enabled
+        renderZones(tf3DemandZones, tf3DemandZoneColor, tf3DemandZoneBorderColor, 2, maxZonesPerSide, showBrokenTf3Zones)
+        renderZones(tf3SupplyZones, tf3SupplyZoneColor, tf3SupplyZoneBorderColor, 2, maxZonesPerSide, showBrokenTf3Zones)
 
     // Debug labels showing zone counts and BOS events
     if showDebugLabel
@@ -2991,56 +2991,56 @@ if barstate.islast
                 if array.get(supplyZones, i).broken
                     brokenSupply := brokenSupply + 1
 
-        // Count CTF zones with valid data
-        int ctfDemandValid = 0
-        int ctfSupplyValid = 0
-        if array.size(ctfDemandZones) > 0
-            for i = 0 to array.size(ctfDemandZones) - 1
-                z = array.get(ctfDemandZones, i)
+        // Count TF1 zones with valid data
+        int tf1DemandValid = 0
+        int tf1SupplyValid = 0
+        if array.size(tf1DemandZones) > 0
+            for i = 0 to array.size(tf1DemandZones) - 1
+                z = array.get(tf1DemandZones, i)
                 if not na(z.leftTime) and not na(z.top) and not na(z.bottom)
-                    ctfDemandValid := ctfDemandValid + 1
-        if array.size(ctfSupplyZones) > 0
-            for i = 0 to array.size(ctfSupplyZones) - 1
-                z = array.get(ctfSupplyZones, i)
+                    tf1DemandValid := tf1DemandValid + 1
+        if array.size(tf1SupplyZones) > 0
+            for i = 0 to array.size(tf1SupplyZones) - 1
+                z = array.get(tf1SupplyZones, i)
                 if not na(z.leftTime) and not na(z.top) and not na(z.bottom)
-                    ctfSupplyValid := ctfSupplyValid + 1
+                    tf1SupplyValid := tf1SupplyValid + 1
 
-        // Count CTF broken zones
-        int ctfDemandBroken = 0
-        int ctfSupplyBroken = 0
-        if array.size(ctfDemandZones) > 0
-            for i = 0 to array.size(ctfDemandZones) - 1
-                if array.get(ctfDemandZones, i).broken
-                    ctfDemandBroken := ctfDemandBroken + 1
-        if array.size(ctfSupplyZones) > 0
-            for i = 0 to array.size(ctfSupplyZones) - 1
-                if array.get(ctfSupplyZones, i).broken
-                    ctfSupplyBroken := ctfSupplyBroken + 1
+        // Count TF1 broken zones
+        int tf1DemandBroken = 0
+        int tf1SupplyBroken = 0
+        if array.size(tf1DemandZones) > 0
+            for i = 0 to array.size(tf1DemandZones) - 1
+                if array.get(tf1DemandZones, i).broken
+                    tf1DemandBroken := tf1DemandBroken + 1
+        if array.size(tf1SupplyZones) > 0
+            for i = 0 to array.size(tf1SupplyZones) - 1
+                if array.get(tf1SupplyZones, i).broken
+                    tf1SupplyBroken := tf1SupplyBroken + 1
 
-        // Get info about CTF demand zones - check multiple recent ones
+        // Get info about TF1 demand zones - check multiple recent ones
         string newestZoneInfo = "none"
         int zeroHeightCount = 0
         float avgHeight = 0.0
-        if array.size(ctfDemandZones) > 0
+        if array.size(tf1DemandZones) > 0
             float totalHeight = 0.0
-            for i = 0 to array.size(ctfDemandZones) - 1
-                Zone z = array.get(ctfDemandZones, i)
+            for i = 0 to array.size(tf1DemandZones) - 1
+                Zone z = array.get(tf1DemandZones, i)
                 float h = z.top - z.bottom
                 totalHeight := totalHeight + h
                 if h < 0.0001
                     zeroHeightCount := zeroHeightCount + 1
-            avgHeight := totalHeight / array.size(ctfDemandZones)
+            avgHeight := totalHeight / array.size(tf1DemandZones)
             // Show last 3 zones
-            int lastIdx = array.size(ctfDemandZones) - 1
-            Zone z1 = array.get(ctfDemandZones, lastIdx)
+            int lastIdx = array.size(tf1DemandZones) - 1
+            Zone z1 = array.get(tf1DemandZones, lastIdx)
             newestZoneInfo := str.tostring(z1.top, "#.#####") + "/" + str.tostring(z1.bottom, "#.#####")
 
         string debugText = "ZONE DEBUG v15:\n"
         debugText := debugText + "Highs: " + str.tostring(array.size(highs)) + ", Lows: " + str.tostring(array.size(lows)) + "\n"
-        debugText := debugText + "CTF BOS: " + str.tostring(ctfBullishBOS) + " bull / " + str.tostring(ctfBearishBOS) + " bear\n"
-        debugText := debugText + "CTF D created: " + str.tostring(ctfDemandZonesCreated) + ", NA: " + str.tostring(ctfDemandSkippedNa) + ", dupe: " + str.tostring(ctfDemandSkippedDupe) + "\n"
-        debugText := debugText + "CTF D in array: " + str.tostring(array.size(ctfDemandZones)) + ", S: " + str.tostring(array.size(ctfSupplyZones)) + "\n"
-        debugText := debugText + "Rendered: " + str.tostring(ctfDemandRendered) + " D / " + str.tostring(ctfSupplyRendered) + " S"
+        debugText := debugText + "TF1 BOS: " + str.tostring(tf1BullishBOS) + " bull / " + str.tostring(tf1BearishBOS) + " bear\n"
+        debugText := debugText + "TF1 D created: " + str.tostring(tf1DemandZonesCreated) + ", NA: " + str.tostring(tf1DemandSkippedNa) + ", dupe: " + str.tostring(tf1DemandSkippedDupe) + "\n"
+        debugText := debugText + "TF1 D in array: " + str.tostring(array.size(tf1DemandZones)) + ", S: " + str.tostring(array.size(tf1SupplyZones)) + "\n"
+        debugText := debugText + "Rendered: " + str.tostring(tf1DemandRendered) + " D / " + str.tostring(tf1SupplyRendered) + " S"
 
         debugLabel := label.new(bar_index, high, debugText,
                                style=label.style_label_down,
