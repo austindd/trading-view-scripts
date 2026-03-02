@@ -8,6 +8,7 @@ indicator("Market Structure Mapper V7 [SB]", "MSM V7 [SB]", overlay=true, max_li
 // CURRENT TIMEFRAME (CTF) SETTINGS
 // ============================================================================
 ctfEnabled = input.bool(true, "Enable CTF Structure", group="Current Timeframe")
+ctfTimeframe = input.timeframe("", "CTF Timeframe", group="Current Timeframe")
 showCtfPeaksValleys = input.bool(true, "Show CTF Peaks/Valleys (Lines)", group="Current Timeframe")
 showCtfLabels = input.bool(false, "Show CTF Labels", group="Current Timeframe")
 showCtfBosLabels = input.bool(true, "Show CTF BOS Labels", group="Current Timeframe")
@@ -78,6 +79,9 @@ zoneBreakOnTouchAfterCreation = input.bool(false, "Break Zones on Touch After Cr
 // ============================================================================
 lineWidth = input.int(2, "Line Width", minval=1, maxval=5, group="Display")
 showDebugLabel = input.bool(false, "Show Debug Info", group="Display")
+
+// CTF display string for labels
+string ctfDisplayTF = ctfTimeframe == "" ? timeframe.period : ctfTimeframe
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -365,16 +369,24 @@ var bool htfBosBullish = false
 var bool htfBosBearish = false
 
 // ============================================================================
+// CTF DATA (configurable timeframe)
+// ============================================================================
+
+[ctfHigh, ctfLow, ctfOpen, ctfClose] = request.security(syminfo.tickerid, ctfTimeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
+ctfTime = request.security(syminfo.tickerid, ctfTimeframe, time, lookahead=barmerge.lookahead_off)
+bool ctfNewCandle = ta.change(ctfTime) != 0
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
-// Check if current candle is bearish and closes below previous candle's low
+// Check if current CTF candle is bearish and closes below previous candle's low
 isBearishBreakdown() =>
-    close < open and close < low[1]
+    ctfClose < ctfOpen and ctfClose < ctfLow[1]
 
-// Check if current candle is bullish and closes above previous candle's high
+// Check if current CTF candle is bullish and closes above previous candle's high
 isBullishBreakout() =>
-    close > open and close > high[1]
+    ctfClose > ctfOpen and ctfClose > ctfHigh[1]
 
 // Find lowest low between two bar indices
 findLowestBetween(startBar, endBar) =>
@@ -960,7 +972,7 @@ checkAllBrokenZones() =>
 // ============================================================================
 
 // Returns [bullishBos, bearishBos]
-checkBrokenLevels() =>
+checkBrokenLevels(float tfHigh, float tfLow, float tfClose) =>
     bool bullishBos = false
     bool bearishBos = false
 
@@ -971,14 +983,14 @@ checkBrokenLevels() =>
             highLevel = array.get(highs, i)
 
             // Check for sweep (wick crosses but close doesn't)
-            if highLevel.levelType != "swept" and highLevel.levelType != "broken" and high > highLevel.price and close <= highLevel.price
+            if highLevel.levelType != "swept" and highLevel.levelType != "broken" and tfHigh > highLevel.price and tfClose <= highLevel.price
                 highLevel.levelType := "swept"
                 if not na(highLevel.levelLine)
                     line.set_style(highLevel.levelLine, line.style_dashed)
                 array.set(highs, i, highLevel)
 
             // Check for break (close crosses above)
-            else if highLevel.levelType != "broken" and close > highLevel.price
+            else if highLevel.levelType != "broken" and tfClose > highLevel.price
                 highLevel.levelType := "broken"
 
                 // Only the most recent high breaking constitutes a valid BOS
@@ -1070,14 +1082,14 @@ checkBrokenLevels() =>
             lowLevel = array.get(lows, i)
 
             // Check for sweep
-            if lowLevel.levelType != "swept" and lowLevel.levelType != "broken" and low < lowLevel.price and close >= lowLevel.price
+            if lowLevel.levelType != "swept" and lowLevel.levelType != "broken" and tfLow < lowLevel.price and tfClose >= lowLevel.price
                 lowLevel.levelType := "swept"
                 if not na(lowLevel.levelLine)
                     line.set_style(lowLevel.levelLine, line.style_dashed)
                 array.set(lows, i, lowLevel)
 
             // Check for break
-            else if lowLevel.levelType != "broken" and close < lowLevel.price
+            else if lowLevel.levelType != "broken" and tfClose < lowLevel.price
                 lowLevel.levelType := "broken"
 
                 // Only the most recent low breaking constitutes a valid BOS
@@ -1428,7 +1440,7 @@ findNearestUnbrokenLow(array<LowLevel> lowsArray) =>
 // INITIALIZATION
 // ============================================================================
 
-if not initialized and bar_index > 0
+if not initialized and bar_index > 0 and ctfNewCandle
     if isBearishBreakdown()
         float localHigh = high
         int localHighBar = bar_index
@@ -1450,48 +1462,21 @@ if not initialized and bar_index > 0
 // MAIN LOGIC
 // ============================================================================
 
-if initialized
+// CTF structure detection (gated on ctfNewCandle)
+if initialized and ctfNewCandle
     // Check broken/swept levels and zones
-    [ctfBullBos, ctfBearBos] = checkBrokenLevels()
+    [ctfBullBos, ctfBearBos] = checkBrokenLevels(ctfHigh, ctfLow, ctfClose)
     // Set CTF BOS alert flags
     if ctfBullBos
         ctfBullishBosFlag := true
     if ctfBearBos
         ctfBearishBosFlag := true
-    checkAllBrokenZones()
-
-    // Update nearest unbroken levels (structure boundaries) - CTF
-    int ctfNewHighIdx = findNearestUnbrokenHigh(highs)
-    if ctfNewHighIdx != nearestUnbrokenHighIndex or (ctfNewHighIdx >= 0 and na(nearestUnbrokenHighLine))
-        if not na(nearestUnbrokenHighLine)
-            line.delete(nearestUnbrokenHighLine)
-            nearestUnbrokenHighLine := na
-        nearestUnbrokenHighIndex := ctfNewHighIdx
-        if ctfNewHighIdx >= 0 and ctfNewHighIdx != mostRecentHighIndex
-            ctfHighLevel = array.get(highs, ctfNewHighIdx)
-            // Use bar_index instead of stored barIndex to avoid "too far" error
-            nearestUnbrokenHighLine := line.new(bar_index, ctfHighLevel.price, bar_index + 1, ctfHighLevel.price, color=color.new(highColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
-    if not na(nearestUnbrokenHighLine)
-        line.set_x2(nearestUnbrokenHighLine, bar_index + 1)
-
-    int ctfNewLowIdx = findNearestUnbrokenLow(lows)
-    if ctfNewLowIdx != nearestUnbrokenLowIndex or (ctfNewLowIdx >= 0 and na(nearestUnbrokenLowLine))
-        if not na(nearestUnbrokenLowLine)
-            line.delete(nearestUnbrokenLowLine)
-            nearestUnbrokenLowLine := na
-        nearestUnbrokenLowIndex := ctfNewLowIdx
-        if ctfNewLowIdx >= 0 and ctfNewLowIdx != mostRecentLowIndex
-            ctfLowLevel = array.get(lows, ctfNewLowIdx)
-            // Use bar_index instead of stored barIndex to avoid "too far" error
-            nearestUnbrokenLowLine := line.new(bar_index, ctfLowLevel.price, bar_index + 1, ctfLowLevel.price, color=color.new(lowColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
-    if not na(nearestUnbrokenLowLine)
-        line.set_x2(nearestUnbrokenLowLine, bar_index + 1)
 
     bool bosBullish = false
     bool bosBearish = false
 
     // Check for Break of Structure
-    if not na(currentValidHigh) and not na(currentValidLow) and close > currentValidHigh and lookingForLow
+    if not na(currentValidHigh) and not na(currentValidLow) and ctfClose > currentValidHigh and lookingForLow
         bosBullish := true
         currentHighIsBroken := true
         lastBosDirection := "bullish"
@@ -1517,7 +1502,7 @@ if initialized
             addLow(newLow, newLowBar, "strong", lowColor)
             mostRecentLowIndex := array.size(lows) - 1
 
-    if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and close < currentValidLow and lookingForHigh
+    if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and ctfClose < currentValidLow and lookingForHigh
         bosBearish := true
         currentLowIsBroken := true
         lastBosDirection := "bearish"
@@ -1575,13 +1560,13 @@ if initialized
                 addHigh(newHigh, newHighBar, levelType, highColor)
                 mostRecentHighIndex := array.size(highs) - 1
 
-    // Track LTF BOS for alert conditions
+    // Track CTF BOS for alert conditions
     if bosBullish
         ltfBosBullishSinceLastHTF := true
         ltfBosFlag := true
 
         // Check if bullish BOS is below 50% of HTF range
-        if not na(pullback50Level) and close < pullback50Level
+        if not na(pullback50Level) and ctfClose < pullback50Level
             ltfBosAtExtremeFlag := true
 
     if bosBearish
@@ -1589,8 +1574,39 @@ if initialized
         ltfBosFlag := true
 
         // Check if bearish BOS is above 50% of HTF range
-        if not na(pullback50Level) and close > pullback50Level
+        if not na(pullback50Level) and ctfClose > pullback50Level
             ltfBosAtExtremeFlag := true
+
+// Ungated CTF logic (runs every bar)
+if initialized
+    checkAllBrokenZones()
+
+    // Update nearest unbroken levels (structure boundaries) - CTF
+    int ctfNewHighIdx = findNearestUnbrokenHigh(highs)
+    if ctfNewHighIdx != nearestUnbrokenHighIndex or (ctfNewHighIdx >= 0 and na(nearestUnbrokenHighLine))
+        if not na(nearestUnbrokenHighLine)
+            line.delete(nearestUnbrokenHighLine)
+            nearestUnbrokenHighLine := na
+        nearestUnbrokenHighIndex := ctfNewHighIdx
+        if ctfNewHighIdx >= 0 and ctfNewHighIdx != mostRecentHighIndex
+            ctfHighLevel = array.get(highs, ctfNewHighIdx)
+            // Use bar_index instead of stored barIndex to avoid "too far" error
+            nearestUnbrokenHighLine := line.new(bar_index, ctfHighLevel.price, bar_index + 1, ctfHighLevel.price, color=color.new(highColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
+    if not na(nearestUnbrokenHighLine)
+        line.set_x2(nearestUnbrokenHighLine, bar_index + 1)
+
+    int ctfNewLowIdx = findNearestUnbrokenLow(lows)
+    if ctfNewLowIdx != nearestUnbrokenLowIndex or (ctfNewLowIdx >= 0 and na(nearestUnbrokenLowLine))
+        if not na(nearestUnbrokenLowLine)
+            line.delete(nearestUnbrokenLowLine)
+            nearestUnbrokenLowLine := na
+        nearestUnbrokenLowIndex := ctfNewLowIdx
+        if ctfNewLowIdx >= 0 and ctfNewLowIdx != mostRecentLowIndex
+            ctfLowLevel = array.get(lows, ctfNewLowIdx)
+            // Use bar_index instead of stored barIndex to avoid "too far" error
+            nearestUnbrokenLowLine := line.new(bar_index, ctfLowLevel.price, bar_index + 1, ctfLowLevel.price, color=color.new(lowColor, 50), width=lineWidth, extend=extend.right, style=line.style_dashed)
+    if not na(nearestUnbrokenLowLine)
+        line.set_x2(nearestUnbrokenLowLine, bar_index + 1)
 
 // ============================================================================
 // HTF DATA AND LOGIC
@@ -2401,14 +2417,14 @@ if initialized and not na(currentValidHigh) and mostRecentHighIndex >= 0
     color labelColor = highColor
 
     if highLevel.levelType == "broken"
-        labelText := timeframe.period + " Broken High"
+        labelText := ctfDisplayTF + " Broken High"
         labelColor := color.new(color.red, 0)
     else if highLevel.levelType == "weak"
-        labelText := timeframe.period + " Weak High"
+        labelText := ctfDisplayTF + " Weak High"
     else if highLevel.levelType == "swept"
-        labelText := timeframe.period + " Swept High"
+        labelText := ctfDisplayTF + " Swept High"
     else
-        labelText := timeframe.period + " Strong High"
+        labelText := ctfDisplayTF + " Strong High"
 
     currentHighLabel := label.new(bar_index + 5, currentValidHigh,
                                    text=labelText,
@@ -2426,14 +2442,14 @@ if initialized and not na(currentValidLow) and mostRecentLowIndex >= 0
     color labelColor = lowColor
 
     if lowLevel.levelType == "broken"
-        labelText := timeframe.period + " Broken Low"
+        labelText := ctfDisplayTF + " Broken Low"
         labelColor := color.new(color.green, 0)
     else if lowLevel.levelType == "weak"
-        labelText := timeframe.period + " Weak Low"
+        labelText := ctfDisplayTF + " Weak Low"
     else if lowLevel.levelType == "swept"
-        labelText := timeframe.period + " Swept Low"
+        labelText := ctfDisplayTF + " Swept Low"
     else
-        labelText := timeframe.period + " Strong Low"
+        labelText := ctfDisplayTF + " Strong Low"
 
     currentLowLabel := label.new(bar_index + 5, currentValidLow,
                                   text=labelText,
@@ -2547,9 +2563,9 @@ if nearestUnbrokenHighIndex >= 0 and nearestUnbrokenHighIndex < array.size(highs
         label.delete(nearestUnbrokenHighLabel)
 
     highLevel = array.get(highs, nearestUnbrokenHighIndex)
-    string labelText = timeframe.period + " Unbroken High"
+    string labelText = ctfDisplayTF + " Unbroken High"
     if highLevel.levelType == "swept"
-        labelText := timeframe.period + " Swept High (Unbroken)"
+        labelText := ctfDisplayTF + " Swept High (Unbroken)"
 
     nearestUnbrokenHighLabel := label.new(bar_index + 5, highLevel.price,
                                           text=labelText,
@@ -2568,9 +2584,9 @@ if nearestUnbrokenLowIndex >= 0 and nearestUnbrokenLowIndex < array.size(lows) a
         label.delete(nearestUnbrokenLowLabel)
 
     lowLevel = array.get(lows, nearestUnbrokenLowIndex)
-    string labelText = timeframe.period + " Unbroken Low"
+    string labelText = ctfDisplayTF + " Unbroken Low"
     if lowLevel.levelType == "swept"
-        labelText := timeframe.period + " Swept Low (Unbroken)"
+        labelText := ctfDisplayTF + " Swept Low (Unbroken)"
 
     nearestUnbrokenLowLabel := label.new(bar_index + 5, lowLevel.price,
                                          text=labelText,
