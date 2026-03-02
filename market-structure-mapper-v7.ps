@@ -4,6 +4,13 @@
 //@version=5
 indicator("Market Structure Mapper V7 [SB]", "MSM V7 [SB]", overlay=true, max_lines_count=250, max_labels_count=250, max_boxes_count=500)
 
+// Ensure sufficient historical buffer for lookback functions
+max_bars_back(high, 5000)
+max_bars_back(low, 5000)
+max_bars_back(open, 5000)
+max_bars_back(close, 5000)
+max_bars_back(time, 5000)
+
 // ============================================================================
 // CURRENT TIMEFRAME (CTF) SETTINGS
 // ============================================================================
