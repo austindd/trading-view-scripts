@@ -8,7 +8,9 @@ length    = input(500,'Lookback',minval=1,maxval=2500,group='Basic'
 row       = input(200,'Row Size',minval=1,maxval=500,group='Basic'
   ,tooltip='Determines the number of rows used for the calculation')
 show_rpoc = input(false,'Show Rolling POC',group='Basic'
-  ,tooltip='Display the rolling POC (highest volume/time ratio level)')
+  ,tooltip='Display the rolling POC (highest scoring level)')
+mode      = input('Intensity','Mode',options=['Intensity','Acceptance'],group='Basic'
+  ,tooltip='Intensity (Vol/Time): highlights levels with high volume per candle — aggressive activity. Acceptance (Vol×Time): highlights levels with both high volume AND high dwell time — confirmed interest.')
 
 width     = input(50,'Width (% of the box)',minval=1,maxval=100,group='Style'
   ,tooltip='Determines the length of the bars relative to the Lookback value')
@@ -60,9 +62,9 @@ if condition
             if touches
                 sumVol := sumVol + volume[k]
                 sumTime := sumTime + 1
-        // Volume/Time ratio: average volume per candle at this level
-        // If no candles touched this level, ratio is 0
-        ratio = sumTime > 0 ? sumVol / sumTime : 0.
+        // Intensity: Vol/Time — high volume per candle (aggressive activity)
+        // Acceptance: Vol*Time — high volume AND high dwell time (confirmed interest)
+        ratio = sumTime > 0 ? (mode == 'Intensity' ? sumVol / sumTime : sumVol * sumTime) : 0.
         array.push(ratios,ratio)
     for j = 0 to row-1
         maxRatio = array.max(ratios)
