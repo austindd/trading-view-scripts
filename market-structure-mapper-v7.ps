@@ -377,8 +377,6 @@ isBullishBreakout() =>
     close > open and close > high[1]
 
 // Find lowest low between two bar indices
-// Note: Pine Script has a limited historical buffer (typically ~200-500 bars depending on plan)
-// We use a conservative limit of 200 to avoid runtime errors
 findLowestBetween(startBar, endBar) =>
     float lowestPrice = na
     int lowestBarIndex = na
@@ -395,8 +393,8 @@ findLowestBetween(startBar, endBar) =>
     int lookbackStart = currentBar - end
     int lookbackEnd = currentBar - start - 1
 
-    // Use conservative limit of 200 bars to stay well within historical buffer
-    int maxLookback = 200
+    // Pine Script supports up to 5000 bars of history
+    int maxLookback = 5000
     lookbackStart := math.max(lookbackStart, 0)
     lookbackEnd := math.min(lookbackEnd, maxLookback)
 
@@ -410,8 +408,7 @@ findLowestBetween(startBar, endBar) =>
     [lowestPrice, lowestBarIndex]
 
 // Find highest high between two bar indices
-// Note: Pine Script has a limited historical buffer (typically ~200-500 bars depending on plan)
-// We use a conservative limit of 200 to avoid runtime errors
+// Pine Script supports up to 5000 bars of history
 findHighestBetween(startBar, endBar) =>
     float highestPrice = na
     int highestBarIndex = na
@@ -428,8 +425,8 @@ findHighestBetween(startBar, endBar) =>
     int lookbackStart = currentBar - end
     int lookbackEnd = currentBar - start - 1
 
-    // Use conservative limit of 200 bars to stay well within historical buffer
-    int maxLookback = 200
+    // Pine Script supports up to 5000 bars of history
+    int maxLookback = 5000
     lookbackStart := math.max(lookbackStart, 0)
     lookbackEnd := math.min(lookbackEnd, maxLookback)
 
@@ -455,7 +452,7 @@ findSwingHighBefore(int startBarIndex, int maxBarsToScan) =>
     float swingPrice = na
     int swingBar = na
     int barsBack = bar_index - startBarIndex
-    int maxLookback = 198  // Conservative limit to stay within historical buffer
+    int maxLookback = 5000
 
     if barsBack >= 0 and barsBack < maxLookback
         // Scan backwards from startBarIndex to find a swing high
@@ -473,7 +470,7 @@ findSwingHighAfter(int startBarIndex, int maxBarsToScan) =>
     float swingPrice = na
     int swingBar = na
     int barsBack = bar_index - startBarIndex
-    int maxLookback = 198  // Conservative limit to stay within historical buffer
+    int maxLookback = 5000
 
     if barsBack > 1 and barsBack < maxLookback
         // Scan forwards from startBarIndex to find a swing high
@@ -491,7 +488,7 @@ findSwingLowBefore(int startBarIndex, int maxBarsToScan) =>
     float swingPrice = na
     int swingBar = na
     int barsBack = bar_index - startBarIndex
-    int maxLookback = 198  // Conservative limit to stay within historical buffer
+    int maxLookback = 5000
 
     if barsBack >= 0 and barsBack < maxLookback
         // Scan backwards from startBarIndex to find a swing low
@@ -509,7 +506,7 @@ findSwingLowAfter(int startBarIndex, int maxBarsToScan) =>
     float swingPrice = na
     int swingBar = na
     int barsBack = bar_index - startBarIndex
-    int maxLookback = 198  // Conservative limit to stay within historical buffer
+    int maxLookback = 5000
 
     if barsBack > 1 and barsBack < maxLookback
         // Scan forwards from startBarIndex to find a swing low
@@ -531,7 +528,7 @@ calculateZoneFromLow(int lowBarIndex) =>
     float zoneTop = na
     float zoneBottom = na
     int leftTime = na
-    int maxLookback = 198  // Conservative limit to stay within historical buffer
+    int maxLookback = 5000
 
     int barsBack = bar_index - lowBarIndex
 
@@ -613,7 +610,7 @@ calculateZoneFromHigh(int highBarIndex) =>
     float zoneTop = na
     float zoneBottom = na
     int leftTime = na
-    int maxLookback = 198  // Conservative limit to stay within historical buffer
+    int maxLookback = 5000
 
     int barsBack = bar_index - highBarIndex
 
@@ -994,7 +991,7 @@ checkBrokenLevels() =>
                             // Find the low between this high and current bar (zone bottom)
                             float zoneBottom = low
                             int zoneBottomIdx = 0
-                            for j = 0 to math.min(barsBack, 200)
+                            for j = 0 to math.min(barsBack, 5000)
                                 if low[j] < zoneBottom
                                     zoneBottom := low[j]
                                     zoneBottomIdx := j
@@ -1013,7 +1010,7 @@ checkBrokenLevels() =>
                                 // Step 3: Zone top = highest high of those bearish candles
                                 bool foundBearish = false
                                 float highestBearishHigh = na
-                                int maxWalk = math.min(zoneBottomIdx + 50, 200)  // Don't walk too far
+                                int maxWalk = math.min(zoneBottomIdx + 50, 5000)
 
                                 for j = zoneBottomIdx to maxWalk
                                     bool isBearish = close[j] < open[j]
@@ -1093,7 +1090,7 @@ checkBrokenLevels() =>
                             // Find the high between this low and current bar (zone top)
                             float zoneTop = high
                             int zoneTopIdx = 0
-                            for j = 0 to math.min(barsBack, 200)
+                            for j = 0 to math.min(barsBack, 5000)
                                 if high[j] > zoneTop
                                     zoneTop := high[j]
                                     zoneTopIdx := j
@@ -1112,7 +1109,7 @@ checkBrokenLevels() =>
                                 // Step 3: Zone bottom = lowest low of those bullish candles
                                 bool foundBullish = false
                                 float lowestBullishLow = na
-                                int maxWalk = math.min(zoneTopIdx + 50, 200)  // Don't walk too far
+                                int maxWalk = math.min(zoneTopIdx + 50, 5000)
 
                                 for j = zoneTopIdx to maxWalk
                                     bool isBearish = close[j] < open[j]
@@ -1436,7 +1433,7 @@ if not initialized and bar_index > 0
         float localHigh = high
         int localHighBar = bar_index
 
-        for i = 1 to math.min(bar_index, 200)
+        for i = 1 to math.min(bar_index, 5000)
             if high[i] > localHigh
                 localHigh := high[i]
                 localHighBar := bar_index - i
@@ -1618,7 +1615,7 @@ if htfEnabled and not htfInitialized and bar_index > 0 and htfNewCandle
         // Find the highest high in the lookback period for initial valid high
         float initHigh = high
         int initHighBar = bar_index
-        for i = 1 to math.min(bar_index, 200)
+        for i = 1 to math.min(bar_index, 5000)
             if high[i] > initHigh
                 initHigh := high[i]
                 initHighBar := bar_index - i
@@ -1889,7 +1886,7 @@ if htf2Enabled and not htf2Initialized and bar_index > 200
     // Find the highest high in the lookback period for initial valid high
     float initHigh = high
     int initHighBar = bar_index
-    for i = 1 to 200
+    for i = 1 to math.min(bar_index, 5000)
         if high[i] > initHigh
             initHigh := high[i]
             initHighBar := bar_index - i
@@ -1897,7 +1894,7 @@ if htf2Enabled and not htf2Initialized and bar_index > 200
     // Find the lowest low in the lookback period for initial valid low
     float initLow = low
     int initLowBar = bar_index
-    for i = 1 to 200
+    for i = 1 to math.min(bar_index, 5000)
         if low[i] < initLow
             initLow := low[i]
             initLowBar := bar_index - i
