@@ -1,0 +1,67 @@
+//@version=5
+indicator("Trend Lines - Customizable", overlay=true)
+
+// Input parameters
+lb = input.int(30, title="Left Bars", minval=1)
+rb = input.int(30, title="Right Bars", minval=1)
+showpivot = input.bool(true, title="Show Pivot Points")
+chdashed = input.bool(true, title="Show Old Line as Dashed")
+ucolor = input.color(color.lime, title = "Uptrend Line Color")
+dcolor = input.color(color.red, title = "Downtrend Line Color")
+uthickness = input.int(1, title = "Uptrend Line Thickness", minval = 1)
+dthickness = input.int(1, title = "Downtrend Line Thickness", minval = 1)
+
+mb = lb + rb + 1
+
+var float top = na
+var float bot = na
+
+high_condition = ta.highestbars(high, mb) == -rb
+low_condition = ta.lowestbars(low, mb) == -rb
+
+top := na(high[mb]) ? na : (high_condition ? high[rb] : na)  // Pivot High
+bot := na(low[mb]) ? na : (low_condition ? low[rb] : na)  // Pivot Low
+
+plotshape(not na(top) and showpivot, text="H", style=shape.labeldown, color=color.new(color.white, 100), textcolor=color.red, location=location.abovebar, offset=-rb)
+plotshape(not na(bot) and showpivot, text="L", style=shape.labelup, color=color.new(color.white, 100), textcolor=color.lime, location=location.belowbar, offset=-rb)
+
+ltop = ta.valuewhen(not na(top), top, 1)
+var int bst = 0
+bst := not na(top) ? 1 : nz(bst[1]) + 1
+var float t_angle = 0.0
+t_angle := na(t_angle[1]) ? 0.0 : t_angle[1]
+
+if not na(ltop) and not na(top)
+    var line tline = na
+    if ltop > top
+        tline := line.new(bar_index - bst[1] - rb, high[bst[1] + rb], bar_index - rb, high[rb], color=dcolor, width=dthickness, extend=extend.right)
+        t_angle := (high[bst[1] + rb] - high[rb]) / bst[1]
+        if t_angle < t_angle[1] and t_angle[1] != 0
+            line.set_extend(tline[1], extend.none)
+        if t_angle > t_angle[1] and t_angle[1] != 0
+            line.set_extend(tline, extend.none)
+    if ltop <= top
+        t_angle := 0.0
+    if chdashed and not na(tline)
+        line.set_style(tline[1], line.style_dashed)
+
+lbot = ta.valuewhen(not na(bot), bot, 1)
+var int bsb = 0
+bsb := not na(bot) ? 1 : nz(bsb[1]) + 1
+var float b_angle = 0.0
+b_angle := na(b_angle[1]) ? 0.0 : b_angle[1]
+
+if not na(lbot) and not na(bot)
+    var line bline = na
+    if lbot < bot
+        bline := line.new(bar_index - bsb[1] - rb, low[bsb[1] + rb], bar_index - rb, low[rb], color=ucolor, width=uthickness, extend=extend.right)
+        b_angle := (low[bsb[1] + rb] - low[rb]) / bsb[1]
+        if b_angle > b_angle[1] and b_angle[1] != 0
+            line.set_extend(bline[1], extend.none)
+        if b_angle < b_angle[1] and b_angle[1] != 0
+            line.set_extend(bline, extend.none)
+    if lbot >= bot
+        b_angle := 0.0
+    if chdashed and not na(bline)
+        line.set_style(bline[1], line.style_dashed)
+
