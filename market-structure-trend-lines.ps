@@ -2,7 +2,7 @@
 // © scientificbest
 
 //@version=5
-indicator("Market Structure Trend Lines [SB]", "MSTL [SB]", overlay=true, max_lines_count=250, max_labels_count=250, max_boxes_count=500)
+indicator("Market Structure Trend Lines [SB]", "MSTL [SB]", overlay=true, max_lines_count=500, max_labels_count=250, max_boxes_count=500)
 
 // Ensure sufficient historical buffer for lookback functions
 max_bars_back(high, 5000)
@@ -55,14 +55,12 @@ lineWidth = input.int(2, "Line Width", minval=1, maxval=5, group="Display")
 // TREND LINE SETTINGS
 // ============================================================================
 showTrendLines = input.bool(true, "Show Trend Lines", group="Trend Lines")
-minPoints = input.int(3, "Min Points for Fit", minval=2, maxval=10, group="Trend Lines")
-maxLookbackPoints = input.int(10, "Max Lookback Points", minval=3, maxval=30, group="Trend Lines")
-r2Threshold = input.float(0.80, "R² Threshold", minval=0.0, maxval=1.0, step=0.05, group="Trend Lines")
+minPoints = input.int(3, "Min Points for Trend Line", minval=2, maxval=10, group="Trend Lines")
+atrTolerance = input.float(1.5, "ATR Tolerance", minval=0.1, maxval=10.0, step=0.1, tooltip="How many ATRs a point can deviate from the projected line and still be considered aligned", group="Trend Lines")
+atrLength = input.int(14, "ATR Length", minval=1, maxval=50, group="Trend Lines")
 resistanceColor = input.color(color.new(color.red, 0), "Resistance Line Color", group="Trend Lines")
 supportColor = input.color(color.new(color.green, 0), "Support Line Color", group="Trend Lines")
 trendLineWidth = input.int(2, "Trend Line Width", minval=1, maxval=5, group="Trend Lines")
-showR2Labels = input.bool(false, "Show R² Labels", group="Trend Lines")
-maxHistoricalLines = input.int(5, "Max Historical Lines", minval=0, maxval=20, group="Trend Lines")
 
 // TF1 display string for labels
 string tf1DisplayTF = tf1Timeframe == "" ? timeframe.period : tf1Timeframe
@@ -93,18 +91,6 @@ type Zone
     bool broken
     bool touched
     int creationBar
-
-type TrendLine
-    float slope
-    float intercept
-    float r2
-    int pointCount
-    int startBar
-    int endBar
-    line lineObj
-    label r2Label
-    bool broken
-    bool isSupport  // true = through lows, false = through highs
 
 // ============================================================================
 // STATE VARIABLES
@@ -149,10 +135,13 @@ var label currentLowLabel = na
 var label nearestUnbrokenHighLabel = na
 var label nearestUnbrokenLowLabel = na
 
-// Trend line state
-var TrendLine activeSupportLine = na
-var TrendLine activeResistanceLine = na
-var array<TrendLine> historicalLines = array.new<TrendLine>()
+// Trend line state — active zig-zag point accumulation
+var array<int> activeResBars = array.new<int>()
+var array<float> activeResPrices = array.new<float>()
+var array<line> activeResSegments = array.new<line>()
+var array<int> activeSupBars = array.new<int>()
+var array<float> activeSupPrices = array.new<float>()
+var array<line> activeSupSegments = array.new<line>()
 var bool needSupportFit = false
 var bool needResistanceFit = false
 
@@ -163,6 +152,9 @@ var bool needResistanceFit = false
 [tf1High, tf1Low, tf1Open, tf1Close] = request.security(syminfo.tickerid, tf1Timeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
 tf1Time = request.security(syminfo.tickerid, tf1Timeframe, time, lookahead=barmerge.lookahead_off)
 bool tf1NewCandle = ta.change(tf1Time) != 0
+
+// ATR for trend line tolerance
+atrValue = ta.atr(atrLength)
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -233,142 +225,70 @@ findHighestBetween(startBar, endBar) =>
     [highestPrice, highestBarIndex]
 
 // ============================================================================
-// LINEAR REGRESSION
+// TREND LINE FUNCTIONS
 // ============================================================================
 
-// Perform linear regression on arrays of x (bar indices) and y (prices)
-// Returns [slope, intercept, r2]
-linearRegression(array<float> xArr, array<float> yArr, int n) =>
-    float slope = 0.0
-    float intercept = 0.0
-    float r2 = 0.0
+// Check if a new structure point aligns with the active trend, and add or break accordingly.
+// Draws zig-zag line segments through aligned points. On break, segments become dashed
+// and remain on chart permanently.
+checkAndAddTrendPoint(array<int> bars, array<float> prices, array<line> segments, int newBar, float newPrice, float atrVal, color lineCol) =>
+    int n = array.size(bars)
 
-    if n >= 2
-        float sumX = 0.0
-        float sumY = 0.0
-        float sumXY = 0.0
-        float sumX2 = 0.0
-        float sumY2 = 0.0
-
-        for i = 0 to n - 1
-            float x = array.get(xArr, i)
-            float y = array.get(yArr, i)
-            sumX += x
-            sumY += y
-            sumXY += x * y
-            sumX2 += x * x
-            sumY2 += y * y
-
-        float denom = n * sumX2 - sumX * sumX
-
-        if math.abs(denom) < 1e-10
-            // All x identical (degenerate)
-            slope := 0.0
-            intercept := sumY / n
-            r2 := 0.0
-        else
-            slope := (n * sumXY - sumX * sumY) / denom
-            intercept := (sumY - slope * sumX) / n
-
-            // R² calculation
-            float meanY = sumY / n
-            float ssTot = 0.0
-            float ssRes = 0.0
-            for i = 0 to n - 1
-                float y = array.get(yArr, i)
-                float x = array.get(xArr, i)
-                float predicted = slope * x + intercept
-                ssTot += (y - meanY) * (y - meanY)
-                ssRes += (y - predicted) * (y - predicted)
-
-            if math.abs(ssTot) < 1e-10
-                // All y identical -> perfect horizontal line
-                r2 := 1.0
-            else
-                r2 := 1.0 - ssRes / ssTot
-                r2 := math.max(0.0, r2)
-
-    [slope, intercept, r2]
-
-// Fit a trend line through structure points with iterative outlier removal
-// isSupport: true = fit through lows, false = fit through highs
-// Returns [slope, intercept, r2, pointCount, startBar, endBar, valid]
-fitTrendLine(bool isSupport) =>
-    float bestSlope = 0.0
-    float bestIntercept = 0.0
-    float bestR2 = 0.0
-    int bestCount = 0
-    int bestStartBar = 0
-    int bestEndBar = 0
-    bool valid = false
-
-    // Collect points from structure arrays
-    var array<float> xPoints = array.new<float>()
-    var array<float> yPoints = array.new<float>()
-    array.clear(xPoints)
-    array.clear(yPoints)
-
-    if isSupport
-        int sz = array.size(lows)
-        int startIdx = math.max(0, sz - maxLookbackPoints)
-        for i = startIdx to sz - 1
-            lowLevel = array.get(lows, i)
-            array.push(xPoints, float(lowLevel.barIndex))
-            array.push(yPoints, lowLevel.price)
+    if n < 2
+        // Need at least 2 existing points to check alignment — just accumulate
+        array.push(bars, newBar)
+        array.push(prices, newPrice)
     else
-        int sz = array.size(highs)
-        int startIdx = math.max(0, sz - maxLookbackPoints)
-        for i = startIdx to sz - 1
-            highLevel = array.get(highs, i)
-            array.push(xPoints, float(highLevel.barIndex))
-            array.push(yPoints, highLevel.price)
+        // Project from first-to-last point to new point's bar
+        int firstBar = array.get(bars, 0)
+        float firstPrice = array.get(prices, 0)
+        int lastBar = array.get(bars, n - 1)
+        float lastPrice = array.get(prices, n - 1)
 
-    int n = array.size(xPoints)
+        float slope = 0.0
+        if lastBar != firstBar
+            slope := (lastPrice - firstPrice) / (lastBar - firstBar)
 
-    if n >= minPoints
-        // Iterative outlier removal
-        int maxIter = n - minPoints
-        int iter = 0
-        bool done = false
+        float projected = firstPrice + slope * (newBar - firstBar)
+        float distance = math.abs(newPrice - projected)
 
-        while not done and iter <= maxIter
-            int currentN = array.size(xPoints)
-            if currentN < minPoints
-                done := true
-            else
-                [s, ic, r] = linearRegression(xPoints, yPoints, currentN)
-                if r >= r2Threshold
-                    bestSlope := s
-                    bestIntercept := ic
-                    bestR2 := r
-                    bestCount := currentN
-                    bestStartBar := math.round(array.get(xPoints, 0))
-                    bestEndBar := math.round(array.get(xPoints, currentN - 1))
-                    valid := true
-                    done := true
-                else if currentN <= minPoints
-                    // At minimum points and still below threshold -> no valid line
-                    done := true
+        bool aligned = na(atrVal) or distance <= atrTolerance * atrVal
+
+        if aligned
+            // Add point to active trend
+            array.push(bars, newBar)
+            array.push(prices, newPrice)
+
+            int newN = array.size(bars)
+            if newN >= minPoints
+                if newN == minPoints
+                    // Just reached minimum — draw all segments
+                    for i = 0 to newN - 2
+                        seg = line.new(array.get(bars, i), array.get(prices, i),
+                                      array.get(bars, i + 1), array.get(prices, i + 1),
+                                      color=lineCol, width=trendLineWidth, style=line.style_solid)
+                        array.push(segments, seg)
                 else
-                    // Remove worst outlier
-                    float maxResidual = 0.0
-                    int worstIdx = -1
-                    for i = 0 to currentN - 1
-                        float x = array.get(xPoints, i)
-                        float y = array.get(yPoints, i)
-                        float predicted = s * x + ic
-                        float residual = math.abs(y - predicted)
-                        if residual > maxResidual
-                            maxResidual := residual
-                            worstIdx := i
-                    if worstIdx >= 0
-                        array.remove(xPoints, worstIdx)
-                        array.remove(yPoints, worstIdx)
-                    else
-                        done := true
-                iter += 1
+                    // Extend — draw new segment from previous last to new point
+                    seg = line.new(lastBar, lastPrice, newBar, newPrice,
+                                  color=lineCol, width=trendLineWidth, style=line.style_solid)
+                    array.push(segments, seg)
+        else
+            // NOT aligned — break the current trend line
+            if n >= minPoints
+                // Set all segments to dashed (they remain on chart permanently)
+                for i = 0 to array.size(segments) - 1
+                    line.set_style(array.get(segments, i), line.style_dashed)
 
-    [bestSlope, bestIntercept, bestR2, bestCount, bestStartBar, bestEndBar, valid]
+            // Clear active state (line objects stay drawn on the chart)
+            array.clear(bars)
+            array.clear(prices)
+            array.clear(segments)
+
+            // Start new accumulation with this point
+            array.push(bars, newBar)
+            array.push(prices, newPrice)
+    true
 
 // ============================================================================
 // LEVEL MANAGEMENT FUNCTIONS
@@ -664,119 +584,6 @@ findNearestUnbrokenLow(array<LowLevel> lowsArray) =>
     result
 
 // ============================================================================
-// TREND LINE FUNCTIONS
-// ============================================================================
-
-// Move active trend line to historical, applying dashed style
-retireTrendLine(TrendLine tl) =>
-    if not na(tl)
-        tl.broken := true
-        if not na(tl.lineObj)
-            line.set_style(tl.lineObj, line.style_dashed)
-            line.set_extend(tl.lineObj, extend.none)
-            // Set x2 to current bar
-            float projectedY = tl.slope * bar_index + tl.intercept
-            line.set_x2(tl.lineObj, bar_index)
-            line.set_y2(tl.lineObj, projectedY)
-        if not na(tl.r2Label)
-            label.delete(tl.r2Label)
-            tl.r2Label := na
-        array.push(historicalLines, tl)
-        // Trim historical lines
-        while array.size(historicalLines) > maxHistoricalLines
-            oldest = array.shift(historicalLines)
-            if not na(oldest.lineObj)
-                line.delete(oldest.lineObj)
-            if not na(oldest.r2Label)
-                label.delete(oldest.r2Label)
-    true
-
-// Update or create a trend line for support or resistance
-// Takes the current active line (to retire if replaced), returns the new active line
-updateTrendLine(bool isSupport, TrendLine oldLine) =>
-    [slope, intercept, r2, pointCount, startBar, endBar, valid] = fitTrendLine(isSupport)
-
-    TrendLine result = oldLine
-
-    if valid
-        // Check if line is already broken at current bar
-        float projectedNow = slope * bar_index + intercept
-        bool alreadyBroken = isSupport ? (close < projectedNow) : (close > projectedNow)
-
-        if not alreadyBroken
-            // Retire the current active line
-            if not na(oldLine)
-                retireTrendLine(oldLine)
-
-            // Create visual line
-            float y1 = slope * startBar + intercept
-            float y2 = slope * endBar + intercept
-            color lineCol = isSupport ? supportColor : resistanceColor
-            line newLine = line.new(startBar, y1, endBar, y2,
-                                   color=lineCol,
-                                   width=trendLineWidth,
-                                   style=line.style_solid,
-                                   extend=extend.right)
-
-            // Create R² label if enabled
-            label r2Lbl = na
-            if showR2Labels
-                r2Lbl := label.new(endBar, y2, "R²=" + str.tostring(r2, "#.##"),
-                                  style=isSupport ? label.style_label_up : label.style_label_down,
-                                  color=lineCol,
-                                  textcolor=color.white,
-                                  size=size.tiny)
-
-            result := TrendLine.new(slope, intercept, r2, pointCount, startBar, endBar, newLine, r2Lbl, false, isSupport)
-
-    result
-
-// Check if active trend lines have been broken by price
-// Returns [supportBroken, resistanceBroken]
-checkTrendLineBreaks(TrendLine supportLine, TrendLine resistanceLine) =>
-    bool supportBroken = false
-    bool resistanceBroken = false
-
-    // Check support line
-    if not na(supportLine)
-        if not supportLine.broken
-            float projected = supportLine.slope * bar_index + supportLine.intercept
-            if close < projected
-                retireTrendLine(supportLine)
-                supportBroken := true
-
-    // Check resistance line
-    if not na(resistanceLine)
-        if not resistanceLine.broken
-            float projected = resistanceLine.slope * bar_index + resistanceLine.intercept
-            if close > projected
-                retireTrendLine(resistanceLine)
-                resistanceBroken := true
-
-    [supportBroken, resistanceBroken]
-
-// Extend active trend lines visually to current bar
-extendActiveTrendLines() =>
-    if not na(activeSupportLine)
-        if not activeSupportLine.broken and not na(activeSupportLine.lineObj)
-            float y2 = activeSupportLine.slope * bar_index + activeSupportLine.intercept
-            line.set_x2(activeSupportLine.lineObj, bar_index)
-            line.set_y2(activeSupportLine.lineObj, y2)
-            if showR2Labels and not na(activeSupportLine.r2Label)
-                label.set_x(activeSupportLine.r2Label, bar_index)
-                label.set_y(activeSupportLine.r2Label, y2)
-
-    if not na(activeResistanceLine)
-        if not activeResistanceLine.broken and not na(activeResistanceLine.lineObj)
-            float y2 = activeResistanceLine.slope * bar_index + activeResistanceLine.intercept
-            line.set_x2(activeResistanceLine.lineObj, bar_index)
-            line.set_y2(activeResistanceLine.lineObj, y2)
-            if showR2Labels and not na(activeResistanceLine.r2Label)
-                label.set_x(activeResistanceLine.r2Label, bar_index)
-                label.set_y(activeResistanceLine.r2Label, y2)
-    true
-
-// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
@@ -918,27 +725,18 @@ if initialized
     if not na(nearestUnbrokenLowLine)
         line.set_x2(nearestUnbrokenLowLine, bar_index + 1)
 
-    // Trend line logic
+    // Trend line logic — process new structure points
     if showTrendLines
-        // Check for breaks first (every bar)
-        [supportBroken, resistanceBroken] = checkTrendLineBreaks(activeSupportLine, activeResistanceLine)
-        if supportBroken
-            activeSupportLine := na
-            needSupportFit := true
-        if resistanceBroken
-            activeResistanceLine := na
-            needResistanceFit := true
-
-        // Re-fit trend lines when triggered
         if needResistanceFit
-            activeResistanceLine := updateTrendLine(false, activeResistanceLine)
+            if array.size(highs) > 0
+                lastHigh = array.get(highs, array.size(highs) - 1)
+                checkAndAddTrendPoint(activeResBars, activeResPrices, activeResSegments, lastHigh.barIndex, lastHigh.price, atrValue, resistanceColor)
             needResistanceFit := false
         if needSupportFit
-            activeSupportLine := updateTrendLine(true, activeSupportLine)
+            if array.size(lows) > 0
+                lastLow = array.get(lows, array.size(lows) - 1)
+                checkAndAddTrendPoint(activeSupBars, activeSupPrices, activeSupSegments, lastLow.barIndex, lastLow.price, atrValue, supportColor)
             needSupportFit := false
-
-        // Extend active lines
-        extendActiveTrendLines()
 
 // ============================================================================
 // UPDATE LEVEL STATES
