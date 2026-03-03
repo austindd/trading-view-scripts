@@ -65,6 +65,7 @@ Standalone S&D zone detection using z-score analysis to identify significant pri
 | `engulfing-bar-play.ps` | 275 | Engulfing bar detection with configurable consecutive-candle filter (default: 3 prior candles in same direction). Ray extensions from pattern extremes. |
 | `wickless-candles.ps` | 29 | Simplest script. Draws horizontal lines at wickless candle levels. No state tracking. |
 | `wickless-candles-v2.ps` | 90 | Enhanced wickless detection with array-based level tracking, alert generation on formation/first cross/retest, and configurable tracking window (default: 20 bars). |
+| `market-structure-trend-lines.ps` | ~940 | Single-TF market structure (extracted from MSM V7) combined with ATR-based zig-zag trend lines through aligned structure highs/lows. Trend lines break when a new structure point deviates beyond ATR tolerance; broken lines remain on chart as dashed historical records. Supports skipping points on the "safe side" of the line. |
 
 ## Architecture Patterns
 
