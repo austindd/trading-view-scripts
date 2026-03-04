@@ -59,6 +59,7 @@ minPoints = input.int(3, "Min Points for Trend Line", minval=2, maxval=10, group
 atrTolerance = input.float(1.5, "ATR Tolerance", minval=0.1, maxval=10.0, step=0.1, tooltip="How many ATRs a point can deviate from the projected line and still be considered aligned", group="Trend Lines")
 atrLength = input.int(14, "ATR Length", minval=1, maxval=50, group="Trend Lines")
 maxSkips = input.int(2, "Max Skippable Points", minval=0, maxval=5, tooltip="How many consecutive structure points can be skipped if they are on the safe side of the line (high below resistance, low above support)", group="Trend Lines")
+maxCandidates = input.int(15, "Max Candidates Per Side", minval=2, maxval=30, group="Trend Lines")
 resistanceColor = input.color(color.new(color.red, 0), "Resistance Line Color", group="Trend Lines")
 supportColor = input.color(color.new(color.green, 0), "Support Line Color", group="Trend Lines")
 trendLineWidth = input.int(2, "Trend Line Width", minval=1, maxval=5, group="Trend Lines")
@@ -92,6 +93,11 @@ type Zone
     bool broken
     bool touched
     int creationBar
+
+type TrendCandidate
+    array<int> bars            // ALL structure points presented to this candidate
+    array<float> prices        // ALL structure points presented to this candidate
+    array<int> alignedIndices  // indices into bars/prices of points in the current cone
 
 // ============================================================================
 // STATE VARIABLES
@@ -136,15 +142,9 @@ var label currentLowLabel = na
 var label nearestUnbrokenHighLabel = na
 var label nearestUnbrokenLowLabel = na
 
-// Trend line state — active zig-zag point accumulation
-var array<int> activeResBars = array.new<int>()
-var array<float> activeResPrices = array.new<float>()
-var array<line> activeResSegments = array.new<line>()
-var array<int> activeSupBars = array.new<int>()
-var array<float> activeSupPrices = array.new<float>()
-var array<line> activeSupSegments = array.new<line>()
-var array<int> activeResSkips = array.new<int>(1, 0)
-var array<int> activeSupSkips = array.new<int>(1, 0)
+// Trend line state — multi-candidate tracking
+var array<TrendCandidate> resCandidates = array.new<TrendCandidate>()
+var array<TrendCandidate> supCandidates = array.new<TrendCandidate>()
 var bool needSupportFit = false
 var bool needResistanceFit = false
 
@@ -231,87 +231,107 @@ findHighestBetween(startBar, endBar) =>
 // TREND LINE FUNCTIONS
 // ============================================================================
 
-// Check if a new structure point aligns with the active trend, and add or break accordingly.
-// Draws zig-zag line segments through aligned points. On break, segments become dashed
-// and remain on chart permanently.
-// isSupport: true = support (through lows), false = resistance (through highs)
-// skipCount: 1-element array used as mutable counter for consecutive skipped points
-checkAndAddTrendPoint(array<int> bars, array<float> prices, array<line> segments, array<int> skipCount, int newBar, float newPrice, float atrVal, color lineCol, bool isSupport) =>
-    int n = array.size(bars)
+// Finalize a candidate: draw solid zig-zag segments through aligned points if enough exist.
+finalizeCandidate(TrendCandidate cand, color lineCol) =>
+    if array.size(cand.alignedIndices) >= minPoints
+        for i = 0 to array.size(cand.alignedIndices) - 2
+            int ai = array.get(cand.alignedIndices, i)
+            int aj = array.get(cand.alignedIndices, i + 1)
+            line.new(array.get(cand.bars, ai), array.get(cand.prices, ai),
+                     array.get(cand.bars, aj), array.get(cand.prices, aj),
+                     color=lineCol, width=trendLineWidth, style=line.style_solid)
+    true
 
-    if n < 2
-        // Need at least 2 existing points to check alignment — just accumulate
-        array.push(bars, newBar)
-        array.push(prices, newPrice)
-        array.set(skipCount, 0, 0)
-    else
-        // Project from first-to-last point to new point's bar
-        int firstBar = array.get(bars, 0)
-        float firstPrice = array.get(prices, 0)
-        int lastBar = array.get(bars, n - 1)
-        float lastPrice = array.get(prices, n - 1)
+// Process a new structure point against all candidates using anchored cone algorithm.
+// The cone is anchored at the first point and re-aimed through each new point.
+// All intermediate points are retroactively validated against the new cone direction.
+processNewStructurePoint(array<TrendCandidate> candidates, int newBar, float newPrice, float atrVal, color lineCol, bool isSupport) =>
+    // Iterate existing candidates in reverse (safe for removal)
+    int idx = array.size(candidates) - 1
+    for _iter = 0 to math.max(0, array.size(candidates) - 1)
+        if idx < 0
+            break
 
-        float slope = 0.0
-        if lastBar != firstBar
-            slope := (lastPrice - firstPrice) / (lastBar - firstBar)
+        TrendCandidate cand = array.get(candidates, idx)
 
-        float projected = firstPrice + slope * (newBar - firstBar)
-        float distance = math.abs(newPrice - projected)
+        // Add new point to bars/prices (every point is stored)
+        array.push(cand.bars, newBar)
+        array.push(cand.prices, newPrice)
+        int n = array.size(cand.bars)
 
-        bool aligned = na(atrVal) or distance <= atrTolerance * atrVal
-
-        if aligned
-            // Add point to active trend
-            array.push(bars, newBar)
-            array.push(prices, newPrice)
-            array.set(skipCount, 0, 0)
-
-            int newN = array.size(bars)
-            if newN >= minPoints
-                if newN == minPoints
-                    // Just reached minimum — draw all segments
-                    for i = 0 to newN - 2
-                        seg = line.new(array.get(bars, i), array.get(prices, i),
-                                      array.get(bars, i + 1), array.get(prices, i + 1),
-                                      color=lineCol, width=trendLineWidth, style=line.style_solid)
-                        array.push(segments, seg)
-                else
-                    // Extend — draw new segment from previous last to new point
-                    seg = line.new(lastBar, lastPrice, newBar, newPrice,
-                                  color=lineCol, width=trendLineWidth, style=line.style_solid)
-                    array.push(segments, seg)
+        if n < 3
+            // Trivially aligned — set alignedIndices to all indices
+            array.clear(cand.alignedIndices)
+            for i = 0 to n - 1
+                array.push(cand.alignedIndices, i)
         else
-            // Not aligned — check if point is on the "safe side" and can be skipped
-            // Resistance (highs): a high BELOW the line didn't reach resistance — safe to skip
-            // Support (lows): a low ABOVE the line didn't reach support — safe to skip
-            bool safeToSkip = false
-            if not na(atrVal)
-                if isSupport
-                    safeToSkip := newPrice > projected
+            // Compute cone center line from first point to new (last) point
+            int firstBar = array.get(cand.bars, 0)
+            float firstPrice = array.get(cand.prices, 0)
+            float slope = 0.0
+            if newBar != firstBar
+                slope := (newPrice - firstPrice) / (newBar - firstBar)
+
+            // Walk intermediate points (index 1 to n-2) and validate
+            array<int> newAligned = array.from(0)  // first point always aligned
+            int consecutiveSkips = 0
+            bool chainBroken = false
+
+            for i = 1 to n - 2
+                if chainBroken
+                    break
+                int ptBar = array.get(cand.bars, i)
+                float ptPrice = array.get(cand.prices, i)
+                float projected = firstPrice + slope * (ptBar - firstBar)
+                float distance = math.abs(ptPrice - projected)
+
+                bool ptAligned = na(atrVal) or distance <= atrTolerance * atrVal
+
+                if ptAligned
+                    array.push(newAligned, i)
+                    consecutiveSkips := 0
                 else
-                    safeToSkip := newPrice < projected
+                    // Check safe side
+                    bool safeToSkip = false
+                    if not na(atrVal)
+                        if isSupport
+                            safeToSkip := ptPrice > projected
+                        else
+                            safeToSkip := ptPrice < projected
 
-            int currentSkips = array.get(skipCount, 0)
+                    if safeToSkip
+                        consecutiveSkips += 1
+                        if consecutiveSkips > maxSkips
+                            chainBroken := true
+                    else
+                        chainBroken := true
 
-            if safeToSkip and currentSkips < maxSkips
-                // Skip this point — don't add it, don't break the trend
-                array.set(skipCount, 0, currentSkips + 1)
+            if chainBroken
+                // Remove the new point we just added
+                array.pop(cand.bars)
+                array.pop(cand.prices)
+                // Finalize with previous alignedIndices
+                finalizeCandidate(cand, lineCol)
+                array.remove(candidates, idx)
             else
-                // Break the current trend line
-                if n >= minPoints
-                    // Set all segments to dashed (they remain on chart permanently)
-                    for i = 0 to array.size(segments) - 1
-                        line.set_style(array.get(segments, i), line.style_dashed)
+                // Chain unbroken — update alignedIndices
+                array.push(newAligned, n - 1)  // last point (the new one) always aligned
+                cand.alignedIndices := newAligned
 
-                // Clear active state (line objects stay drawn on the chart)
-                array.clear(bars)
-                array.clear(prices)
-                array.clear(segments)
-                array.set(skipCount, 0, 0)
+        idx -= 1
 
-                // Start new accumulation with this point
-                array.push(bars, newBar)
-                array.push(prices, newPrice)
+    // Always create a new single-point candidate for this structure point
+    newCand = TrendCandidate.new(array.from(newBar), array.from(newPrice), array.from(0))
+    array.push(candidates, newCand)
+
+    // Evict oldest candidates if over the limit
+    for _evict = 0 to maxCandidates
+        if array.size(candidates) <= maxCandidates
+            break
+        TrendCandidate oldest = array.get(candidates, 0)
+        finalizeCandidate(oldest, lineCol)
+        array.remove(candidates, 0)
+
     true
 
 // ============================================================================
@@ -754,12 +774,12 @@ if initialized
         if needResistanceFit
             if array.size(highs) > 0
                 lastHigh = array.get(highs, array.size(highs) - 1)
-                checkAndAddTrendPoint(activeResBars, activeResPrices, activeResSegments, activeResSkips, lastHigh.barIndex, lastHigh.price, atrValue, resistanceColor, false)
+                processNewStructurePoint(resCandidates, lastHigh.barIndex, lastHigh.price, atrValue, resistanceColor, false)
             needResistanceFit := false
         if needSupportFit
             if array.size(lows) > 0
                 lastLow = array.get(lows, array.size(lows) - 1)
-                checkAndAddTrendPoint(activeSupBars, activeSupPrices, activeSupSegments, activeSupSkips, lastLow.barIndex, lastLow.price, atrValue, supportColor, true)
+                processNewStructurePoint(supCandidates, lastLow.barIndex, lastLow.price, atrValue, supportColor, true)
             needSupportFit := false
 
 // ============================================================================
