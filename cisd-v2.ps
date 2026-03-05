@@ -22,6 +22,7 @@ detectIFVGSweep     = input.bool(true, "IFVG Sweep", group=grpDetection, tooltip
 grpSettings = "Settings"
 swingLookback = input.int(50, "Swing Lookback Bars", minval=5, maxval=200, group=grpSettings, tooltip="How far back to search for CSP swing points")
 maxIfvgBars   = input.int(6, "Max IFVG Candles", minval=3, maxval=50, group=grpSettings, tooltip="Maximum candles from the first FVG candle to the IFVG confirmation candle")
+invalidateSwept = input.bool(false, "Invalidate Swept CSPs", group=grpSettings, tooltip="When enabled, a CSP that has already been wicked through by a prior candle is considered used and will not qualify for CISD detection")
 
 // Timeframe 1
 tf1Enabled   = input.bool(true, "Enable", inline="tf1", group="Timeframe 1")
@@ -128,12 +129,16 @@ detectCISD() =>
                         isSwingLow = low[j] < low[j + 1] and low[j] < low[j - 1] and low[j] < bodyBottom
                         if isSwingLow
                             cspLevel = low[j]
-                            // Check CSP not broken before structure
+                            // Check CSP not broken (or already swept) before structure
                             levelBroken = false
                             for k = firstBearOff + 1 to j - 1
                                 if close[k] < cspLevel
                                     levelBroken := true
                                     break
+                                if invalidateSwept
+                                    if low[k] <= cspLevel
+                                        levelBroken := true
+                                        break
                             if not levelBroken
                                 // ── Case 1: Wick Sweep ──
                                 if not bullishCISD and detectWickSweep
@@ -196,12 +201,16 @@ detectCISD() =>
                         isSwingHigh = high[j] > high[j + 1] and high[j] > high[j - 1] and high[j] > bodyTop
                         if isSwingHigh
                             cspLevel = high[j]
-                            // Check CSP not broken before structure
+                            // Check CSP not broken (or already swept) before structure
                             levelBroken = false
                             for k = firstBullOff + 1 to j - 1
                                 if close[k] > cspLevel
                                     levelBroken := true
                                     break
+                                if invalidateSwept
+                                    if high[k] >= cspLevel
+                                        levelBroken := true
+                                        break
                             if not levelBroken
                                 // ── Case 1: Wick Sweep ──
                                 if not bearishCISD and detectWickSweep
