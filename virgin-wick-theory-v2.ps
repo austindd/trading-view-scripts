@@ -12,6 +12,7 @@ supColor = input.color(color.rgb(171, 71, 189), "bearish virgin level")
 lineWidth = input.int(2, "width")
 poiTimeframe = input.timeframe("60", "POI timeframe")
 poiCandles = input.int(1, "POI candles", minval=1)
+colorFilter = input.string("None", "POI candle color filter", options=["None", "Same color", "Opposite color"])
 maxCandles = 50000
 
 poiDurationMs = timeframe.in_seconds(poiTimeframe) * 1000 * poiCandles
@@ -20,7 +21,9 @@ poiDurationMs = timeframe.in_seconds(poiTimeframe) * 1000 * poiCandles
 newHTF = ta.change(T)
 
 var float[] wickH = array.new_float()
+var bool[] wickHBullish = array.new_bool()
 var float[] wickL = array.new_float()
+var bool[] wickLBullish = array.new_bool()
 
 // Track active lines for alerts (level, expiry time)
 var float[] activeBullishLevels = array.new_float()
@@ -29,43 +32,60 @@ var float[] activeBearishLevels = array.new_float()
 var int[] activeBearishExpiry = array.new_int()
 
 if newHTF
+    wickCandleBullish = C[1] > O[1]
     if H[1] > math.max(O[1], C[1])
         array.push(wickH, H[1])
+        array.push(wickHBullish, wickCandleBullish)
     if L[1] < math.min(O[1], C[1])
         array.push(wickL, L[1])
+        array.push(wickLBullish, wickCandleBullish)
 
 while array.size(wickH) > maxCandles
     array.shift(wickH)
+    array.shift(wickHBullish)
 while array.size(wickL) > maxCandles
     array.shift(wickL)
+    array.shift(wickLBullish)
 
 if showHighs and array.size(wickH) > 0
     for i = array.size(wickH)-1 to 0
         if i < array.size(wickH)
             w = array.get(wickH, i)
             if C > w
-                tStart = time
-                tEnd = time + poiDurationMs
-                line.new(tStart, w, tEnd, w, xloc=xloc.bar_time, color=resColor, width=lineWidth)
-                array.push(activeBullishLevels, w)
-                array.push(activeBullishExpiry, tEnd)
+                crossingBullish = C > O
+                wickWasBullish = array.get(wickHBullish, i)
+                colorMatch = colorFilter == "None" or (colorFilter == "Same color" and crossingBullish == wickWasBullish) or (colorFilter == "Opposite color" and crossingBullish != wickWasBullish)
+                if colorMatch
+                    tStart = time
+                    tEnd = time + poiDurationMs
+                    line.new(tStart, w, tEnd, w, xloc=xloc.bar_time, color=resColor, width=lineWidth)
+                    array.push(activeBullishLevels, w)
+                    array.push(activeBullishExpiry, tEnd)
                 array.remove(wickH, i)
+                array.remove(wickHBullish, i)
             else if H >= w and C <= w
                 array.remove(wickH, i)
+                array.remove(wickHBullish, i)
 
 if showLows and array.size(wickL) > 0
     for i = array.size(wickL)-1 to 0
         if i < array.size(wickL)
             w = array.get(wickL, i)
             if C < w
-                tStart = time
-                tEnd = time + poiDurationMs
-                line.new(tStart, w, tEnd, w, xloc=xloc.bar_time, color=supColor, width=lineWidth)
-                array.push(activeBearishLevels, w)
-                array.push(activeBearishExpiry, tEnd)
+                crossingBullish = C > O
+                wickWasBullish = array.get(wickLBullish, i)
+                colorMatch = colorFilter == "None" or (colorFilter == "Same color" and crossingBullish == wickWasBullish) or (colorFilter == "Opposite color" and crossingBullish != wickWasBullish)
+                if colorMatch
+                    tStart = time
+                    tEnd = time + poiDurationMs
+                    line.new(tStart, w, tEnd, w, xloc=xloc.bar_time, color=supColor, width=lineWidth)
+                    array.push(activeBearishLevels, w)
+                    array.push(activeBearishExpiry, tEnd)
                 array.remove(wickL, i)
+                array.remove(wickLBullish, i)
             else if L <= w and C >= w
                 array.remove(wickL, i)
+                array.remove(wickLBullish, i)
 
 // Check active bullish levels for close through (and remove expired)
 if array.size(activeBullishLevels) > 0
