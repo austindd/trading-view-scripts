@@ -155,7 +155,7 @@ detectCISD() =>
                                         levelBroken := true
                                         break
                                     if invalidateSwept
-                                        if low[k] <= cspLevel
+                                        if low[k] < cspLevel
                                             levelBroken := true
                                             break
                                 if not levelBroken
@@ -166,7 +166,7 @@ detectCISD() =>
                                         for k = 0 to firstBearOff
                                             if close[k] < cspLevel
                                                 hasClose := true
-                                            if low[k] <= cspLevel and close[k] > cspLevel
+                                            if low[k] < cspLevel and close[k] > cspLevel
                                                 hasWick := true
                                         if hasWick
                                             if not hasClose
@@ -240,7 +240,7 @@ detectCISD() =>
                                         levelBroken := true
                                         break
                                     if invalidateSwept
-                                        if high[k] >= cspLevel
+                                        if high[k] > cspLevel
                                             levelBroken := true
                                             break
                                 if not levelBroken
@@ -251,7 +251,7 @@ detectCISD() =>
                                         for k = 0 to firstBullOff
                                             if close[k] > cspLevel
                                                 hasClose := true
-                                            if high[k] >= cspLevel and close[k] < cspLevel
+                                            if high[k] > cspLevel and close[k] < cspLevel
                                                 hasWick := true
                                         if hasWick
                                             if not hasClose
