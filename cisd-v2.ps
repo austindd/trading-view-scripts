@@ -23,6 +23,8 @@ grpSettings = "Settings"
 swingLookback = input.int(50, "Swing Lookback Bars", minval=5, maxval=200, group=grpSettings, tooltip="How far back to search for CSP swing points")
 maxIfvgBars   = input.int(6, "Max IFVG Candles", minval=3, maxval=50, group=grpSettings, tooltip="Maximum candles from the first FVG candle to the IFVG confirmation candle")
 invalidateSwept = input.bool(false, "Invalidate Swept CSPs", group=grpSettings, tooltip="When enabled, a CSP that has already been wicked through by a prior candle is considered used and will not qualify for CISD detection")
+requireStrongCandle = input.bool(false, "Require Strong Leg-Out Candle", group=grpSettings, tooltip="When enabled, at least one leg-out candle must have a body that is at least the specified percentage of its total range")
+minBodyPct = input.float(65, "Min Body %", minval=1, maxval=100, step=5, group=grpSettings, tooltip="Minimum body-to-range percentage for the strong candle requirement") / 100
 
 // Timeframe 1
 tf1Enabled   = input.bool(true, "Enable", inline="tf1", group="Timeframe 1")
@@ -122,67 +124,78 @@ detectCISD() =>
                 firstBearOff = bullRunLen + bearRunLen - 1
                 lastBearOff = bullRunLen  // final bearish candle (closest to bullish run)
                 if close > open[firstBearOff]  // engulfment
-                    maxJ = math.min(swingLookback, 4998)
-                    startJ = math.max(2, firstBearOff + 1)
-                    for j = startJ to maxJ
-                        bodyBottom = math.min(open[j], close[j])
-                        isSwingLow = low[j] < low[j + 1] and low[j] < low[j - 1] and low[j] < bodyBottom
-                        if isSwingLow
-                            cspLevel = low[j]
-                            // Check CSP not broken (or already swept) before structure
-                            levelBroken = false
-                            for k = firstBearOff + 1 to j - 1
-                                if close[k] < cspLevel
-                                    levelBroken := true
+                    // Check for strong leg-out candle if required
+                    strongOk = not requireStrongCandle
+                    if requireStrongCandle
+                        for k = 0 to bullRunLen - 1
+                            candleRange = high[k] - low[k]
+                            if candleRange > 0
+                                body = math.abs(close[k] - open[k])
+                                if body >= candleRange * minBodyPct
+                                    strongOk := true
                                     break
-                                if invalidateSwept
-                                    if low[k] <= cspLevel
+                    if strongOk
+                        maxJ = math.min(swingLookback, 4998)
+                        startJ = math.max(2, firstBearOff + 1)
+                        for j = startJ to maxJ
+                            bodyBottom = math.min(open[j], close[j])
+                            isSwingLow = low[j] < low[j + 1] and low[j] < low[j - 1] and low[j] < bodyBottom
+                            if isSwingLow
+                                cspLevel = low[j]
+                                // Check CSP not broken (or already swept) before structure
+                                levelBroken = false
+                                for k = firstBearOff + 1 to j - 1
+                                    if close[k] < cspLevel
                                         levelBroken := true
                                         break
-                            if not levelBroken
-                                // ── Case 1: Wick Sweep ──
-                                if not bullishCISD and detectWickSweep
-                                    hasWick = false
-                                    hasClose = false
-                                    for k = 0 to firstBearOff
-                                        if close[k] < cspLevel
-                                            hasClose := true
-                                        if low[k] <= cspLevel and close[k] > cspLevel
-                                            hasWick := true
-                                    if hasWick
-                                        if not hasClose
-                                            bullishCISD := true
-
-                                // ── Case 2: Two-Candle Sweep ──
-                                if not bullishCISD and detectTwoCandleSweep
-                                    if close[lastBearOff] < cspLevel and close[lastBearOff - 1] > cspLevel
-                                        onlyOne = true
-                                        if bearRunLen >= 2
-                                            for k = lastBearOff + 1 to firstBearOff
-                                                if close[k] < cspLevel
-                                                    onlyOne := false
-                                                    break
-                                        if onlyOne
-                                            bullishCISD := true
-
-                                // ── Case 3: IFVG Sweep ──
-                                if not bullishCISD and detectIFVGSweep
-                                    if close[0] > cspLevel
-                                        hasCloseBelow = false
+                                    if invalidateSwept
+                                        if low[k] <= cspLevel
+                                            levelBroken := true
+                                            break
+                                if not levelBroken
+                                    // ── Case 1: Wick Sweep ──
+                                    if not bullishCISD and detectWickSweep
+                                        hasWick = false
+                                        hasClose = false
                                         for k = 0 to firstBearOff
                                             if close[k] < cspLevel
-                                                hasCloseBelow := true
-                                                break
-                                        if hasCloseBelow
-                                            for i = 1 to maxIfvgBars - 2
-                                                if i + 2 <= maxIfvgBars
-                                                    if high[i] < low[i + 2]
-                                                        if close[0] > low[i + 2]
-                                                            bullishCISD := true
-                                                            break
+                                                hasClose := true
+                                            if low[k] <= cspLevel and close[k] > cspLevel
+                                                hasWick := true
+                                        if hasWick
+                                            if not hasClose
+                                                bullishCISD := true
 
-                        if bullishCISD
-                            break
+                                    // ── Case 2: Two-Candle Sweep ──
+                                    if not bullishCISD and detectTwoCandleSweep
+                                        if close[lastBearOff] < cspLevel and close[lastBearOff - 1] > cspLevel
+                                            onlyOne = true
+                                            if bearRunLen >= 2
+                                                for k = lastBearOff + 1 to firstBearOff
+                                                    if close[k] < cspLevel
+                                                        onlyOne := false
+                                                        break
+                                            if onlyOne
+                                                bullishCISD := true
+
+                                    // ── Case 3: IFVG Sweep ──
+                                    if not bullishCISD and detectIFVGSweep
+                                        if close[0] > cspLevel
+                                            hasCloseBelow = false
+                                            for k = 0 to firstBearOff
+                                                if close[k] < cspLevel
+                                                    hasCloseBelow := true
+                                                    break
+                                            if hasCloseBelow
+                                                for i = 1 to maxIfvgBars - 2
+                                                    if i + 2 <= maxIfvgBars
+                                                        if high[i] < low[i + 2]
+                                                            if close[0] > low[i + 2]
+                                                                bullishCISD := true
+                                                                break
+
+                            if bullishCISD
+                                break
 
     // ─── Bearish CISD ─────────────────────────────────────────────────
     // Requires: consecutive bearish run → preceded by bullish run → engulfment → CSP sweep
@@ -194,67 +207,78 @@ detectCISD() =>
                 firstBullOff = bearRunLen2 + bullRunLen2 - 1
                 lastBullOff = bearRunLen2  // final bullish candle (closest to bearish run)
                 if close < open[firstBullOff]  // engulfment
-                    maxJ = math.min(swingLookback, 4998)
-                    startJ = math.max(2, firstBullOff + 1)
-                    for j = startJ to maxJ
-                        bodyTop = math.max(open[j], close[j])
-                        isSwingHigh = high[j] > high[j + 1] and high[j] > high[j - 1] and high[j] > bodyTop
-                        if isSwingHigh
-                            cspLevel = high[j]
-                            // Check CSP not broken (or already swept) before structure
-                            levelBroken = false
-                            for k = firstBullOff + 1 to j - 1
-                                if close[k] > cspLevel
-                                    levelBroken := true
+                    // Check for strong leg-out candle if required
+                    strongOk = not requireStrongCandle
+                    if requireStrongCandle
+                        for k = 0 to bearRunLen2 - 1
+                            candleRange = high[k] - low[k]
+                            if candleRange > 0
+                                body = math.abs(close[k] - open[k])
+                                if body >= candleRange * minBodyPct
+                                    strongOk := true
                                     break
-                                if invalidateSwept
-                                    if high[k] >= cspLevel
+                    if strongOk
+                        maxJ = math.min(swingLookback, 4998)
+                        startJ = math.max(2, firstBullOff + 1)
+                        for j = startJ to maxJ
+                            bodyTop = math.max(open[j], close[j])
+                            isSwingHigh = high[j] > high[j + 1] and high[j] > high[j - 1] and high[j] > bodyTop
+                            if isSwingHigh
+                                cspLevel = high[j]
+                                // Check CSP not broken (or already swept) before structure
+                                levelBroken = false
+                                for k = firstBullOff + 1 to j - 1
+                                    if close[k] > cspLevel
                                         levelBroken := true
                                         break
-                            if not levelBroken
-                                // ── Case 1: Wick Sweep ──
-                                if not bearishCISD and detectWickSweep
-                                    hasWick = false
-                                    hasClose = false
-                                    for k = 0 to firstBullOff
-                                        if close[k] > cspLevel
-                                            hasClose := true
-                                        if high[k] >= cspLevel and close[k] < cspLevel
-                                            hasWick := true
-                                    if hasWick
-                                        if not hasClose
-                                            bearishCISD := true
-
-                                // ── Case 2: Two-Candle Sweep ──
-                                if not bearishCISD and detectTwoCandleSweep
-                                    if close[lastBullOff] > cspLevel and close[lastBullOff - 1] < cspLevel
-                                        onlyOne = true
-                                        if bullRunLen2 >= 2
-                                            for k = lastBullOff + 1 to firstBullOff
-                                                if close[k] > cspLevel
-                                                    onlyOne := false
-                                                    break
-                                        if onlyOne
-                                            bearishCISD := true
-
-                                // ── Case 3: IFVG Sweep ──
-                                if not bearishCISD and detectIFVGSweep
-                                    if close[0] < cspLevel
-                                        hasCloseAbove = false
+                                    if invalidateSwept
+                                        if high[k] >= cspLevel
+                                            levelBroken := true
+                                            break
+                                if not levelBroken
+                                    // ── Case 1: Wick Sweep ──
+                                    if not bearishCISD and detectWickSweep
+                                        hasWick = false
+                                        hasClose = false
                                         for k = 0 to firstBullOff
                                             if close[k] > cspLevel
-                                                hasCloseAbove := true
-                                                break
-                                        if hasCloseAbove
-                                            for i = 1 to maxIfvgBars - 2
-                                                if i + 2 <= maxIfvgBars
-                                                    if low[i] > high[i + 2]
-                                                        if close[0] < high[i + 2]
-                                                            bearishCISD := true
-                                                            break
+                                                hasClose := true
+                                            if high[k] >= cspLevel and close[k] < cspLevel
+                                                hasWick := true
+                                        if hasWick
+                                            if not hasClose
+                                                bearishCISD := true
 
-                        if bearishCISD
-                            break
+                                    // ── Case 2: Two-Candle Sweep ──
+                                    if not bearishCISD and detectTwoCandleSweep
+                                        if close[lastBullOff] > cspLevel and close[lastBullOff - 1] < cspLevel
+                                            onlyOne = true
+                                            if bullRunLen2 >= 2
+                                                for k = lastBullOff + 1 to firstBullOff
+                                                    if close[k] > cspLevel
+                                                        onlyOne := false
+                                                        break
+                                            if onlyOne
+                                                bearishCISD := true
+
+                                    // ── Case 3: IFVG Sweep ──
+                                    if not bearishCISD and detectIFVGSweep
+                                        if close[0] < cspLevel
+                                            hasCloseAbove = false
+                                            for k = 0 to firstBullOff
+                                                if close[k] > cspLevel
+                                                    hasCloseAbove := true
+                                                    break
+                                            if hasCloseAbove
+                                                for i = 1 to maxIfvgBars - 2
+                                                    if i + 2 <= maxIfvgBars
+                                                        if low[i] > high[i + 2]
+                                                            if close[0] < high[i + 2]
+                                                                bearishCISD := true
+                                                                break
+
+                            if bearishCISD
+                                break
 
     [bullishCISD, bearishCISD]
 
