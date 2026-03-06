@@ -22,12 +22,13 @@ detectIFVGSweep     = input.bool(true, "IFVG Sweep", group=grpDetection, tooltip
 grpSettings = "Settings"
 swingLookback = input.int(50, "Swing Lookback Bars", minval=5, maxval=200, group=grpSettings, tooltip="How far back to search for CSP swing points")
 maxIfvgBars   = input.int(6, "Max IFVG Candles", minval=3, maxval=50, group=grpSettings, tooltip="Maximum candles from the first FVG candle to the IFVG confirmation candle")
-invalidateSwept = input.bool(false, "Invalidate Swept CSPs", group=grpSettings, tooltip="When enabled, a CSP that has already been wicked through by a prior candle is considered used and will not qualify for CISD detection")
+invalidateSwept = input.bool(true "Invalidate Swept CSPs", group=grpSettings, tooltip="When enabled, a CSP that has already been wicked through by a prior candle is considered used and will not qualify for CISD detection")
+allowEqualCSPs  = input.bool(false, "Allow Equal Highs/Lows as CSPs", group=grpSettings, tooltip="When enabled, consecutive candles with equal highs or lows count as a valid CSP swing point if surrounded by lower highs or higher lows")
 minLegIn  = input.int(0, "Min Leg-In Candles",  minval=0, maxval=200, group=grpSettings, tooltip="Minimum consecutive candles in the leg-in run (0 = no minimum beyond the default of 1)")
-maxLegIn  = input.int(0, "Max Leg-In Candles",  minval=0, maxval=200, group=grpSettings, tooltip="Maximum consecutive candles in the leg-in run (0 = no limit)")
+maxLegIn  = input.int(12, "Max Leg-In Candles",  minval=0, maxval=200, group=grpSettings, tooltip="Maximum consecutive candles in the leg-in run (0 = no limit)")
 minLegOut = input.int(0, "Min Leg-Out Candles", minval=0, maxval=200, group=grpSettings, tooltip="Minimum consecutive candles in the leg-out run (0 = no minimum beyond the default of 1)")
-maxLegOut = input.int(0, "Max Leg-Out Candles", minval=0, maxval=200, group=grpSettings, tooltip="Maximum consecutive candles in the leg-out run (0 = no limit)")
-requireStrongCandle = input.bool(false, "Require Strong Leg-Out Candle", group=grpSettings, tooltip="When enabled, at least one leg-out candle must have a body that is at least the specified percentage of its total range")
+maxLegOut = input.int(8, "Max Leg-Out Candles", minval=0, maxval=200, group=grpSettings, tooltip="Maximum consecutive candles in the leg-out run (0 = no limit)")
+requireStrongCandle = input.bool(true "Require Strong Leg-Out Candle", group=grpSettings, tooltip="When enabled, at least one leg-out candle must have a body that is at least the specified percentage of its total range")
 minBodyPct = input.float(65, "Min Body %", minval=1, maxval=100, step=5, group=grpSettings, tooltip="Minimum body-to-range percentage for the strong candle requirement") / 100
 
 // Timeframe 1
@@ -146,6 +147,18 @@ detectCISD() =>
                         for j = startJ to maxJ
                             bodyBottom = math.min(open[j], close[j])
                             isSwingLow = low[j] < low[j + 1] and low[j] < low[j - 1] and low[j] < bodyBottom
+                            // Equal lows: right side (j-1) already higher, scan left past equal run
+                            if not isSwingLow and allowEqualCSPs
+                                if low[j] < low[j - 1] and low[j] < bodyBottom
+                                    if low[j] == low[j + 1]
+                                        lastEq = j + 1
+                                        for scan = j + 2 to j + 50
+                                            if low[scan] == low[j]
+                                                lastEq := scan
+                                            else
+                                                break
+                                        if low[lastEq + 1] > low[j]
+                                            isSwingLow := true
                             if isSwingLow
                                 cspLevel = low[j]
                                 // Check CSP not broken (or already swept) before structure
@@ -231,6 +244,18 @@ detectCISD() =>
                         for j = startJ to maxJ
                             bodyTop = math.max(open[j], close[j])
                             isSwingHigh = high[j] > high[j + 1] and high[j] > high[j - 1] and high[j] > bodyTop
+                            // Equal highs: right side (j-1) already lower, scan left past equal run
+                            if not isSwingHigh and allowEqualCSPs
+                                if high[j] > high[j - 1] and high[j] > bodyTop
+                                    if high[j] == high[j + 1]
+                                        lastEq = j + 1
+                                        for scan = j + 2 to j + 50
+                                            if high[scan] == high[j]
+                                                lastEq := scan
+                                            else
+                                                break
+                                        if high[lastEq + 1] < high[j]
+                                            isSwingHigh := true
                             if isSwingHigh
                                 cspLevel = high[j]
                                 // Check CSP not broken (or already swept) before structure
