@@ -13,11 +13,14 @@ lineWidth = input.int(2, "width")
 poiTimeframe = input.timeframe("60", "POI timeframe")
 poiCandles = input.int(1, "POI candles", minval=1)
 colorFilter = input.string("None", "POI candle color filter", options=["None", "Same color", "Opposite color"])
+atrFilterEnabled = input.bool(false, "ATR filter")
+atrPeriod = input.int(14, "ATR period", minval=1)
+atrMultiple = input.float(1.0, "ATR multiple", minval=0)
 maxCandles = 50000
 
 poiDurationMs = timeframe.in_seconds(poiTimeframe) * 1000 * poiCandles
 
-[H,L,O,C,T] = request.security(syminfo.tickerid, htfTF, [high,low,open,close,time], lookahead=barmerge.lookahead_off)
+[H,L,O,C,T,htfATR] = request.security(syminfo.tickerid, htfTF, [high,low,open,close,time,ta.atr(atrPeriod)], lookahead=barmerge.lookahead_off)
 newHTF = ta.change(T)
 
 var float[] wickH = array.new_float()
@@ -55,7 +58,8 @@ if showHighs and array.size(wickH) > 0
                 crossingBullish = C > O
                 wickWasBullish = array.get(wickHBullish, i)
                 colorMatch = colorFilter == "None" or (colorFilter == "Same color" and crossingBullish == wickWasBullish) or (colorFilter == "Opposite color" and crossingBullish != wickWasBullish)
-                if colorMatch
+                atrMatch = not atrFilterEnabled or (H - L >= atrMultiple * htfATR)
+                if colorMatch and atrMatch
                     tStart = time
                     tEnd = time + poiDurationMs
                     line.new(tStart, w, tEnd, w, xloc=xloc.bar_time, color=resColor, width=lineWidth)
@@ -75,7 +79,8 @@ if showLows and array.size(wickL) > 0
                 crossingBullish = C > O
                 wickWasBullish = array.get(wickLBullish, i)
                 colorMatch = colorFilter == "None" or (colorFilter == "Same color" and crossingBullish == wickWasBullish) or (colorFilter == "Opposite color" and crossingBullish != wickWasBullish)
-                if colorMatch
+                atrMatch = not atrFilterEnabled or (H - L >= atrMultiple * htfATR)
+                if colorMatch and atrMatch
                     tStart = time
                     tEnd = time + poiDurationMs
                     line.new(tStart, w, tEnd, w, xloc=xloc.bar_time, color=supColor, width=lineWidth)
