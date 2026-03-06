@@ -23,6 +23,10 @@ grpSettings = "Settings"
 swingLookback = input.int(50, "Swing Lookback Bars", minval=5, maxval=200, group=grpSettings, tooltip="How far back to search for CSP swing points")
 maxIfvgBars   = input.int(6, "Max IFVG Candles", minval=3, maxval=50, group=grpSettings, tooltip="Maximum candles from the first FVG candle to the IFVG confirmation candle")
 invalidateSwept = input.bool(false, "Invalidate Swept CSPs", group=grpSettings, tooltip="When enabled, a CSP that has already been wicked through by a prior candle is considered used and will not qualify for CISD detection")
+minLegIn  = input.int(0, "Min Leg-In Candles",  minval=0, maxval=200, group=grpSettings, tooltip="Minimum consecutive candles in the leg-in run (0 = no minimum beyond the default of 1)")
+maxLegIn  = input.int(0, "Max Leg-In Candles",  minval=0, maxval=200, group=grpSettings, tooltip="Maximum consecutive candles in the leg-in run (0 = no limit)")
+minLegOut = input.int(0, "Min Leg-Out Candles", minval=0, maxval=200, group=grpSettings, tooltip="Minimum consecutive candles in the leg-out run (0 = no minimum beyond the default of 1)")
+maxLegOut = input.int(0, "Max Leg-Out Candles", minval=0, maxval=200, group=grpSettings, tooltip="Maximum consecutive candles in the leg-out run (0 = no limit)")
 requireStrongCandle = input.bool(false, "Require Strong Leg-Out Candle", group=grpSettings, tooltip="When enabled, at least one leg-out candle must have a body that is at least the specified percentage of its total range")
 minBodyPct = input.float(65, "Min Body %", minval=1, maxval=100, step=5, group=grpSettings, tooltip="Minimum body-to-range percentage for the strong candle requirement") / 100
 
@@ -118,9 +122,11 @@ detectCISD() =>
     // Requires: consecutive bullish run → preceded by bearish run → engulfment → CSP sweep
     if showBullish
         bullRunLen = countBullRun(0)
-        if bullRunLen >= 1
+        legOutOk1 = bullRunLen >= math.max(1, minLegOut) and (maxLegOut == 0 or bullRunLen <= maxLegOut)
+        if legOutOk1
             bearRunLen = countBearRun(bullRunLen)
-            if bearRunLen >= 1
+            legInOk1 = bearRunLen >= math.max(1, minLegIn) and (maxLegIn == 0 or bearRunLen <= maxLegIn)
+            if legInOk1
                 firstBearOff = bullRunLen + bearRunLen - 1
                 lastBearOff = bullRunLen  // final bearish candle (closest to bullish run)
                 if close > open[firstBearOff]  // engulfment
@@ -201,9 +207,11 @@ detectCISD() =>
     // Requires: consecutive bearish run → preceded by bullish run → engulfment → CSP sweep
     if showBearish
         bearRunLen2 = countBearRun(0)
-        if bearRunLen2 >= 1
+        legOutOk2 = bearRunLen2 >= math.max(1, minLegOut) and (maxLegOut == 0 or bearRunLen2 <= maxLegOut)
+        if legOutOk2
             bullRunLen2 = countBullRun(bearRunLen2)
-            if bullRunLen2 >= 1
+            legInOk2 = bullRunLen2 >= math.max(1, minLegIn) and (maxLegIn == 0 or bullRunLen2 <= maxLegIn)
+            if legInOk2
                 firstBullOff = bearRunLen2 + bullRunLen2 - 1
                 lastBullOff = bearRunLen2  // final bullish candle (closest to bearish run)
                 if close < open[firstBullOff]  // engulfment
