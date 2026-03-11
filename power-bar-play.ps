@@ -24,6 +24,7 @@ envelopeColor = input.color(color.new(color.blue, 85), "Envelope Fill Color", gr
 // ============================================================================
 // POWER BAR SETTINGS
 // ============================================================================
+pbAtrLength = input.int(14, "ATR Length (Candle Size)", minval=1, group="Power Bar")
 pbMinAtrMultiple = input.float(1.0, "Min Candle Size (ATR Multiple)", minval=0.1, step=0.1, group="Power Bar")
 pbMinBodyRatio = input.float(0.75, "Min Body Ratio (Body/Range)", minval=0.1, maxval=1.0, step=0.05, group="Power Bar")
 pbBullishColor = input.color(color.new(color.green, 0), "Bullish Power Bar Color", group="Power Bar")
@@ -62,6 +63,7 @@ type LowLevel
 
 smaValue = ta.sma(close, smaLength)
 atrEnvelopeValue = ta.atr(atrEnvelopeLength)
+atrPbValue = ta.atr(pbAtrLength)
 smaUpper = smaValue + atrEnvelopeValue * atrEnvelopeMultiplier
 smaLower = smaValue - atrEnvelopeValue * atrEnvelopeMultiplier
 
@@ -454,7 +456,7 @@ float candleBody = math.abs(close - open)
 float bodyRatio = candleRange > 0 ? candleBody / candleRange : 0
 
 bool touchesEnvelope = not na(smaUpper) and not na(smaLower) and low <= smaUpper and high >= smaLower
-bool meetsAtrSize = not na(atrEnvelopeValue) and candleRange >= pbMinAtrMultiple * atrEnvelopeValue
+bool meetsAtrSize = not na(atrPbValue) and candleRange >= pbMinAtrMultiple * atrPbValue
 bool meetsBodyRatio = bodyRatio >= pbMinBodyRatio
 bool isBos = bosBullish or bosBearish
 
@@ -482,7 +484,8 @@ if isBearishPowerBar
 // ============================================================================
 
 // SMA and envelope
-smaPlot = plot(smaValue, "SMA", color=smaColor, linewidth=2)
+color smaSlopeColor = smaValue > smaValue[1] ? color.green : smaValue < smaValue[1] ? color.red : color.gray
+smaPlot = plot(smaValue, "SMA", color=smaSlopeColor, linewidth=2)
 upperPlot = plot(showEnvelope ? smaUpper : na, "Upper Envelope", color=smaColor, linewidth=1)
 lowerPlot = plot(showEnvelope ? smaLower : na, "Lower Envelope", color=smaColor, linewidth=1)
 fill(upperPlot, lowerPlot, color=envelopeColor)
