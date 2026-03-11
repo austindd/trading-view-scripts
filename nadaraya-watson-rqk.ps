@@ -1,0 +1,136 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © jdehorty
+// @version=5
+
+// A non-repainting implementation of Nadaraya–Watson Regression using a Rational Quadratic Kernel. 
+
+indicator('Nadaraya-Watson: Rational Quadratic Kernel (Non-Repainting) x2 [SB]', "NW RQK (no-repaint) x2 [SB]", overlay=true, timeframe="")
+
+// Settings
+srcA = input.source(open, 'Source A')
+srcB = input.source(close, 'Source B')
+h = input.float(8., 'Lookback Window', minval=3., tooltip='The number of bars used for the estimation. This is a sliding value that represents the most recent historical bars. Recommended range: 3-50')
+r = input.float(8., 'Relative Weighting', step=0.25, tooltip='Relative weighting of time frames. As this value approaches zero, the longer time frames will exert more influence on the estimation. As this value approaches infinity, the behavior of the Rational Quadratic Kernel will become identical to the Gaussian kernel. Recommended range: 0.25-25')
+x_0 = input.int(25, "Start Regression at Bar", tooltip='Bar index on which to start regression. The first bars of a chart are often highly volatile, and omission of these initial bars often leads to a better overall fit. Recommended range: 5-25')
+smoothColors = input.bool(false, "Smooth Colors", tooltip="Uses a crossover based mechanism to determine colors. This often results in less color transitions overall.", inline='1', group='Colors')
+lag = input.int(2, "Lag", tooltip="Lag for crossover detection. Lower values result in earlier crossovers. Recommended range: 1-2", inline='1', group='Colors')
+useEmaSmoothing = input.bool(true, "Use EMA Smoothing")
+smoothingFactor = input.int(4, "EMA Smoothing Factor")
+sizeA = array.size(array.from(srcA)) // size of the data series
+sizeB = array.size(array.from(srcB)) // size of the data series
+
+// Further Reading:
+// The Kernel Cookbook: Advice on Covariance functions. David Duvenaud. Published June 2014.
+// Estimation of the bandwidth parameter in Nadaraya-Watson kernel non-parametric regression based on universal threshold level. Ali T, Heyam Abd Al-Majeed Hayawi, Botani I. Published February 26, 2021.
+kernel_regression(_src, _size, _h) =>
+    float _currentWeight = 0.
+    float _cumulativeWeight = 0.
+    for i = 0 to _size + x_0
+        y = _src[i] 
+        w = math.pow(1 + (math.pow(i, 2) / ((math.pow(_h, 2) * 2 * r))), -r)
+        _currentWeight += y*w
+        _cumulativeWeight += w
+    _currentWeight / _cumulativeWeight
+
+// Estimations - A
+yhat1A_raw = kernel_regression(srcA, sizeA, h)
+yhat2A_raw = kernel_regression(srcA, sizeA, h-lag)
+yhat1A = useEmaSmoothing ? ta.ema(yhat1A_raw, smoothingFactor) : yhat1A_raw
+yhat2A = useEmaSmoothing ? ta.ema(yhat2A_raw, smoothingFactor) : yhat2A_raw
+
+// Estimations - B
+yhat1B_raw = kernel_regression(srcB, sizeB, h)
+yhat2B_raw = kernel_regression(srcB, sizeB, h-lag)
+yhat1B = useEmaSmoothing ? ta.ema(yhat1B_raw, smoothingFactor) : yhat1B_raw
+yhat2B = useEmaSmoothing ? ta.ema(yhat2B_raw, smoothingFactor) : yhat2B_raw
+
+// Rates of Change - A
+bool wasBearishA = yhat1A[2] > yhat1A[1]
+bool wasBullishA = yhat1A[2] < yhat1A[1]
+bool isBearishA = yhat1A[1] > yhat1A
+bool isBullishA = yhat1A[1] < yhat1A
+bool isBearishChangeA = isBearishA and wasBullishA
+bool isBullishChangeA = isBullishA and wasBearishA
+
+// Rates of Change - B
+bool wasBearishB = yhat1B[2] > yhat1B[1]
+bool wasBullishB = yhat1B[2] < yhat1B[1]
+bool isBearishB = yhat1B[1] > yhat1B
+bool isBullishB = yhat1B[1] < yhat1B
+bool isBearishChangeB = isBearishB and wasBullishB
+bool isBullishChangeB = isBullishB and wasBearishB
+
+// Crossovers - A
+bool isBullishCrossA = ta.crossover(yhat2A, yhat1A)
+bool isBearishCrossA = ta.crossunder(yhat2A, yhat1A) 
+bool isBullishSmoothA = yhat2A > yhat1A
+bool isBearishSmoothA = yhat2A < yhat1A
+
+// Crossovers - B
+bool isBullishCrossB = ta.crossover(yhat2B, yhat1B)
+bool isBearishCrossB = ta.crossunder(yhat2B, yhat1B) 
+bool isBullishSmoothB = yhat2B > yhat1B
+bool isBearishSmoothB = yhat2B < yhat1B
+
+// Crossovers Between A and B
+distMA = math.abs(ta.ema(yhat1B - yhat1A, smoothingFactor))
+isNeutral = math.abs(yhat1B - yhat1A) < (0.4 * distMA)
+wasBullish = yhat1B[1] > yhat1A[1] and not isNeutral[1] //and wasBullishA and wasBullishB
+wasBearish = yhat1B[1] < yhat1A[1] and not isNeutral[1] //and wasBearishA and wasBearishB
+isBullish = yhat1B > yhat1A and not isNeutral //and isBullishA and isBullishB
+isBearish = yhat1B < yhat1A and not isNeutral //and isBearishA and isBearishB
+bullishCross = isBullish and not wasBullish
+bearishCross = isBearish and not wasBearish
+
+
+
+// Colors - A
+color c_bullishA = input.color(#1759ff, 'Bullish Color', group='Colors')
+color c_bearishA = input.color(#fd6e07, 'Bearish Color', group='Colors')
+color colorByCrossA = isBullishSmoothA ? c_bullishA : c_bearishA
+color colorByRateA = isBullishA ? c_bullishA : c_bearishA
+color plotColorA = smoothColors ? colorByCrossA : colorByRateA
+
+// Colors - B
+color c_bullishB = input.color(#1759ff, 'Bullish Color', group='Colors')
+color c_bearishB = input.color(#fd6e07, 'Bearish Color', group='Colors')
+color colorByCrossB = isBullishSmoothB ? c_bullishB : c_bearishB
+color colorByRateB = isBullishB ? c_bullishB : c_bearishB
+color plotColorB = smoothColors ? colorByCrossB : colorByRateB
+
+// Plot - A
+plotA = plot(yhat1A, "Rational Quadratic Kernel Estimate - A", color=plotColorA, linewidth=2, display = display.none)
+
+// Plot - B
+plotB = plot(yhat1B, "Rational Quadratic Kernel Estimate - B", color=plotColorB, linewidth=2, display = display.none)
+
+// Fill Between A and B
+fill(plotA, plotB, color= isBullish and isBullishA and isBullishB ? color.lime : isBearish and isBearishA and isBearishB ? color.purple : color.gray)
+
+// Plot Crossovers
+plotshape(bullishCross, "Bullish Cross", shape.diamond, location=location.belowbar, color=color.lime)
+plotshape(bearishCross, "Bearish Cross", shape.diamond, location=location.abovebar, color=color.purple)
+// plotshape(isBullish and isBullishA and isBullishB, "Bullish Cross", shape.diamond, location=location.belowbar, color=color.lime)
+// plotshape(isBearish and isBearishA and isBearishB, "Bearish Cross", shape.diamond, location=location.abovebar, color=color.purple)
+
+// Alert Variables - A
+bool alertBullishA = smoothColors ? isBearishCrossA : isBearishChangeA
+bool alertBearishA = smoothColors ? isBullishCrossA : isBullishChangeA
+
+// Alert Variables - B
+bool alertBullishB = smoothColors ? isBearishCrossB : isBearishChangeB
+bool alertBearishB = smoothColors ? isBullishCrossB : isBullishChangeB
+
+// Alerts for Color Changes - A
+alertcondition(condition=alertBullishA, title='Bearish Color Change - A', message='Nadaraya-Watson: {{ticker}} ({{interval}}) turned Bearish ▼ [A]')
+alertcondition(condition=alertBearishA, title='Bullish Color Change - A', message='Nadaraya-Watson: {{ticker}} ({{interval}}) turned Bullish ▲ [A]')
+
+// Alerts for Color Changes - B
+alertcondition(condition=alertBullishB, title='Bearish Color Change - B', message='Nadaraya-Watson: {{ticker}} ({{interval}}) turned Bearish ▼ [B]')
+alertcondition(condition=alertBearishB, title='Bullish Color Change - B', message='Nadaraya-Watson: {{ticker}} ({{interval}}) turned Bullish ▲ [B]')
+
+// Non-Displayed Plot Outputs (i.e., for use in other indicators) - A
+plot(alertBearishA ? -1 : alertBullishA ? 1 : 0, "Alert Stream A", display=display.none)
+
+// Non-Displayed Plot Outputs (i.e., for use in other indicators) - B
+plot(alertBearishB ? -1 : alertBullishB ? 1 : 0, "Alert Stream A", display=display.none)
