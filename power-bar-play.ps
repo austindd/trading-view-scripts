@@ -1,0 +1,497 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Power Bar Play [SB]", "PBP [SB]", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// Ensure sufficient historical buffer for lookback functions
+max_bars_back(high, 5000)
+max_bars_back(low, 5000)
+max_bars_back(open, 5000)
+max_bars_back(close, 5000)
+max_bars_back(time, 5000)
+
+// ============================================================================
+// SMA & ENVELOPE SETTINGS
+// ============================================================================
+smaLength = input.int(20, "SMA Length", minval=1, group="SMA Envelope")
+atrEnvelopeLength = input.int(100, "ATR Length (Envelope)", minval=1, group="SMA Envelope")
+atrEnvelopeMultiplier = input.float(1.0, "ATR Multiplier (Envelope)", minval=0.1, step=0.1, group="SMA Envelope")
+showEnvelope = input.bool(true, "Show SMA Envelope", group="SMA Envelope")
+smaColor = input.color(color.new(color.blue, 0), "SMA Color", group="SMA Envelope")
+envelopeColor = input.color(color.new(color.blue, 85), "Envelope Fill Color", group="SMA Envelope")
+
+// ============================================================================
+// POWER BAR SETTINGS
+// ============================================================================
+pbMinAtrMultiple = input.float(1.0, "Min Candle Size (ATR Multiple)", minval=0.1, step=0.1, group="Power Bar")
+pbMinBodyRatio = input.float(0.75, "Min Body Ratio (Body/Range)", minval=0.1, maxval=1.0, step=0.05, group="Power Bar")
+pbBullishColor = input.color(color.new(color.green, 0), "Bullish Power Bar Color", group="Power Bar")
+pbBearishColor = input.color(color.new(color.red, 0), "Bearish Power Bar Color", group="Power Bar")
+pbColorBars = input.bool(true, "Color Power Bar Candles", group="Power Bar")
+
+// ============================================================================
+// STRUCTURE DISPLAY SETTINGS
+// ============================================================================
+showStructureLines = input.bool(false, "Show Structure Lines", group="Structure Display")
+showBosLabels = input.bool(false, "Show BOS Labels", group="Structure Display")
+highColor = input.color(color.new(color.red, 0), "High Color", group="Structure Display")
+lowColor = input.color(color.new(color.green, 0), "Low Color", group="Structure Display")
+bosColor = input.color(color.new(color.gray, 0), "BOS Color", group="Structure Display")
+lineWidth = input.int(1, "Line Width", minval=1, maxval=5, group="Structure Display")
+
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
+
+type HighLevel
+    float price
+    int barIndex
+    line levelLine
+    string levelType  // "strong", "weak", "broken", "swept"
+
+type LowLevel
+    float price
+    int barIndex
+    line levelLine
+    string levelType  // "strong", "weak", "broken", "swept"
+
+// ============================================================================
+// SMA & ATR CALCULATIONS
+// ============================================================================
+
+smaValue = ta.sma(close, smaLength)
+atrEnvelopeValue = ta.atr(atrEnvelopeLength)
+smaUpper = smaValue + atrEnvelopeValue * atrEnvelopeMultiplier
+smaLower = smaValue - atrEnvelopeValue * atrEnvelopeMultiplier
+
+// ============================================================================
+// STATE VARIABLES
+// ============================================================================
+
+// Structure arrays
+var array<HighLevel> highs = array.new<HighLevel>()
+var array<LowLevel> lows = array.new<LowLevel>()
+
+// Market structure state
+var float currentValidHigh = na
+var float currentValidLow = na
+var int currentValidHighBar = na
+var int currentValidLowBar = na
+var bool initialized = false
+var bool lookingForLow = false
+var bool lookingForHigh = false
+var bool currentHighIsBroken = false
+var bool currentLowIsBroken = false
+var string lastBosDirection = "none"
+
+var int mostRecentHighIndex = -1
+var int mostRecentLowIndex = -1
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+isBearishBreakdown() =>
+    close < open and close < low[1]
+
+isBullishBreakout() =>
+    close > open and close > high[1]
+
+findLowestBetween(startBar, endBar) =>
+    float lowestPrice = na
+    int lowestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    int maxLookback = 5000
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(low[i])
+                if na(lowestPrice) or low[i] < lowestPrice
+                    lowestPrice := low[i]
+                    lowestBarIndex := currentBar - i
+
+    [lowestPrice, lowestBarIndex]
+
+findHighestBetween(startBar, endBar) =>
+    float highestPrice = na
+    int highestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    int maxLookback = 5000
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(high[i])
+                if na(highestPrice) or high[i] > highestPrice
+                    highestPrice := high[i]
+                    highestBarIndex := currentBar - i
+
+    [highestPrice, highestBarIndex]
+
+// ============================================================================
+// LEVEL MANAGEMENT FUNCTIONS
+// ============================================================================
+
+addHigh(float price, int barIdx, string levelType, color lineColor) =>
+    if mostRecentHighIndex >= 0
+        prevHigh = array.get(highs, mostRecentHighIndex)
+        if prevHigh.levelType != "broken" and prevHigh.levelType != "swept" and not na(prevHigh.levelLine)
+            line.delete(prevHigh.levelLine)
+
+    line newLine = na
+    if showStructureLines
+        newLine := line.new(barIdx, price, barIdx + 1, price,
+                           color=lineColor,
+                           width=lineWidth,
+                           extend=extend.right,
+                           style=line.style_solid)
+
+    newHigh = HighLevel.new(price, barIdx, newLine, levelType)
+    array.push(highs, newHigh)
+    true
+
+addLow(float price, int barIdx, string levelType, color lineColor) =>
+    if mostRecentLowIndex >= 0
+        prevLow = array.get(lows, mostRecentLowIndex)
+        if prevLow.levelType != "broken" and prevLow.levelType != "swept" and not na(prevLow.levelLine)
+            line.delete(prevLow.levelLine)
+
+    line newLine = na
+    if showStructureLines
+        newLine := line.new(barIdx, price, barIdx + 1, price,
+                           color=lineColor,
+                           width=lineWidth,
+                           extend=extend.right,
+                           style=line.style_solid)
+
+    newLow = LowLevel.new(price, barIdx, newLine, levelType)
+    array.push(lows, newLow)
+    true
+
+getHighLevelType(string bosDirection) =>
+    bosDirection == "bullish" ? "weak" : "strong"
+
+getLowLevelType(string bosDirection) =>
+    bosDirection == "bearish" ? "weak" : "strong"
+
+// ============================================================================
+// CHECK FOR BROKEN AND SWEPT LEVELS
+// ============================================================================
+
+checkBrokenLevels() =>
+    bool bullishBos = false
+    bool bearishBos = false
+
+    if array.size(highs) > 0
+        for i = array.size(highs) - 1 to 0
+            highLevel = array.get(highs, i)
+
+            if highLevel.levelType != "swept" and highLevel.levelType != "broken" and high > highLevel.price and close <= highLevel.price
+                highLevel.levelType := "swept"
+                if not na(highLevel.levelLine)
+                    line.set_style(highLevel.levelLine, line.style_dashed)
+                array.set(highs, i, highLevel)
+
+            else if highLevel.levelType != "broken" and close > highLevel.price
+                highLevel.levelType := "broken"
+                array.set(highs, i, highLevel)
+
+                if i == mostRecentHighIndex
+                    if not na(highLevel.levelLine)
+                        line.set_x2(highLevel.levelLine, bar_index)
+                        line.set_extend(highLevel.levelLine, extend.none)
+                        line.set_style(highLevel.levelLine, line.style_dotted)
+                        line.set_color(highLevel.levelLine, color.new(bosColor, 30))
+
+                    bullishBos := true
+
+                    if showBosLabels
+                        centerBar = math.round((highLevel.barIndex + bar_index) / 2)
+                        label.new(centerBar, highLevel.price, "BOS",
+                                 style=label.style_label_center,
+                                 color=color.white,
+                                 textcolor=bosColor,
+                                 size=size.tiny)
+                else
+                    if not na(highLevel.levelLine)
+                        line.delete(highLevel.levelLine)
+
+    if array.size(lows) > 0
+        for i = array.size(lows) - 1 to 0
+            lowLevel = array.get(lows, i)
+
+            if lowLevel.levelType != "swept" and lowLevel.levelType != "broken" and low < lowLevel.price and close >= lowLevel.price
+                lowLevel.levelType := "swept"
+                if not na(lowLevel.levelLine)
+                    line.set_style(lowLevel.levelLine, line.style_dashed)
+                array.set(lows, i, lowLevel)
+
+            else if lowLevel.levelType != "broken" and close < lowLevel.price
+                lowLevel.levelType := "broken"
+                array.set(lows, i, lowLevel)
+
+                if i == mostRecentLowIndex
+                    if not na(lowLevel.levelLine)
+                        line.set_x2(lowLevel.levelLine, bar_index)
+                        line.set_extend(lowLevel.levelLine, extend.none)
+                        line.set_style(lowLevel.levelLine, line.style_dotted)
+                        line.set_color(lowLevel.levelLine, color.new(bosColor, 30))
+
+                    bearishBos := true
+
+                    if showBosLabels
+                        centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
+                        label.new(centerBar, lowLevel.price, "BOS",
+                                 style=label.style_label_center,
+                                 color=color.white,
+                                 textcolor=bosColor,
+                                 size=size.tiny)
+                else
+                    if not na(lowLevel.levelLine)
+                        line.delete(lowLevel.levelLine)
+
+    [bullishBos, bearishBos]
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+if not initialized and bar_index > 0
+    if isBearishBreakdown()
+        float localHigh = high
+        int localHighBar = bar_index
+
+        for i = 1 to math.min(bar_index, 5000)
+            if high[i] > localHigh
+                localHigh := high[i]
+                localHighBar := bar_index - i
+
+        currentValidHigh := localHigh
+        currentValidHighBar := localHighBar
+        initialized := true
+        lookingForLow := true
+
+        addHigh(localHigh, localHighBar, "strong", highColor)
+        mostRecentHighIndex := array.size(highs) - 1
+
+// ============================================================================
+// MAIN STRUCTURE LOGIC
+// ============================================================================
+
+bool bosBullish = false
+bool bosBearish = false
+
+if initialized
+    [bullBos, bearBos] = checkBrokenLevels()
+
+    // Check for Break of Structure
+    if not na(currentValidHigh) and not na(currentValidLow) and close > currentValidHigh and lookingForLow
+        bosBullish := true
+        currentHighIsBroken := true
+        lastBosDirection := "bullish"
+
+        [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
+
+        if not na(newLow) and not na(newLowBar)
+            currentValidLow := newLow
+            currentValidLowBar := newLowBar
+            lookingForHigh := true
+            lookingForLow := false
+            currentLowIsBroken := false
+
+            addLow(newLow, newLowBar, "strong", lowColor)
+            mostRecentLowIndex := array.size(lows) - 1
+
+    if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and close < currentValidLow and lookingForHigh
+        bosBearish := true
+        currentLowIsBroken := true
+        lastBosDirection := "bearish"
+
+        [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
+
+        if not na(newHigh) and not na(newHighBar)
+            currentValidHigh := newHigh
+            currentValidHighBar := newHighBar
+            lookingForLow := true
+            lookingForHigh := false
+            currentHighIsBroken := false
+
+            addHigh(newHigh, newHighBar, "strong", highColor)
+            mostRecentHighIndex := array.size(highs) - 1
+
+    // Look for new valid low via breakout
+    if not bosBullish and not bosBearish and lookingForLow
+        if isBullishBreakout()
+            [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
+
+            if not na(newLow) and not na(newLowBar)
+                currentValidLow := newLow
+                currentValidLowBar := newLowBar
+                lookingForHigh := true
+                lookingForLow := false
+                currentLowIsBroken := false
+
+                levelType = getLowLevelType(lastBosDirection)
+                addLow(newLow, newLowBar, levelType, lowColor)
+                mostRecentLowIndex := array.size(lows) - 1
+
+    // Look for new valid high via breakdown
+    if not bosBullish and not bosBearish and lookingForHigh
+        if isBearishBreakdown()
+            [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
+
+            if not na(newHigh) and not na(newHighBar)
+                currentValidHigh := newHigh
+                currentValidHighBar := newHighBar
+                lookingForLow := true
+                lookingForHigh := false
+                currentHighIsBroken := false
+
+                levelType = getHighLevelType(lastBosDirection)
+                addHigh(newHigh, newHighBar, levelType, highColor)
+                mostRecentHighIndex := array.size(highs) - 1
+
+// ============================================================================
+// UPDATE LEVEL STATES
+// ============================================================================
+
+if initialized
+    int brokenHighIdx = -1
+    if array.size(highs) > 0
+        for i = array.size(highs) - 1 to 0
+            highLevel = array.get(highs, i)
+            if highLevel.levelType == "broken"
+                brokenHighIdx := i
+                break
+
+    int brokenLowIdx = -1
+    if array.size(lows) > 0
+        for i = array.size(lows) - 1 to 0
+            lowLevel = array.get(lows, i)
+            if lowLevel.levelType == "broken"
+                brokenLowIdx := i
+                break
+
+    if brokenHighIdx >= 0 or brokenLowIdx >= 0
+        if brokenHighIdx >= 0 and (brokenLowIdx < 0 or brokenHighIdx > brokenLowIdx)
+            lastBosDirection := "bullish"
+
+            if mostRecentHighIndex >= 0
+                currentHigh = array.get(highs, mostRecentHighIndex)
+                if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
+                    currentHigh.levelType := "weak"
+
+            if mostRecentLowIndex >= 0
+                currentLow = array.get(lows, mostRecentLowIndex)
+                if currentLow.levelType != "broken" and currentLow.levelType != "swept"
+                    currentLow.levelType := "strong"
+
+        else if brokenLowIdx >= 0
+            lastBosDirection := "bearish"
+
+            if mostRecentLowIndex >= 0
+                currentLow = array.get(lows, mostRecentLowIndex)
+                if currentLow.levelType != "broken" and currentLow.levelType != "swept"
+                    currentLow.levelType := "weak"
+
+            if mostRecentHighIndex >= 0
+                currentHigh = array.get(highs, mostRecentHighIndex)
+                if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
+                    currentHigh.levelType := "strong"
+
+// ============================================================================
+// ARRAY TRUNCATION
+// ============================================================================
+
+if array.size(highs) > 30
+    oldHigh = array.get(highs, 0)
+    if not na(oldHigh.levelLine)
+        line.delete(oldHigh.levelLine)
+    array.shift(highs)
+    mostRecentHighIndex := math.max(-1, mostRecentHighIndex - 1)
+
+if array.size(lows) > 30
+    oldLow = array.get(lows, 0)
+    if not na(oldLow.levelLine)
+        line.delete(oldLow.levelLine)
+    array.shift(lows)
+    mostRecentLowIndex := math.max(-1, mostRecentLowIndex - 1)
+
+// ============================================================================
+// POWER BAR DETECTION
+// ============================================================================
+
+float candleRange = high - low
+float candleBody = math.abs(close - open)
+float bodyRatio = candleRange > 0 ? candleBody / candleRange : 0
+
+bool touchesEnvelope = not na(smaUpper) and not na(smaLower) and low <= smaUpper and high >= smaLower
+bool meetsAtrSize = not na(atrEnvelopeValue) and candleRange >= pbMinAtrMultiple * atrEnvelopeValue
+bool meetsBodyRatio = bodyRatio >= pbMinBodyRatio
+bool isBos = bosBullish or bosBearish
+
+bool isPowerBar = touchesEnvelope and meetsAtrSize and meetsBodyRatio and isBos
+bool isBullishPowerBar = isPowerBar and bosBullish
+bool isBearishPowerBar = isPowerBar and bosBearish
+
+// Power bar labels
+if isBullishPowerBar
+    label.new(bar_index, low, "PB",
+             style=label.style_label_up,
+             color=pbBullishColor,
+             textcolor=color.white,
+             size=size.small)
+
+if isBearishPowerBar
+    label.new(bar_index, high, "PB",
+             style=label.style_label_down,
+             color=pbBearishColor,
+             textcolor=color.white,
+             size=size.small)
+
+// ============================================================================
+// PLOTS
+// ============================================================================
+
+// SMA and envelope
+smaPlot = plot(smaValue, "SMA", color=smaColor, linewidth=2)
+upperPlot = plot(showEnvelope ? smaUpper : na, "Upper Envelope", color=smaColor, linewidth=1)
+lowerPlot = plot(showEnvelope ? smaLower : na, "Lower Envelope", color=smaColor, linewidth=1)
+fill(upperPlot, lowerPlot, color=envelopeColor)
+
+// Power bar candle coloring
+barcolor(pbColorBars and isBullishPowerBar ? pbBullishColor : na)
+barcolor(pbColorBars and isBearishPowerBar ? pbBearishColor : na)
+
+// Alerts
+alertcondition(isBullishPowerBar, "Bullish Power Bar", "Bullish Power Bar detected")
+alertcondition(isBearishPowerBar, "Bearish Power Bar", "Bearish Power Bar detected")
+alertcondition(isPowerBar, "Any Power Bar", "Power Bar detected")
