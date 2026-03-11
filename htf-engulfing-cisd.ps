@@ -1,0 +1,565 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("HTF Engulfing CISD [SB]", "HEC [SB]", overlay=true, max_lines_count=100, max_labels_count=200, max_boxes_count=300)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+// Settings
+htfTimeframe = input.timeframe("60", "HTF Timeframe", group="Settings")
+ltfTimeframe = input.timeframe("", "LTF Timeframe (CISD)", group="Settings", tooltip="Timeframe for CISD detection. Default (empty) uses the chart timeframe.")
+
+// Display
+showHtfBoxes = input.bool(true, "Show HTF Candle Boxes", group="Display")
+showSignals = input.bool(true, "Show Reversal Signals", group="Display")
+showBullish = input.bool(true, "Show Bullish Reversals", group="Display")
+showBearish = input.bool(true, "Show Bearish Reversals", group="Display")
+requireFullEngulf = input.bool(false, "Require Full Candle Engulfment", group="Display", tooltip="When enabled, the second candle must close beyond the first candle's high (bullish) or low (bearish), not just its body")
+showDebugLabels = input.bool(false, "Show Debug Labels", group="Debug")
+
+// Colors
+bullishBoxColor = input.color(color.new(color.green, 80), "Bullish HTF Box", group="Colors")
+bearishBoxColor = input.color(color.new(color.red, 80), "Bearish HTF Box", group="Colors")
+patternBullColor = input.color(color.green, "Bullish Pattern", group="Colors")
+patternBearColor = input.color(color.red, "Bearish Pattern", group="Colors")
+
+// CISD Detection Types
+grpCISDDetection = "CISD Detection Types"
+detectWickSweep     = input.bool(true, "Wick Sweep", group=grpCISDDetection, tooltip="Candle wicks through CSP and closes above/below it")
+detectTwoCandleSweep = input.bool(true, "Two-Candle Sweep", group=grpCISDDetection, tooltip="One candle closes through CSP, very next candle reverses and closes back above/below")
+detectIFVGSweep     = input.bool(true, "IFVG Sweep", group=grpCISDDetection, tooltip="Candle(s) close through CSP, then a valid IFVG forms to reclaim the level")
+
+// CISD Settings
+grpCISDSettings = "CISD Settings"
+swingLookback = input.int(50, "Swing Lookback Bars", minval=5, maxval=200, group=grpCISDSettings, tooltip="How far back to search for CSP swing points")
+maxIfvgBars   = input.int(6, "Max IFVG Candles", minval=3, maxval=50, group=grpCISDSettings, tooltip="Maximum candles from the first FVG candle to the IFVG confirmation candle")
+invalidateSwept = input.bool(true, "Invalidate Swept CSPs", group=grpCISDSettings, tooltip="When enabled, a CSP that has already been wicked through by a prior candle is considered used and will not qualify for CISD detection")
+allowEqualCSPs  = input.bool(false, "Allow Equal Highs/Lows as CSPs", group=grpCISDSettings, tooltip="When enabled, consecutive candles with equal highs or lows count as a valid CSP swing point if surrounded by lower highs or higher lows")
+minLegIn  = input.int(0, "Min Leg-In Candles",  minval=0, maxval=200, group=grpCISDSettings, tooltip="Minimum consecutive candles in the leg-in run (0 = no minimum beyond the default of 1)")
+maxLegIn  = input.int(12, "Max Leg-In Candles",  minval=0, maxval=200, group=grpCISDSettings, tooltip="Maximum consecutive candles in the leg-in run (0 = no limit)")
+minLegOut = input.int(0, "Min Leg-Out Candles", minval=0, maxval=200, group=grpCISDSettings, tooltip="Minimum consecutive candles in the leg-out run (0 = no minimum beyond the default of 1)")
+maxLegOut = input.int(8, "Max Leg-Out Candles", minval=0, maxval=200, group=grpCISDSettings, tooltip="Maximum consecutive candles in the leg-out run (0 = no limit)")
+requireStrongCandle = input.bool(true, "Require Strong Leg-Out Candle", group=grpCISDSettings, tooltip="When enabled, at least one leg-out candle must have a body that is at least the specified percentage of its total range")
+minBodyPct = input.float(65, "Min Body %", minval=1, maxval=100, step=5, group=grpCISDSettings, tooltip="Minimum body-to-range percentage for the strong candle requirement") / 100
+
+// ============================================================================
+// HTF DATA
+// ============================================================================
+
+// Current developing HTF candle (N)
+htfOpen = request.security(syminfo.tickerid, htfTimeframe, open, lookahead=barmerge.lookahead_on)
+htfHigh = request.security(syminfo.tickerid, htfTimeframe, high, lookahead=barmerge.lookahead_on)
+htfLow = request.security(syminfo.tickerid, htfTimeframe, low, lookahead=barmerge.lookahead_on)
+htfClose = request.security(syminfo.tickerid, htfTimeframe, close, lookahead=barmerge.lookahead_on)
+htfTime = request.security(syminfo.tickerid, htfTimeframe, time, lookahead=barmerge.lookahead_on)
+
+// Previous HTF candle (N-1) — the just-completed one
+htfOpen_1 = request.security(syminfo.tickerid, htfTimeframe, open[1], lookahead=barmerge.lookahead_on)
+htfHigh_1 = request.security(syminfo.tickerid, htfTimeframe, high[1], lookahead=barmerge.lookahead_on)
+htfLow_1 = request.security(syminfo.tickerid, htfTimeframe, low[1], lookahead=barmerge.lookahead_on)
+htfClose_1 = request.security(syminfo.tickerid, htfTimeframe, close[1], lookahead=barmerge.lookahead_on)
+
+// Prior HTF candle (N-2)
+htfOpen_2 = request.security(syminfo.tickerid, htfTimeframe, open[2], lookahead=barmerge.lookahead_on)
+htfHigh_2 = request.security(syminfo.tickerid, htfTimeframe, high[2], lookahead=barmerge.lookahead_on)
+htfLow_2 = request.security(syminfo.tickerid, htfTimeframe, low[2], lookahead=barmerge.lookahead_on)
+htfClose_2 = request.security(syminfo.tickerid, htfTimeframe, close[2], lookahead=barmerge.lookahead_on)
+
+bool htfNewCandle = ta.change(htfTime) != 0
+
+// ============================================================================
+// HTF CANDLE BAR TRACKING
+// ============================================================================
+
+var int currentHtfStartBar = na
+
+// Completed candle (N-1)
+var float completedHtfOpen = na
+var float completedHtfHigh = na
+var float completedHtfLow = na
+var float completedHtfClose = na
+var int completedHtfStartBar = na
+var int completedHtfEndBar = na
+
+// Prior candle (N-2)
+var int priorHtfStartBar = na
+var int priorHtfEndBar = na
+
+// CISD tracking for current developing HTF candle
+var bool currentHadBullCISD = false
+var float currentBullCISDLow = na
+var bool currentHadBearCISD = false
+var float currentBearCISDHigh = na
+
+// Saved CISD values for the just-completed HTF candle
+var bool completedHadBullCISD = false
+var float completedBullCISDLow = na
+var bool completedHadBearCISD = false
+var float completedBearCISDHigh = na
+
+if htfNewCandle
+    // 1. Save CISD tracking for just-completed candle
+    completedHadBullCISD := currentHadBullCISD
+    completedBullCISDLow := currentBullCISDLow
+    completedHadBearCISD := currentHadBearCISD
+    completedBearCISDHigh := currentBearCISDHigh
+
+    // 2. Reset CISD tracking for new candle
+    currentHadBullCISD := false
+    currentBullCISDLow := na
+    currentHadBearCISD := false
+    currentBearCISDHigh := na
+
+    // 3. Shift N-1 → N-2
+    priorHtfStartBar := completedHtfStartBar
+    priorHtfEndBar := completedHtfEndBar
+
+    // 4. Save just-completed as N-1
+    completedHtfOpen := htfOpen_1
+    completedHtfHigh := htfHigh_1
+    completedHtfLow := htfLow_1
+    completedHtfClose := htfClose_1
+    completedHtfStartBar := currentHtfStartBar
+    completedHtfEndBar := bar_index - 1
+
+    // 5. New candle starts
+    currentHtfStartBar := bar_index
+
+// ============================================================================
+// DIRECTION HELPERS (from CISD V2)
+// ============================================================================
+
+getDirection(int offset) =>
+    result = close[offset] > open[offset]
+    if close[offset] == open[offset]
+        for k = offset + 1 to offset + 50
+            if close[k] > open[k]
+                result := true
+                break
+            if close[k] < open[k]
+                result := false
+                break
+    result
+
+countBullRun(int startOff) =>
+    n = 0
+    i = startOff
+    cont = true
+    while i < startOff + 200 and cont
+        if close[i] > open[i]
+            n += 1
+            i += 1
+        else if close[i] == open[i]
+            if getDirection(i)
+                n += 1
+                i += 1
+            else
+                cont := false
+        else
+            cont := false
+    n
+
+countBearRun(int startOff) =>
+    n = 0
+    i = startOff
+    cont = true
+    while i < startOff + 200 and cont
+        if close[i] < open[i]
+            n += 1
+            i += 1
+        else if close[i] == open[i]
+            if not getDirection(i)
+                n += 1
+                i += 1
+            else
+                cont := false
+        else
+            cont := false
+    n
+
+// ============================================================================
+// CISD DETECTION WITH EXTREME VALUES (adapted from CISD V2)
+// ============================================================================
+
+detectCISDWithExtreme() =>
+    bullishCISD = false
+    bearishCISD = false
+    float bullCISDLowestLow = na
+    float bearCISDHighestHigh = na
+
+    // ─── Bullish CISD ─────────────────────────────────────────────────
+    if showBullish
+        bullRunLen = countBullRun(0)
+        legOutOk1 = bullRunLen >= math.max(1, minLegOut) and (maxLegOut == 0 or bullRunLen <= maxLegOut)
+        if legOutOk1
+            bearRunLen = countBearRun(bullRunLen)
+            legInOk1 = bearRunLen >= math.max(1, minLegIn) and (maxLegIn == 0 or bearRunLen <= maxLegIn)
+            if legInOk1
+                firstBearOff = bullRunLen + bearRunLen - 1
+                lastBearOff = bullRunLen
+                if close > open[firstBearOff]
+                    strongOk = not requireStrongCandle
+                    if requireStrongCandle
+                        for k = 0 to bullRunLen - 1
+                            candleRange = high[k] - low[k]
+                            if candleRange > 0
+                                body = math.abs(close[k] - open[k])
+                                if body >= candleRange * minBodyPct
+                                    strongOk := true
+                                    break
+                    if strongOk
+                        maxJ = math.min(swingLookback, 4998)
+                        startJ = math.max(2, firstBearOff + 1)
+                        for j = startJ to maxJ
+                            bodyBottom = math.min(open[j], close[j])
+                            isSwingLow = low[j] < low[j + 1] and low[j] < low[j - 1] and low[j] < bodyBottom
+                            if not isSwingLow and allowEqualCSPs
+                                if low[j] < low[j - 1] and low[j] < bodyBottom
+                                    if low[j] == low[j + 1]
+                                        lastEq = j + 1
+                                        for scan = j + 2 to j + 50
+                                            if low[scan] == low[j]
+                                                lastEq := scan
+                                            else
+                                                break
+                                        if low[lastEq + 1] > low[j]
+                                            isSwingLow := true
+                            if isSwingLow
+                                cspLevel = low[j]
+                                levelBroken = false
+                                for k = firstBearOff + 1 to j - 1
+                                    if close[k] < cspLevel
+                                        levelBroken := true
+                                        break
+                                    if invalidateSwept
+                                        if low[k] < cspLevel
+                                            levelBroken := true
+                                            break
+                                if not levelBroken
+                                    // Case 1: Wick Sweep
+                                    if not bullishCISD and detectWickSweep
+                                        hasWick = false
+                                        hasClose = false
+                                        for k = 0 to firstBearOff
+                                            if close[k] < cspLevel
+                                                hasClose := true
+                                            if low[k] < cspLevel and close[k] > cspLevel
+                                                hasWick := true
+                                        if hasWick
+                                            if not hasClose
+                                                bullishCISD := true
+
+                                    // Case 2: Two-Candle Sweep
+                                    if not bullishCISD and detectTwoCandleSweep
+                                        if close[lastBearOff] < cspLevel and close[lastBearOff - 1] > cspLevel
+                                            onlyOne = true
+                                            if bearRunLen >= 2
+                                                for k = lastBearOff + 1 to firstBearOff
+                                                    if close[k] < cspLevel
+                                                        onlyOne := false
+                                                        break
+                                            if onlyOne
+                                                bullishCISD := true
+
+                                    // Case 3: IFVG Sweep
+                                    if not bullishCISD and detectIFVGSweep
+                                        if close[0] > cspLevel
+                                            hasCloseBelow = false
+                                            for k = 0 to firstBearOff
+                                                if close[k] < cspLevel
+                                                    hasCloseBelow := true
+                                                    break
+                                            if hasCloseBelow
+                                                for i = 1 to maxIfvgBars - 2
+                                                    if i + 2 <= maxIfvgBars
+                                                        if high[i] < low[i + 2]
+                                                            if close[0] > low[i + 2]
+                                                                bullishCISD := true
+                                                                break
+
+                            if bullishCISD
+                                break
+                        // Compute lowest low of the CISD structure
+                        if bullishCISD
+                            float lowestLow = low[0]
+                            for k = 1 to firstBearOff
+                                if low[k] < lowestLow
+                                    lowestLow := low[k]
+                            bullCISDLowestLow := lowestLow
+
+    // ─── Bearish CISD ─────────────────────────────────────────────────
+    if showBearish
+        bearRunLen2 = countBearRun(0)
+        legOutOk2 = bearRunLen2 >= math.max(1, minLegOut) and (maxLegOut == 0 or bearRunLen2 <= maxLegOut)
+        if legOutOk2
+            bullRunLen2 = countBullRun(bearRunLen2)
+            legInOk2 = bullRunLen2 >= math.max(1, minLegIn) and (maxLegIn == 0 or bullRunLen2 <= maxLegIn)
+            if legInOk2
+                firstBullOff = bearRunLen2 + bullRunLen2 - 1
+                lastBullOff = bearRunLen2
+                if close < open[firstBullOff]
+                    strongOk = not requireStrongCandle
+                    if requireStrongCandle
+                        for k = 0 to bearRunLen2 - 1
+                            candleRange = high[k] - low[k]
+                            if candleRange > 0
+                                body = math.abs(close[k] - open[k])
+                                if body >= candleRange * minBodyPct
+                                    strongOk := true
+                                    break
+                    if strongOk
+                        maxJ = math.min(swingLookback, 4998)
+                        startJ = math.max(2, firstBullOff + 1)
+                        for j = startJ to maxJ
+                            bodyTop = math.max(open[j], close[j])
+                            isSwingHigh = high[j] > high[j + 1] and high[j] > high[j - 1] and high[j] > bodyTop
+                            if not isSwingHigh and allowEqualCSPs
+                                if high[j] > high[j - 1] and high[j] > bodyTop
+                                    if high[j] == high[j + 1]
+                                        lastEq = j + 1
+                                        for scan = j + 2 to j + 50
+                                            if high[scan] == high[j]
+                                                lastEq := scan
+                                            else
+                                                break
+                                        if high[lastEq + 1] < high[j]
+                                            isSwingHigh := true
+                            if isSwingHigh
+                                cspLevel = high[j]
+                                levelBroken = false
+                                for k = firstBullOff + 1 to j - 1
+                                    if close[k] > cspLevel
+                                        levelBroken := true
+                                        break
+                                    if invalidateSwept
+                                        if high[k] > cspLevel
+                                            levelBroken := true
+                                            break
+                                if not levelBroken
+                                    // Case 1: Wick Sweep
+                                    if not bearishCISD and detectWickSweep
+                                        hasWick = false
+                                        hasClose = false
+                                        for k = 0 to firstBullOff
+                                            if close[k] > cspLevel
+                                                hasClose := true
+                                            if high[k] > cspLevel and close[k] < cspLevel
+                                                hasWick := true
+                                        if hasWick
+                                            if not hasClose
+                                                bearishCISD := true
+
+                                    // Case 2: Two-Candle Sweep
+                                    if not bearishCISD and detectTwoCandleSweep
+                                        if close[lastBullOff] > cspLevel and close[lastBullOff - 1] < cspLevel
+                                            onlyOne = true
+                                            if bullRunLen2 >= 2
+                                                for k = lastBullOff + 1 to firstBullOff
+                                                    if close[k] > cspLevel
+                                                        onlyOne := false
+                                                        break
+                                            if onlyOne
+                                                bearishCISD := true
+
+                                    // Case 3: IFVG Sweep
+                                    if not bearishCISD and detectIFVGSweep
+                                        if close[0] < cspLevel
+                                            hasCloseAbove = false
+                                            for k = 0 to firstBullOff
+                                                if close[k] > cspLevel
+                                                    hasCloseAbove := true
+                                                    break
+                                            if hasCloseAbove
+                                                for i = 1 to maxIfvgBars - 2
+                                                    if i + 2 <= maxIfvgBars
+                                                        if low[i] > high[i + 2]
+                                                            if close[0] < high[i + 2]
+                                                                bearishCISD := true
+                                                                break
+
+                            if bearishCISD
+                                break
+                        // Compute highest high of the CISD structure
+                        if bearishCISD
+                            float highestHigh = high[0]
+                            for k = 1 to firstBullOff
+                                if high[k] > highestHigh
+                                    highestHigh := high[k]
+                            bearCISDHighestHigh := highestHigh
+
+    [bullishCISD, bearishCISD, bullCISDLowestLow, bearCISDHighestHigh]
+
+// ============================================================================
+// LTF CISD INVOCATION
+// ============================================================================
+
+// Direct call for chart timeframe (avoids one-bar delay from request.security)
+[chartBull, chartBear, chartBullLow, chartBearHigh] = detectCISDWithExtreme()
+
+// Security call for specified LTF
+[secBull, secBear, secBullLow, secBearHigh] = request.security(syminfo.tickerid, ltfTimeframe, detectCISDWithExtreme())
+
+// Use direct result when LTF matches chart TF
+rawBull = ltfTimeframe == "" ? chartBull : secBull
+rawBear = ltfTimeframe == "" ? chartBear : secBear
+rawBullLow = ltfTimeframe == "" ? chartBullLow : secBullLow
+rawBearHigh = ltfTimeframe == "" ? chartBearHigh : secBearHigh
+
+// Edge detection: signal only on first bar where value transitions to true
+bull = rawBull and not nz(rawBull[1])
+bear = rawBear and not nz(rawBear[1])
+
+// Capture extreme values on transition
+float bullLow = bull ? rawBullLow : na
+float bearHigh = bear ? rawBearHigh : na
+
+// ============================================================================
+// PER-HTF-CANDLE CISD ACCUMULATION
+// ============================================================================
+
+if bull
+    currentHadBullCISD := true
+    if na(currentBullCISDLow) or bullLow < currentBullCISDLow
+        currentBullCISDLow := bullLow
+
+if bear
+    currentHadBearCISD := true
+    if na(currentBearCISDHigh) or bearHigh > currentBearCISDHigh
+        currentBearCISDHigh := bearHigh
+
+// ============================================================================
+// PATTERN DETECTION
+// ============================================================================
+
+bool bullishReversal = false
+bool bearishReversal = false
+
+if htfNewCandle and not na(completedHtfClose) and not na(htfClose_2)
+    // --- Bullish Reversal ---
+    // N-2 bearish, N-1 bullish, N-1 sweeps N-2's low, N-1 engulfs N-2's body,
+    // bullish CISD on LTF during N-1 with its low in the wick/sweep area
+    if showBullish
+        if htfClose_2 < htfOpen_2           // N-2 is bearish
+            if completedHtfClose >= completedHtfOpen  // N-1 is bullish
+                if completedHtfLow < htfLow_2         // N-1 swept N-2's low
+                    if completedHtfClose > (requireFullEngulf ? htfHigh_2 : htfOpen_2)  // N-1 engulfs N-2
+                        if completedHadBullCISD
+                            if not na(completedBullCISDLow)
+                                if completedBullCISDLow < completedHtfOpen  // CISD is in the wick area
+                                    bullishReversal := true
+
+    // --- Bearish Reversal ---
+    // N-2 bullish, N-1 bearish, N-1 sweeps N-2's high, N-1 engulfs N-2's body,
+    // bearish CISD on LTF during N-1 with its high in the wick/sweep area
+    if showBearish
+        if htfClose_2 >= htfOpen_2          // N-2 is bullish
+            if completedHtfClose < completedHtfOpen   // N-1 is bearish
+                if completedHtfHigh > htfHigh_2       // N-1 swept N-2's high
+                    if completedHtfClose < (requireFullEngulf ? htfLow_2 : htfOpen_2)  // N-1 engulfs N-2
+                        if completedHadBearCISD
+                            if not na(completedBearCISDHigh)
+                                if completedBearCISDHigh > completedHtfOpen  // CISD is in the wick area
+                                    bearishReversal := true
+
+// ============================================================================
+// HTF CANDLE BOX DRAWING
+// ============================================================================
+
+var box currentHtfBox = na
+var box currentHtfBodyBox = na
+
+// Current developing HTF candle (updated every bar)
+if showHtfBoxes and not na(currentHtfStartBar)
+    if not na(currentHtfBox)
+        box.delete(currentHtfBox)
+    if not na(currentHtfBodyBox)
+        box.delete(currentHtfBodyBox)
+
+    bool isBullish = htfClose >= htfOpen
+    color boxColor = isBullish ? bullishBoxColor : bearishBoxColor
+
+    currentHtfBox := box.new(currentHtfStartBar, htfHigh, bar_index, htfLow,
+         bgcolor=boxColor, border_color=color.new(isBullish ? color.green : color.red, 50), border_width=1)
+
+    float bodyTop = math.max(htfOpen, htfClose)
+    float bodyBottom = math.min(htfOpen, htfClose)
+    currentHtfBodyBox := box.new(currentHtfStartBar, bodyTop, bar_index, bodyBottom,
+         bgcolor=boxColor, border_color=color.new(isBullish ? color.green : color.red, 50), border_width=1)
+
+// Completed HTF candle (drawn once when new candle starts)
+if htfNewCandle and showHtfBoxes and not na(completedHtfStartBar) and not na(completedHtfEndBar)
+    bool wasHtfBullish = completedHtfClose >= completedHtfOpen
+    color completedBoxColor = wasHtfBullish ? bullishBoxColor : bearishBoxColor
+
+    // Highlight pattern candles with thicker border and pattern color
+    int borderW = 2
+    color borderCol = color.new(wasHtfBullish ? color.green : color.red, 30)
+    if bullishReversal or bearishReversal
+        borderW := 3
+        borderCol := bullishReversal ? patternBullColor : patternBearColor
+
+    box.new(completedHtfStartBar, completedHtfHigh, completedHtfEndBar, completedHtfLow,
+         bgcolor=completedBoxColor, border_color=borderCol, border_width=borderW)
+
+    float completedBodyTop = math.max(completedHtfOpen, completedHtfClose)
+    float completedBodyBottom = math.min(completedHtfOpen, completedHtfClose)
+    box.new(completedHtfStartBar, completedBodyTop, completedHtfEndBar, completedBodyBottom,
+         bgcolor=completedBoxColor, border_color=borderCol, border_width=borderW)
+
+// ============================================================================
+// PATTERN LABELS
+// ============================================================================
+
+if htfNewCandle and showSignals
+    if bullishReversal
+        int centerBar = math.round((completedHtfStartBar + completedHtfEndBar) / 2)
+        label.new(centerBar, completedHtfLow, "Bullish\nReversal",
+             style=label.style_label_up, color=patternBullColor, textcolor=color.white, size=size.small)
+
+    if bearishReversal
+        int centerBar = math.round((completedHtfStartBar + completedHtfEndBar) / 2)
+        label.new(centerBar, completedHtfHigh, "Bearish\nReversal",
+             style=label.style_label_down, color=patternBearColor, textcolor=color.white, size=size.small)
+
+// ============================================================================
+// DEBUG LABELS
+// ============================================================================
+
+var label debugLabel = na
+if showDebugLabels
+    if not na(debugLabel)
+        label.delete(debugLabel)
+
+    string debugText = "HTF: " + htfTimeframe +
+         "\nLTF: " + (ltfTimeframe == "" ? "Chart" : ltfTimeframe) +
+         "\n--- Completed (N-1) ---" +
+         "\nO: " + str.tostring(completedHtfOpen, "#.##") +
+         " H: " + str.tostring(completedHtfHigh, "#.##") +
+         "\nL: " + str.tostring(completedHtfLow, "#.##") +
+         " C: " + str.tostring(completedHtfClose, "#.##") +
+         "\n--- Prior (N-2) ---" +
+         "\nO: " + str.tostring(htfOpen_2, "#.##") +
+         " H: " + str.tostring(htfHigh_2, "#.##") +
+         "\nL: " + str.tostring(htfLow_2, "#.##") +
+         " C: " + str.tostring(htfClose_2, "#.##") +
+         "\n--- CISD (current candle) ---" +
+         "\nBull CISD: " + str.tostring(currentHadBullCISD) +
+         "\nBull Low: " + str.tostring(currentBullCISDLow, "#.##") +
+         "\nBear CISD: " + str.tostring(currentHadBearCISD) +
+         "\nBear High: " + str.tostring(currentBearCISDHigh, "#.##") +
+         "\n--- Last Pattern ---" +
+         "\nBullish Rev: " + str.tostring(bullishReversal) +
+         "\nBearish Rev: " + str.tostring(bearishReversal)
+
+    debugLabel := label.new(bar_index + 5, high, debugText,
+         style=label.style_label_left, color=color.new(color.gray, 50), textcolor=color.white, size=size.small)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+alertcondition(bullishReversal, "Bullish Engulfing CISD Reversal", "Bullish HTF engulfing sweep with CISD confirmation detected")
+alertcondition(bearishReversal, "Bearish Engulfing CISD Reversal", "Bearish HTF engulfing sweep with CISD confirmation detected")
