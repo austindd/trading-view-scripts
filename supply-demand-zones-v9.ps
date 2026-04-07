@@ -28,8 +28,8 @@ maxNumberOfZonesInput				= input.int(120, title='Max number of zones', minval=1,
 
 // Moving Average Filter
 maFilterEnabledInput				= input.bool(true, title='Enable MA Filter', group=grp2, tooltip='When enabled, only supply zones from bearish moves originating below the MA and demand zones from bullish moves originating above the MA will be created.')
-maTypeInput							= input.string('EMA', title='MA Type', group=grp2, options=['EMA', 'SMA'], tooltip='Type of moving average to use as the trend filter.')
-maLengthInput						= input.int(50, title='MA Length', minval=1, group=grp2, tooltip='Length of the moving average.')
+maTypeInput							= input.string('SMA', title='MA Type', group=grp2, options=['EMA', 'SMA'], tooltip='Type of moving average to use as the trend filter.')
+maLengthInput						= input.int(20, title='MA Length', minval=1, group=grp2, tooltip='Length of the moving average.')
 maSourceInput						= input.source(close, title='MA Source', group=grp2, tooltip='Source for the moving average calculation.')
 showMaInput							= input.bool(true, title='Show MA on Chart', group=grp2, tooltip='If enabled, plots the moving average on the chart.')
 maColorInput						= input.color(color.new(color.yellow, 0), title="MA Color", group=grp2)
