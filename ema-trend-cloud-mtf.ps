@@ -203,7 +203,23 @@ tf4BearExpanding = (tf4Slow - tf4Fast) > (tf4SlowPrev - tf4FastPrev)
 bool allBullExpanding = allBull and (not tf1Enabled or tf1BullExpanding) and (not tf2Enabled or tf2BullExpanding) and (not tf3Enabled or tf3BullExpanding) and (not tf4Enabled or tf4BullExpanding)
 bool allBearExpanding = allBear and (not tf1Enabled or tf1BearExpanding) and (not tf2Enabled or tf2BearExpanding) and (not tf3Enabled or tf3BearExpanding) and (not tf4Enabled or tf4BearExpanding)
 
-string alignment = allBullExpanding ? "Momentum Bull" : allBearExpanding ? "Momentum Bear" : allBull ? "Bull" : allBear ? "Bear" : "None"
+// Cloud contracting: the spread between fast and slow EMAs is shrinking
+tf1BullContracting = (tf1Fast - tf1Slow) < (tf1FastPrev - tf1SlowPrev)
+tf1BearContracting = (tf1Slow - tf1Fast) < (tf1SlowPrev - tf1FastPrev)
+
+tf2BullContracting = (tf2Fast - tf2Slow) < (tf2FastPrev - tf2SlowPrev)
+tf2BearContracting = (tf2Slow - tf2Fast) < (tf2SlowPrev - tf2FastPrev)
+
+tf3BullContracting = (tf3Fast - tf3Slow) < (tf3FastPrev - tf3SlowPrev)
+tf3BearContracting = (tf3Slow - tf3Fast) < (tf3SlowPrev - tf3FastPrev)
+
+tf4BullContracting = (tf4Fast - tf4Slow) < (tf4FastPrev - tf4SlowPrev)
+tf4BearContracting = (tf4Slow - tf4Fast) < (tf4SlowPrev - tf4FastPrev)
+
+bool allBullContracting = allBull and (not tf1Enabled or tf1BullContracting) and (not tf2Enabled or tf2BullContracting) and (not tf3Enabled or tf3BullContracting) and (not tf4Enabled or tf4BullContracting)
+bool allBearContracting = allBear and (not tf1Enabled or tf1BearContracting) and (not tf2Enabled or tf2BearContracting) and (not tf3Enabled or tf3BearContracting) and (not tf4Enabled or tf4BearContracting)
+
+string alignment = allBullExpanding ? "Bullish Expansion" : allBearExpanding ? "Bearish Expansion" : allBullContracting ? "Bullish Contraction" : allBearContracting ? "Bearish Contraction" : allBull ? "Bullish" : allBear ? "Bearish" : "None"
 color alignColor = allBull ? color.green : allBear ? color.red : color.gray
 
 // ============================================================================
