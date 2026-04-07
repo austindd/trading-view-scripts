@@ -15,6 +15,7 @@ useRealtime = input.bool(false, "Use Realtime HTF Data", tooltip="When enabled, 
 // TIMEFRAME 1 SETTINGS
 // ============================================================================
 tf1Enabled = input.bool(true, "Enable TF1 Cloud", group="Timeframe 1")
+tf1InStatus = input.bool(true, "Include TF1 in Trend Status", group="Timeframe 1")
 tf1Timeframe = input.timeframe("", "TF1 Timeframe", group="Timeframe 1")
 tf1BullColor = input.color(color.new(color.green, 95), "TF1 Bull Cloud", group="Timeframe 1")
 tf1BearColor = input.color(color.new(color.red, 95), "TF1 Bear Cloud", group="Timeframe 1")
@@ -23,6 +24,7 @@ tf1BearColor = input.color(color.new(color.red, 95), "TF1 Bear Cloud", group="Ti
 // TIMEFRAME 2 SETTINGS
 // ============================================================================
 tf2Enabled = input.bool(true, "Enable TF2 Cloud", group="Timeframe 2")
+tf2InStatus = input.bool(true, "Include TF2 in Trend Status", group="Timeframe 2")
 tf2Timeframe = input.timeframe("15", "TF2 Timeframe", group="Timeframe 2")
 tf2BullColor = input.color(color.new(color.blue, 95), "TF2 Bull Cloud", group="Timeframe 2")
 tf2BearColor = input.color(color.new(color.orange, 95), "TF2 Bear Cloud", group="Timeframe 2")
@@ -31,6 +33,7 @@ tf2BearColor = input.color(color.new(color.orange, 95), "TF2 Bear Cloud", group=
 // TIMEFRAME 3 SETTINGS
 // ============================================================================
 tf3Enabled = input.bool(true, "Enable TF3 Cloud", group="Timeframe 3")
+tf3InStatus = input.bool(true, "Include TF3 in Trend Status", group="Timeframe 3")
 tf3Timeframe = input.timeframe("60", "TF3 Timeframe", group="Timeframe 3")
 tf3BullColor = input.color(color.new(color.teal, 95), "TF3 Bull Cloud", group="Timeframe 3")
 tf3BearColor = input.color(color.new(color.purple, 95), "TF3 Bear Cloud", group="Timeframe 3")
@@ -39,6 +42,7 @@ tf3BearColor = input.color(color.new(color.purple, 95), "TF3 Bear Cloud", group=
 // TIMEFRAME 4 SETTINGS
 // ============================================================================
 tf4Enabled = input.bool(true, "Enable TF4 Cloud", group="Timeframe 4")
+tf4InStatus = input.bool(true, "Include TF4 in Trend Status", group="Timeframe 4")
 tf4Timeframe = input.timeframe("D", "TF4 Timeframe", group="Timeframe 4")
 tf4BullColor = input.color(color.new(color.lime, 95), "TF4 Bull Cloud", group="Timeframe 4")
 tf4BearColor = input.color(color.new(color.maroon, 95), "TF4 Bear Cloud", group="Timeframe 4")
@@ -182,10 +186,10 @@ tf4SlopeDown = tf4Fast < tf4FastPrev and tf4Slow < tf4SlowPrev
 tf4Bull = tf4Fast > tf4Slow and (not requireSlope or tf4SlopeUp)
 tf4Bear = tf4Fast < tf4Slow and (not requireSlope or tf4SlopeDown)
 
-// All enabled TFs must agree for alignment (disabled TFs are ignored)
-bool anyEnabled = tf1Enabled or tf2Enabled or tf3Enabled or tf4Enabled
-bool allBull = anyEnabled and (not tf1Enabled or tf1Bull) and (not tf2Enabled or tf2Bull) and (not tf3Enabled or tf3Bull) and (not tf4Enabled or tf4Bull)
-bool allBear = anyEnabled and (not tf1Enabled or tf1Bear) and (not tf2Enabled or tf2Bear) and (not tf3Enabled or tf3Bear) and (not tf4Enabled or tf4Bear)
+// All included TFs must agree for alignment (excluded TFs are ignored)
+bool anyInStatus = tf1InStatus or tf2InStatus or tf3InStatus or tf4InStatus
+bool allBull = anyInStatus and (not tf1InStatus or tf1Bull) and (not tf2InStatus or tf2Bull) and (not tf3InStatus or tf3Bull) and (not tf4InStatus or tf4Bull)
+bool allBear = anyInStatus and (not tf1InStatus or tf1Bear) and (not tf2InStatus or tf2Bear) and (not tf3InStatus or tf3Bear) and (not tf4InStatus or tf4Bear)
 
 // Cloud expanding: the spread between fast and slow EMAs is growing
 tf1BullExpanding = (tf1Fast - tf1Slow) > (tf1FastPrev - tf1SlowPrev)
@@ -200,8 +204,8 @@ tf3BearExpanding = (tf3Slow - tf3Fast) > (tf3SlowPrev - tf3FastPrev)
 tf4BullExpanding = (tf4Fast - tf4Slow) > (tf4FastPrev - tf4SlowPrev)
 tf4BearExpanding = (tf4Slow - tf4Fast) > (tf4SlowPrev - tf4FastPrev)
 
-bool allBullExpanding = allBull and (not tf1Enabled or tf1BullExpanding) and (not tf2Enabled or tf2BullExpanding) and (not tf3Enabled or tf3BullExpanding) and (not tf4Enabled or tf4BullExpanding)
-bool allBearExpanding = allBear and (not tf1Enabled or tf1BearExpanding) and (not tf2Enabled or tf2BearExpanding) and (not tf3Enabled or tf3BearExpanding) and (not tf4Enabled or tf4BearExpanding)
+bool allBullExpanding = allBull and (not tf1InStatus or tf1BullExpanding) and (not tf2InStatus or tf2BullExpanding) and (not tf3InStatus or tf3BullExpanding) and (not tf4InStatus or tf4BullExpanding)
+bool allBearExpanding = allBear and (not tf1InStatus or tf1BearExpanding) and (not tf2InStatus or tf2BearExpanding) and (not tf3InStatus or tf3BearExpanding) and (not tf4InStatus or tf4BearExpanding)
 
 // Cloud contracting: the spread between fast and slow EMAs is shrinking
 tf1BullContracting = (tf1Fast - tf1Slow) < (tf1FastPrev - tf1SlowPrev)
@@ -216,8 +220,8 @@ tf3BearContracting = (tf3Slow - tf3Fast) < (tf3SlowPrev - tf3FastPrev)
 tf4BullContracting = (tf4Fast - tf4Slow) < (tf4FastPrev - tf4SlowPrev)
 tf4BearContracting = (tf4Slow - tf4Fast) < (tf4SlowPrev - tf4FastPrev)
 
-bool allBullContracting = allBull and (not tf1Enabled or tf1BullContracting) and (not tf2Enabled or tf2BullContracting) and (not tf3Enabled or tf3BullContracting) and (not tf4Enabled or tf4BullContracting)
-bool allBearContracting = allBear and (not tf1Enabled or tf1BearContracting) and (not tf2Enabled or tf2BearContracting) and (not tf3Enabled or tf3BearContracting) and (not tf4Enabled or tf4BearContracting)
+bool allBullContracting = allBull and (not tf1InStatus or tf1BullContracting) and (not tf2InStatus or tf2BullContracting) and (not tf3InStatus or tf3BullContracting) and (not tf4InStatus or tf4BullContracting)
+bool allBearContracting = allBear and (not tf1InStatus or tf1BearContracting) and (not tf2InStatus or tf2BearContracting) and (not tf3InStatus or tf3BearContracting) and (not tf4InStatus or tf4BearContracting)
 
 string alignment = allBullExpanding ? "Bullish Expansion" : allBearExpanding ? "Bearish Expansion" : allBullContracting ? "Bullish Contraction" : allBearContracting ? "Bearish Contraction" : allBull ? "Bullish" : allBear ? "Bearish" : "None"
 color alignColor = allBull ? color.green : allBear ? color.red : color.gray
