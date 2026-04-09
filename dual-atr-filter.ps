@@ -1,0 +1,74 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Dual ATR Filter", overlay=true)
+
+// ==========================================
+// Inputs
+// ==========================================
+
+// --- Combination ---
+combineMode = input.string("AND", "Filter Combination", options=["AND", "OR"], group="Combination")
+bullColor = input.color(color.green, "Bullish Color", group="Combination")
+bearColor = input.color(color.red, "Bearish Color", group="Combination")
+
+// --- Filter 1 ---
+f1_enabled = input.bool(true, "Enable", group="Filter 1")
+f1_length  = input.int(14, "ATR Length", minval=1, group="Filter 1")
+f1_maType  = input.string("RMA", "Smoothing", options=["None", "SMA", "EMA", "RMA", "WMA", "HMA"], group="Filter 1")
+f1_atrSrc  = input.string("Full Range", "ATR Source", options=["Full Range", "Body"], group="Filter 1")
+f1_candSrc = input.string("Full Range", "Candle Source", options=["Full Range", "Body"], group="Filter 1")
+f1_mult    = input.float(1.0, "ATR Multiple", minval=0.1, step=0.1, group="Filter 1")
+f1_dir     = input.string("Above", "Candle Range", options=["Above", "Below"], group="Filter 1")
+
+// --- Filter 2 ---
+f2_enabled = input.bool(true, "Enable", group="Filter 2")
+f2_length  = input.int(50, "ATR Length", minval=1, group="Filter 2")
+f2_maType  = input.string("RMA", "Smoothing", options=["None", "SMA", "EMA", "RMA", "WMA", "HMA"], group="Filter 2")
+f2_atrSrc  = input.string("Full Range", "ATR Source", options=["Full Range", "Body"], group="Filter 2")
+f2_candSrc = input.string("Full Range", "Candle Source", options=["Full Range", "Body"], group="Filter 2")
+f2_mult    = input.float(1.0, "ATR Multiple", minval=0.1, step=0.1, group="Filter 2")
+f2_dir     = input.string("Below", "Candle Range", options=["Above", "Below"], group="Filter 2")
+
+// ==========================================
+// ATR Calculation
+// ==========================================
+
+fullRange = high - low
+bodySize  = math.abs(close - open)
+tr        = ta.tr
+
+calcSmoothing(float src, int len, string maType) =>
+    switch maType
+        "None" => src
+        "SMA"  => ta.sma(src, len)
+        "EMA"  => ta.ema(src, len)
+        "RMA"  => ta.rma(src, len)
+        "WMA"  => ta.wma(src, len)
+        "HMA"  => ta.hma(src, len)
+
+f1_atrBase = f1_atrSrc == "Body" ? bodySize : tr
+f2_atrBase = f2_atrSrc == "Body" ? bodySize : tr
+f1_atr = calcSmoothing(f1_atrBase, f1_length, f1_maType)
+f2_atr = calcSmoothing(f2_atrBase, f2_length, f2_maType)
+
+// ==========================================
+// Filter Logic
+// ==========================================
+
+f1_candle = f1_candSrc == "Body" ? bodySize : fullRange
+f2_candle = f2_candSrc == "Body" ? bodySize : fullRange
+
+f1_pass = not f1_enabled or (f1_dir == "Above" ? f1_candle > f1_atr * f1_mult : f1_candle < f1_atr * f1_mult)
+f2_pass = not f2_enabled or (f2_dir == "Above" ? f2_candle > f2_atr * f2_mult : f2_candle < f2_atr * f2_mult)
+
+passFilter = combineMode == "AND" ? (f1_pass and f2_pass) : (f1_pass or f2_pass)
+
+// ==========================================
+// Visualization
+// ==========================================
+
+isBull = close >= open
+plotshape(passFilter and isBull, style=shape.diamond, location=location.belowbar, color=bullColor, size=size.tiny)
+plotshape(passFilter and not isBull, style=shape.diamond, location=location.abovebar, color=bearColor, size=size.tiny)
