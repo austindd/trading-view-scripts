@@ -4,9 +4,10 @@
 
 // A non-repainting implementation of Nadaraya–Watson Regression using a Rational Quadratic Kernel. 
 
-indicator('Nadaraya-Watson: Rational Quadratic Kernel (Non-Repainting) x2 [SB]', "NW RQK (no-repaint) x2 [SB]", overlay=true, timeframe="")
+indicator('Nadaraya-Watson: Rational Quadratic Kernel (Non-Repainting) x2 [SB]', "NW RQK (no-repaint) x2 [SB]", overlay=true, timeframe="", max_lines_count=500)
 
 // Settings
+htfTimeframe = input.timeframe("", "Timeframe", tooltip="Timeframe for the kernel regression. Leave blank for current chart timeframe.")
 srcA = input.source(open, 'Source A')
 srcB = input.source(close, 'Source B')
 h = input.float(8., 'Lookback Window', minval=3., tooltip='The number of bars used for the estimation. This is a sliding value that represents the most recent historical bars. Recommended range: 3-50')
@@ -32,17 +33,19 @@ kernel_regression(_src, _size, _h) =>
         _cumulativeWeight += w
     _currentWeight / _cumulativeWeight
 
-// Estimations - A
-yhat1A_raw = kernel_regression(srcA, sizeA, h)
-yhat2A_raw = kernel_regression(srcA, sizeA, h-lag)
-yhat1A = useEmaSmoothing ? ta.ema(yhat1A_raw, smoothingFactor) : yhat1A_raw
-yhat2A = useEmaSmoothing ? ta.ema(yhat2A_raw, smoothingFactor) : yhat2A_raw
+// Estimations (computed on current TF, then fetched from requested TF via request.security)
+yhat1A_ctf_raw = kernel_regression(srcA, sizeA, h)
+yhat2A_ctf_raw = kernel_regression(srcA, sizeA, h-lag)
+yhat1A_ctf = useEmaSmoothing ? ta.ema(yhat1A_ctf_raw, smoothingFactor) : yhat1A_ctf_raw
+yhat2A_ctf = useEmaSmoothing ? ta.ema(yhat2A_ctf_raw, smoothingFactor) : yhat2A_ctf_raw
 
-// Estimations - B
-yhat1B_raw = kernel_regression(srcB, sizeB, h)
-yhat2B_raw = kernel_regression(srcB, sizeB, h-lag)
-yhat1B = useEmaSmoothing ? ta.ema(yhat1B_raw, smoothingFactor) : yhat1B_raw
-yhat2B = useEmaSmoothing ? ta.ema(yhat2B_raw, smoothingFactor) : yhat2B_raw
+yhat1B_ctf_raw = kernel_regression(srcB, sizeB, h)
+yhat2B_ctf_raw = kernel_regression(srcB, sizeB, h-lag)
+yhat1B_ctf = useEmaSmoothing ? ta.ema(yhat1B_ctf_raw, smoothingFactor) : yhat1B_ctf_raw
+yhat2B_ctf = useEmaSmoothing ? ta.ema(yhat2B_ctf_raw, smoothingFactor) : yhat2B_ctf_raw
+
+// Fetch from requested timeframe (when htfTimeframe is "", this returns current TF values)
+[yhat1A, yhat2A, yhat1B, yhat2B] = request.security(syminfo.tickerid, htfTimeframe, [yhat1A_ctf, yhat2A_ctf, yhat1B_ctf, yhat2B_ctf])
 
 // Rates of Change - A
 bool wasBearishA = yhat1A[2] > yhat1A[1]
