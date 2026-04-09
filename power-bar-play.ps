@@ -455,12 +455,12 @@ float candleRange = high - low
 float candleBody = math.abs(close - open)
 float bodyRatio = candleRange > 0 ? candleBody / candleRange : 0
 
-bool touchesEnvelope = not na(smaUpper) and not na(smaLower) and low <= smaUpper and high >= smaLower
+bool opensInEnvelope = not na(smaUpper) and not na(smaLower) and open <= smaUpper and open >= smaLower
 bool meetsAtrSize = not na(atrPbValue) and candleRange >= pbMinAtrMultiple * atrPbValue
 bool meetsBodyRatio = bodyRatio >= pbMinBodyRatio
 bool isBos = bosBullish or bosBearish
 
-bool isPowerBar = touchesEnvelope and meetsAtrSize and meetsBodyRatio and isBos
+bool isPowerBar = opensInEnvelope and meetsAtrSize and meetsBodyRatio and isBos
 bool isBullishPowerBar = isPowerBar and bosBullish
 bool isBearishPowerBar = isPowerBar and bosBearish
 
