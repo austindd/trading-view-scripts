@@ -11,8 +11,18 @@ string maType   = input.string("EMA", "MA Type", options=["EMA", "SMA"])
 int atrLength   = input.int(10, "ATR Length", minval=1)
 int maxLevels   = input.int(30, "Max Levels Per Side", minval=1, maxval=50)
 bool showKC     = input.bool(true, "Show Keltner Channel")
-color highColor = input.color(color.red, "High Level Color")
-color lowColor  = input.color(color.green, "Low Level Color")
+color highColor       = input.color(color.red, "High Level Color")
+color lowColor        = input.color(color.green, "Low Level Color")
+string activeStyleIn  = input.string("Solid", "Active Line Style", options=["Solid", "Dashed", "Dotted"])
+string wickedStyleIn  = input.string("Dotted", "Wicked Line Style", options=["Solid", "Dashed", "Dotted"])
+string brokenStyleIn  = input.string("Dotted", "Broken Line Style", options=["Solid", "Dashed", "Dotted"])
+
+styleFromStr(string s) =>
+    s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
+
+activeStyle = styleFromStr(activeStyleIn)
+wickedStyle = styleFromStr(wickedStyleIn)
+brokenStyle = styleFromStr(brokenStyleIn)
 
 // --- Keltner Channel ---
 float middle = maType == "EMA" ? ta.ema(close, kcLength) : ta.sma(close, kcLength)
@@ -36,8 +46,10 @@ var float downBreakoutLow     = na
 // --- Level Storage ---
 var line[]  highLines  = array.new<line>()
 var float[] highPrices = array.new<float>()
+var bool[]  highWicked = array.new<bool>()
 var line[]  lowLines   = array.new<line>()
 var float[] lowPrices  = array.new<float>()
+var bool[]  lowWicked  = array.new<bool>()
 
 // --- Detect Upward Breakout ---
 if high > upper and not inUpBreakout
@@ -52,12 +64,14 @@ if inUpBreakout and high > upBreakoutHigh
 
 // Resolve: price retraces to middle line → structure high confirmed
 if inUpBreakout and low <= middle
-    line newLine = line.new(upBreakoutHighBar, upBreakoutHigh, bar_index, upBreakoutHigh, color=highColor, style=line.style_solid, width=1)
+    line newLine = line.new(upBreakoutHighBar, upBreakoutHigh, bar_index, upBreakoutHigh, color=highColor, style=activeStyle, width=2)
     array.push(highLines, newLine)
     array.push(highPrices, upBreakoutHigh)
+    array.push(highWicked, false)
     if array.size(highLines) > maxLevels
         line.delete(array.shift(highLines))
         array.shift(highPrices)
+        array.shift(highWicked)
     inUpBreakout := false
 
 // --- Detect Downward Breakout ---
@@ -73,37 +87,49 @@ if inDownBreakout and low < downBreakoutLow
 
 // Resolve: price retraces to middle line → structure low confirmed
 if inDownBreakout and high >= middle
-    line newLine = line.new(downBreakoutLowBar, downBreakoutLow, bar_index, downBreakoutLow, color=lowColor, style=line.style_solid, width=1)
+    line newLine = line.new(downBreakoutLowBar, downBreakoutLow, bar_index, downBreakoutLow, color=lowColor, style=activeStyle, width=2)
     array.push(lowLines, newLine)
     array.push(lowPrices, downBreakoutLow)
+    array.push(lowWicked, false)
     if array.size(lowLines) > maxLevels
         line.delete(array.shift(lowLines))
         array.shift(lowPrices)
+        array.shift(lowWicked)
     inDownBreakout := false
 
 // --- Extend Active Lines / Check for Breaks ---
-for i = array.size(highLines) - 1 to 0
-    float p = array.get(highPrices, i)
-    line l  = array.get(highLines, i)
-    if close > p
-        // Broken by close — stop extending, restyle
-        line.set_x2(l, bar_index)
-        line.set_style(l, line.style_dotted)
-        array.remove(highLines, i)
-        array.remove(highPrices, i)
-    else
-        // Still active — extend rightward
-        line.set_x2(l, bar_index)
+if array.size(highLines) > 0
+    for i = array.size(highLines) - 1 to 0
+        float p = array.get(highPrices, i)
+        line l  = array.get(highLines, i)
+        if close > p
+            // Broken by close — stop extending
+            line.set_x2(l, bar_index)
+            line.set_style(l, brokenStyle)
+            array.remove(highLines, i)
+            array.remove(highPrices, i)
+            array.remove(highWicked, i)
+        else
+            line.set_x2(l, bar_index)
+            if high > p and not array.get(highWicked, i)
+                // Wicked through — restyle but keep extending
+                line.set_style(l, wickedStyle)
+                array.set(highWicked, i, true)
 
-for i = array.size(lowLines) - 1 to 0
-    float p = array.get(lowPrices, i)
-    line l  = array.get(lowLines, i)
-    if close < p
-        // Broken by close — stop extending, restyle
-        line.set_x2(l, bar_index)
-        line.set_style(l, line.style_dotted)
-        array.remove(lowLines, i)
-        array.remove(lowPrices, i)
-    else
-        // Still active — extend rightward
-        line.set_x2(l, bar_index)
+if array.size(lowLines) > 0
+    for i = array.size(lowLines) - 1 to 0
+        float p = array.get(lowPrices, i)
+        line l  = array.get(lowLines, i)
+        if close < p
+            // Broken by close — stop extending
+            line.set_x2(l, bar_index)
+            line.set_style(l, brokenStyle)
+            array.remove(lowLines, i)
+            array.remove(lowPrices, i)
+            array.remove(lowWicked, i)
+        else
+            line.set_x2(l, bar_index)
+            if low < p and not array.get(lowWicked, i)
+                // Wicked through — restyle but keep extending
+                line.set_style(l, wickedStyle)
+                array.set(lowWicked, i, true)
