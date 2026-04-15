@@ -1,0 +1,21 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Volume Body Bars", overlay=true)
+
+minBodyRatio = input.float(0.75, "Min Body/Range Ratio", minval=0.0, maxval=1.0, step=0.05)
+minVolRatio  = input.float(2.0, "Min Volume/Prev Volume Ratio", minval=0.0, step=0.1)
+
+bodySize  = math.abs(close - open)
+rangeSize = high - low
+
+bodyRatio = rangeSize > 0 ? bodySize / rangeSize : 0.0
+volRatio  = volume[1] > 0 ? volume / volume[1] : 0.0
+
+isQualified = bodyRatio >= minBodyRatio and volRatio >= minVolRatio
+
+isBullish = close >= open
+
+plotshape(isQualified and isBullish, style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small)
+plotshape(isQualified and not isBullish, style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small)
