@@ -14,7 +14,7 @@ useRealtime = input.bool(false, "Use Realtime HTF Data", tooltip="When enabled, 
 // ============================================================================
 // TIMEFRAME 1 SETTINGS
 // ============================================================================
-tf1Enabled = input.bool(true, "Enable TF1 Cloud", group="Timeframe 1")
+tf1Enabled = input.bool(true, "Show TF1 Cloud", group="Timeframe 1")
 tf1InStatus = input.bool(true, "Include TF1 in Trend Status", group="Timeframe 1")
 tf1Timeframe = input.timeframe("", "TF1 Timeframe", group="Timeframe 1")
 tf1BullColor = input.color(color.new(color.green, 95), "TF1 Bull Cloud", group="Timeframe 1")
@@ -23,7 +23,7 @@ tf1BearColor = input.color(color.new(color.red, 95), "TF1 Bear Cloud", group="Ti
 // ============================================================================
 // TIMEFRAME 2 SETTINGS
 // ============================================================================
-tf2Enabled = input.bool(true, "Enable TF2 Cloud", group="Timeframe 2")
+tf2Enabled = input.bool(true, "Show TF2 Cloud", group="Timeframe 2")
 tf2InStatus = input.bool(true, "Include TF2 in Trend Status", group="Timeframe 2")
 tf2Timeframe = input.timeframe("15", "TF2 Timeframe", group="Timeframe 2")
 tf2BullColor = input.color(color.new(color.blue, 95), "TF2 Bull Cloud", group="Timeframe 2")
@@ -32,7 +32,7 @@ tf2BearColor = input.color(color.new(color.orange, 95), "TF2 Bear Cloud", group=
 // ============================================================================
 // TIMEFRAME 3 SETTINGS
 // ============================================================================
-tf3Enabled = input.bool(true, "Enable TF3 Cloud", group="Timeframe 3")
+tf3Enabled = input.bool(true, "Show TF3 Cloud", group="Timeframe 3")
 tf3InStatus = input.bool(true, "Include TF3 in Trend Status", group="Timeframe 3")
 tf3Timeframe = input.timeframe("60", "TF3 Timeframe", group="Timeframe 3")
 tf3BullColor = input.color(color.new(color.teal, 95), "TF3 Bull Cloud", group="Timeframe 3")
@@ -41,7 +41,7 @@ tf3BearColor = input.color(color.new(color.purple, 95), "TF3 Bear Cloud", group=
 // ============================================================================
 // TIMEFRAME 4 SETTINGS
 // ============================================================================
-tf4Enabled = input.bool(true, "Enable TF4 Cloud", group="Timeframe 4")
+tf4Enabled = input.bool(true, "Show TF4 Cloud", group="Timeframe 4")
 tf4InStatus = input.bool(true, "Include TF4 in Trend Status", group="Timeframe 4")
 tf4Timeframe = input.timeframe("D", "TF4 Timeframe", group="Timeframe 4")
 tf4BullColor = input.color(color.new(color.lime, 95), "TF4 Bull Cloud", group="Timeframe 4")
@@ -52,6 +52,14 @@ tf4BearColor = input.color(color.new(color.maroon, 95), "TF4 Bear Cloud", group=
 // ============================================================================
 showTable = input.bool(true, "Show Alignment Status", group="Status Table")
 requireSlope = input.bool(true, "Require EMA Slope", tooltip="When enabled, Bull/Bear requires both EMAs sloping in the trend direction. When disabled, only checks fast vs slow EMA position.", group="Status Table")
+showBgColor = input.bool(false, "Show Background Colors", group="Status Table")
+bgBullishExpansion = input.color(color.new(color.green, 85), "Bullish Expansion BG", group="Status Table")
+bgBearishExpansion = input.color(color.new(color.red, 85), "Bearish Expansion BG", group="Status Table")
+bgBullishContraction = input.color(color.new(color.green, 92), "Bullish Contraction BG", group="Status Table")
+bgBearishContraction = input.color(color.new(color.red, 92), "Bearish Contraction BG", group="Status Table")
+bgBullish = input.color(color.new(color.green, 88), "Bullish BG", group="Status Table")
+bgBearish = input.color(color.new(color.red, 88), "Bearish BG", group="Status Table")
+bgNeutralConsolidation = input.color(color.new(color.gray, 90), "Neutral Consolidation BG", group="Status Table")
 
 // ============================================================================
 // EMA CALCULATIONS
@@ -256,4 +264,10 @@ alertcondition(statusChanged and allBull and not allBullExpanding and not allBul
 alertcondition(statusChanged and allBear and not allBearExpanding and not allBearContracting, "Bearish", "EMA clouds entered Bearish")
 alertcondition(statusChanged and neutralConsolidation, "Neutral Consolidation", "EMA clouds entered Neutral Consolidation")
 alertcondition(statusChanged and not allBull and not allBear and not neutralConsolidation, "Neutral", "EMA clouds entered Neutral")
-alertcondition(statusChanged, "Any Status Change", "EMA cloud status changed to " + alignment)
+alertcondition(statusChanged, "Any Status Change", "EMA cloud trend status changed")
+
+// ============================================================================
+// BACKGROUND COLORS
+// ============================================================================
+color bgCol = not showBgColor ? na : allBullExpanding ? bgBullishExpansion : allBearExpanding ? bgBearishExpansion : allBullContracting ? bgBullishContraction : allBearContracting ? bgBearishContraction : allBull ? bgBullish : allBear ? bgBearish : neutralConsolidation ? bgNeutralConsolidation : na
+bgcolor(bgCol, title="Trend Status Background")
