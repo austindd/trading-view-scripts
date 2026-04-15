@@ -1,0 +1,109 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Keltner Channel Market Structure", overlay=true, max_lines_count=500)
+
+// --- Inputs ---
+int kcLength    = input.int(20, "KC Length", minval=1)
+float kcMult    = input.float(1.5, "KC Multiplier", minval=0.1, step=0.1)
+string maType   = input.string("EMA", "MA Type", options=["EMA", "SMA"])
+int atrLength   = input.int(10, "ATR Length", minval=1)
+int maxLevels   = input.int(30, "Max Levels Per Side", minval=1, maxval=50)
+bool showKC     = input.bool(true, "Show Keltner Channel")
+color highColor = input.color(color.red, "High Level Color")
+color lowColor  = input.color(color.green, "Low Level Color")
+
+// --- Keltner Channel ---
+float middle = maType == "EMA" ? ta.ema(close, kcLength) : ta.sma(close, kcLength)
+float atrVal = ta.atr(atrLength)
+float upper  = middle + kcMult * atrVal
+float lower  = middle - kcMult * atrVal
+
+plot(showKC ? upper : na, "Upper Band", color=color.new(color.gray, 50))
+plot(showKC ? middle : na, "Middle Line", color=color.new(color.yellow, 50))
+plot(showKC ? lower : na, "Lower Band", color=color.new(color.gray, 50))
+
+// --- Breakout State Tracking ---
+var bool  inUpBreakout      = false
+var int   upBreakoutHighBar = na
+var float upBreakoutHigh    = na
+
+var bool  inDownBreakout      = false
+var int   downBreakoutLowBar  = na
+var float downBreakoutLow     = na
+
+// --- Level Storage ---
+var line[]  highLines  = array.new<line>()
+var float[] highPrices = array.new<float>()
+var line[]  lowLines   = array.new<line>()
+var float[] lowPrices  = array.new<float>()
+
+// --- Detect Upward Breakout ---
+if high > upper and not inUpBreakout
+    inUpBreakout      := true
+    upBreakoutHigh    := high
+    upBreakoutHighBar := bar_index
+
+// Track running high while in upward breakout
+if inUpBreakout and high > upBreakoutHigh
+    upBreakoutHigh    := high
+    upBreakoutHighBar := bar_index
+
+// Resolve: price retraces to middle line → structure high confirmed
+if inUpBreakout and low <= middle
+    line newLine = line.new(upBreakoutHighBar, upBreakoutHigh, bar_index, upBreakoutHigh, color=highColor, style=line.style_solid, width=1)
+    array.push(highLines, newLine)
+    array.push(highPrices, upBreakoutHigh)
+    if array.size(highLines) > maxLevels
+        line.delete(array.shift(highLines))
+        array.shift(highPrices)
+    inUpBreakout := false
+
+// --- Detect Downward Breakout ---
+if low < lower and not inDownBreakout
+    inDownBreakout     := true
+    downBreakoutLow    := low
+    downBreakoutLowBar := bar_index
+
+// Track running low while in downward breakout
+if inDownBreakout and low < downBreakoutLow
+    downBreakoutLow    := low
+    downBreakoutLowBar := bar_index
+
+// Resolve: price retraces to middle line → structure low confirmed
+if inDownBreakout and high >= middle
+    line newLine = line.new(downBreakoutLowBar, downBreakoutLow, bar_index, downBreakoutLow, color=lowColor, style=line.style_solid, width=1)
+    array.push(lowLines, newLine)
+    array.push(lowPrices, downBreakoutLow)
+    if array.size(lowLines) > maxLevels
+        line.delete(array.shift(lowLines))
+        array.shift(lowPrices)
+    inDownBreakout := false
+
+// --- Extend Active Lines / Check for Breaks ---
+for i = array.size(highLines) - 1 to 0
+    float p = array.get(highPrices, i)
+    line l  = array.get(highLines, i)
+    if close > p
+        // Broken by close — stop extending, restyle
+        line.set_x2(l, bar_index)
+        line.set_style(l, line.style_dotted)
+        array.remove(highLines, i)
+        array.remove(highPrices, i)
+    else
+        // Still active — extend rightward
+        line.set_x2(l, bar_index)
+
+for i = array.size(lowLines) - 1 to 0
+    float p = array.get(lowPrices, i)
+    line l  = array.get(lowLines, i)
+    if close < p
+        // Broken by close — stop extending, restyle
+        line.set_x2(l, bar_index)
+        line.set_style(l, line.style_dotted)
+        array.remove(lowLines, i)
+        array.remove(lowPrices, i)
+    else
+        // Still active — extend rightward
+        line.set_x2(l, bar_index)
