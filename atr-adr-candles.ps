@@ -1,0 +1,121 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Amphibiantrading
+
+//@version=5
+indicator("ATR/ADR Candles", overlay = true)
+
+//inputs
+var g1 = 'ATR/ADR Settings'
+adrOrAtr =          input.string('ATR', 'ATR or ADR', options = ['ATR', 'ADR'])
+atrLenLong =        input.int(20, 'ATR/ADR Long Lookback', group = g1)
+atrLenShort =       input.int(5, 'ATR/ADR Short Lookback' ,group = g1)
+bgColorBool =       input.bool(true, ' ', inline = '1', group = g1)
+bgColor =           input.color(color.new(color.yellow,90), 'Show ATR/ADR Expansion', inline = '1', group = g1, 
+      tooltip = 'Color Background when Short ATR/ADR > Long ATR/ADR')
+
+var g2 = 'Candle Colors'
+atrLenMed =         input.int(10, 'ATR/ADR Length for Candles', inline = '0', group = g2, 
+       tooltip = 'ATR length used to calculate candle colors')
+atrSrc =            input.string('Open', 'Calculate Days ATR Move From', options = ['Open', 'Previous Close', 'Daily Range'], 
+       group = g2, tooltip = 'Calculate the ATR move from the open, previous close, or full daily range. ADR will always use daily range.')
+fullAtrBool =       input.bool(true, ' ', inline = '1', group = g2)
+contraBool =        input.bool(true, ' ', inline = '2', group = g2)
+expan1Bool =        input.bool(true, ' ', inline = '3', group = g2)
+expan2Bool =        input.bool(true, ' ', inline = '4', group = g2)
+
+contractMult =      input.float(0.5, 'Contraction Threshold', minval = .1, maxval = .99, step = .01, inline = '2', 
+       group = g2, tooltip = 'A candle thats range is less than chosen % of ATR/ADR')
+multi2 =            input.float(1.5, 'Expansion Threshold', minval = 1.25, maxval = 10, step = .25, inline = '3', group = g2, 
+       tooltip = 'A candle thats range is greater than chosen % of ATR/ADR')
+multi3 =            input.float(2.0, 'Expansion Threshold', minval = 1.5, maxval = 10, step = .25, inline = '4', group = g2, 
+       tooltip = 'A candle thats range is greater than chosen % of ATR/ADR')
+
+color1 =            input.color(color.rgb(255, 213, 151), 'Full ATR/ADR', inline = '1', group = g2)
+color2 =            input.color(color.rgb(179, 246, 255), ' ', inline = '2', group = g2)
+color3 =            input.color(color.rgb(34, 130, 255), ' ', inline = '3', group = g2)
+color4 =            input.color(color.rgb(255, 0, 119), ' ', inline = '4', group = g2)
+
+var g3 = 'Ranges'
+showLines =         input.bool(false, 'Show Expansion Candle Open/Close', inline = '1', group = g3)
+onlyLast =          input.bool(false, 'Only Show Last Lines', inline = '1', group = g3)
+maxLineLen =        input.int(9, 'Delete Lines After Days', inline = '2', group = g3)
+lineStyle =         input.string('Solid', 'Line Style', options = ['Solid', 'Dashed', 'Dotted'], inline = '3', group = g3)
+lineColor =         input.color(color.red, ' ', inline = '3', group = g3)
+
+var g4 = 'ATR Labels'
+showAtrLabels =     input.bool(true, ' ', inline = '1', group = g4)
+yPos =              input.string("Bottom", "ATR/ADR Labels", options = ["Top", "Middle", "Bottom"], inline = '1', group = g4)
+xPos =              input.string("Right", " ", options = ["Right","Center", "Left"], inline = '1', group = g4)
+labelColor =        input.color(color.new(color.white,100), 'Label Color', inline = '2', group = g4)
+textColor =         input.color(color.black, 'Text Color', inline = '2', group = g4)
+
+//methods
+method switcher(string this)=>
+    switch this
+        'Solid' => line.style_solid
+        'Dashed' => line.style_dashed
+        'Dotted' => line.style_dotted
+    
+//table and array for boxes
+var table atrTable = table.new(str.lower(yPos) + '_' + str.lower(xPos), 1, 4, 
+      border_color = color.new(color.white,100), border_width = 2)
+var line openLine = na, var line closeLine = na
+var line [] openLinesArr = array.new_line()
+var line [] closeLinesArr = array.new_line()
+
+//atrs & adrs
+dailyRange =    high - low
+atrLong =       ta.atr(atrLenLong)
+atrShort =      ta.atr(atrLenShort)
+atrMed =        ta.atr(atrLenMed)
+adrLong =       ta.sma(dailyRange,atrLenLong)
+adrShort =      ta.sma(dailyRange,atrLenShort)
+adrMed =        ta.sma(dailyRange,atrLenMed)
+
+//calcs
+contract1 = adrOrAtr == 'ADR' ? dailyRange <= adrMed * contractMult : adrOrAtr == 'ATR' ? close < open and atrSrc == 'Open' ? (open - close) <= atrMed * contractMult : close > open and atrSrc == 'Open' ? (close - open) <= atrMed * contractMult :
+      close < close[1] and atrSrc == 'Previous Close' ? (close[1] - close) <= atrMed * contractMult : close > close[1] and atrSrc == 'Previous Close' ? (close - close[1]) <= atrMed * contractMult : 
+      atrSrc == 'Daily Range' ? dailyRange <= atrMed * contractMult : na : na
+expan1 = adrOrAtr == 'ADR' ? dailyRange >= adrMed * multi2 : adrOrAtr == 'ATR' ? close < open and atrSrc == 'Open' ? (open - close) >= atrMed * multi2 : close > open and atrSrc == 'Open' ? (close - open) >= atrMed * multi2 :
+      close < close[1] and atrSrc == 'Previous Close' ? (close[1] - close) >= atrMed * multi2 : close > close[1] and atrSrc == 'Previous Close' ? (close - close[1]) >= atrMed * multi2 :
+      atrSrc == 'Daily Range' ? dailyRange >= atrMed * multi2 : na : na
+expan2 = adrOrAtr == 'ADR' ? dailyRange >= adrMed * multi3 : adrOrAtr == 'ATR' ? close < open and atrSrc == 'Open' ? (open - close) >= atrMed * multi3 : close > open and atrSrc == 'Open' ? (close - open) >= atrMed * multi3 :
+      close < close[1] and atrSrc == 'Previous Close' ? (close[1] - close) >= atrMed * multi3 : close > close[1] and atrSrc == 'Previous Close' ? (close - close[1]) >= atrMed * multi3 :
+      atrSrc == 'Daily Range' ? (high - low) >= atrMed * multi3 : na : na
+isFull = adrOrAtr == 'ADR' ? dailyRange >= adrMed : adrOrAtr == 'ATR' ? close < open and atrSrc == 'Open' ? (open - close) >= atrMed : close > open and atrSrc == 'Open' ? (close - open) >= atrMed :
+      close < close[1] and atrSrc == 'Previous Close' ? (close[1] - close) >= atrMed : close > close[1] and atrSrc == 'Previous Close' ? (close - close[1]) >= atrMed :
+      atrSrc == 'Daily Range' ? dailyRange >= atrMed : na : na
+expansion = adrOrAtr == 'ATR' ? atrShort > atrLong : adrShort > adrLong
+isExpan = expan1 or expan2
+
+//plots
+barcolor(expan2 and expan2Bool ? color4 : expan1 and expan1Bool ? color3 : isFull and fullAtrBool ? color1 : 
+       contract1 and contraBool ? color2 : na)
+bgcolor(expansion and bgColorBool ? bgColor : na)
+
+if barstate.islast and showAtrLabels
+    table.cell(atrTable, 0, 0, ' ', bgcolor = color.new(color.white, 100))
+    table.cell(atrTable, 0, 1, adrOrAtr == 'ATR' ? 'ATR Long: $' + str.tostring(atrLong, format.mintick) : 'ADR Long: $' + str.tostring(adrLong, format.mintick), text_color = textColor, 
+      text_halign = text.align_left, bgcolor = labelColor)
+    table.cell(atrTable, 0, 2, adrOrAtr == 'ATR' ? 'ATR Short: $' + str.tostring(atrShort, format.mintick) : 'ADR Short: $' + str.tostring(adrShort, format.mintick), text_color = textColor, 
+      text_halign = text.align_left, bgcolor = labelColor)
+    table.cell(atrTable, 0, 3, ' ', bgcolor = color.new(color.white, 100))
+
+if isExpan and showLines
+    openLine := line.new(bar_index, open, bar_index + 1, open, extend = extend.right, style = lineStyle.switcher(), color = lineColor)
+    closeLine := line.new(bar_index, close, bar_index + 1, close, extend = extend.right, style = lineStyle.switcher(), color = lineColor)
+    openLinesArr.unshift(openLine), closeLinesArr.unshift(closeLine)
+    if onlyLast
+        (openLine[1]).delete(), (closeLine[1]).delete() 
+
+for [ind, l] in openLinesArr
+    if bar_index - l.get_x1() > maxLineLen
+        line.delete(openLinesArr.get(ind))
+for [ind, l] in closeLinesArr
+    if bar_index - l.get_x1() > maxLineLen
+        line.delete(closeLinesArr.get(ind))
+
+//alerts
+if expansion and not expansion[1]
+    alert('ATR/ADR Expansion', alert.freq_once_per_bar_close)
+
