@@ -24,8 +24,9 @@ envelopeColor = input.color(color.new(color.blue, 85), "Envelope Fill Color", gr
 // ============================================================================
 // POWER BAR SETTINGS
 // ============================================================================
-pbAtrLength = input.int(14, "ATR Length (Candle Size)", minval=1, group="Power Bar")
-pbMinAtrMultiple = input.float(1.0, "Min Candle Size (ATR Multiple)", minval=0.1, step=0.1, group="Power Bar")
+pbAtrLength = input.int(14, "Length (Candle Size)", minval=1, group="Power Bar")
+pbSizeMethod = input.string("ATR", "Candle Size Method", options=["ATR", "Average Body Size"], group="Power Bar", tooltip="ATR = RMA of true range; compared against the candle's full high-low range. Average Body Size = RMA of |close-open|; compared against the candle's body. Same smoothing in both modes.")
+pbMinAtrMultiple = input.float(1.0, "Min Candle Size Multiple", minval=0.1, step=0.1, group="Power Bar")
 pbMinBodyRatio = input.float(0.75, "Min Body Ratio (Body/Range)", minval=0.1, maxval=1.0, step=0.05, group="Power Bar")
 pbBreakoutLookback = input.int(5, "Breakout Lookback (bars)", minval=1, group="Power Bar", tooltip="Bullish PB must close above the highest high of the last N bars; bearish must close below the lowest low. Set to 1 to just break the prior bar. Ignored when 'Require Formal BOS' is on.")
 pbRequireBos = input.bool(false, "Require Formal BOS (stricter)", group="Power Bar", tooltip="When enabled, only bars that trigger a Break of Structure against the state-machine's current valid high/low qualify. This is much stricter and filters out continuation power bars in a trend.")
@@ -82,6 +83,7 @@ type LowLevel
 smaValue = ta.sma(close, smaLength)
 atrEnvelopeValue = ta.atr(atrEnvelopeLength)
 atrPbValue = ta.atr(pbAtrLength)
+absPbValue = ta.rma(math.abs(close - open), pbAtrLength)
 smaUpper = smaValue + atrEnvelopeValue * atrEnvelopeMultiplier
 smaLower = smaValue - atrEnvelopeValue * atrEnvelopeMultiplier
 
@@ -496,8 +498,11 @@ float bodyRatio = candleRange > 0 ? candleBody / candleRange : 0
 float priorHigh = ta.highest(high, pbBreakoutLookback)[1]
 float priorLow = ta.lowest(low, pbBreakoutLookback)[1]
 
+float sizeReference = pbSizeMethod == "ATR" ? atrPbValue : absPbValue
+float sizeMetric = pbSizeMethod == "ATR" ? candleRange : candleBody
+
 bool opensInEnvelope = not na(smaUpper) and not na(smaLower) and open <= smaUpper and open >= smaLower
-bool meetsAtrSize = not na(atrPbValue) and candleRange >= pbMinAtrMultiple * atrPbValue
+bool meetsAtrSize = not na(sizeReference) and sizeReference > 0 and sizeMetric >= pbMinAtrMultiple * sizeReference
 bool meetsBodyRatio = bodyRatio >= pbMinBodyRatio
 
 bool breaksPriorHigh = not na(priorHigh) and close > priorHigh and close > open
@@ -565,8 +570,11 @@ alertcondition(isPowerBar, "Any Power Bar", "Power Bar on {{ticker}} ({{interval
 
 // Dynamic alerts — fire on bar close with live field values.
 // In the Create Alert dialog, pick "Any alert() function call" to use these.
+string sizeLabel = pbSizeMethod == "ATR" ? "ATR" : "ABS"
+string sizeSuffix = sizeReference > 0 ? " | size=" + str.tostring(sizeMetric / sizeReference, "#.00") + "x " + sizeLabel : ""
+
 if barstate.isconfirmed and isBullishPowerBar
-    alert("Bullish Power Bar on " + syminfo.ticker + " (" + timeframe.period + ") @ " + str.tostring(close, format.mintick) + " | body=" + str.tostring(bodyRatio * 100, "#.0") + "% | size=" + str.tostring(candleRange / atrPbValue, "#.00") + "x ATR" + (pbUseVolumeFilter ? " | vol=" + str.tostring(pbVolRatio, "#.00") + "x" : ""), alert.freq_once_per_bar_close)
+    alert("Bullish Power Bar on " + syminfo.ticker + " (" + timeframe.period + ") @ " + str.tostring(close, format.mintick) + " | body=" + str.tostring(bodyRatio * 100, "#.0") + "%" + sizeSuffix + (pbUseVolumeFilter ? " | vol=" + str.tostring(pbVolRatio, "#.00") + "x" : ""), alert.freq_once_per_bar_close)
 
 if barstate.isconfirmed and isBearishPowerBar
-    alert("Bearish Power Bar on " + syminfo.ticker + " (" + timeframe.period + ") @ " + str.tostring(close, format.mintick) + " | body=" + str.tostring(bodyRatio * 100, "#.0") + "% | size=" + str.tostring(candleRange / atrPbValue, "#.00") + "x ATR" + (pbUseVolumeFilter ? " | vol=" + str.tostring(pbVolRatio, "#.00") + "x" : ""), alert.freq_once_per_bar_close)
+    alert("Bearish Power Bar on " + syminfo.ticker + " (" + timeframe.period + ") @ " + str.tostring(close, format.mintick) + " | body=" + str.tostring(bodyRatio * 100, "#.0") + "%" + sizeSuffix + (pbUseVolumeFilter ? " | vol=" + str.tostring(pbVolRatio, "#.00") + "x" : ""), alert.freq_once_per_bar_close)
