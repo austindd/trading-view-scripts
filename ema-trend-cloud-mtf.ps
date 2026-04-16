@@ -59,7 +59,7 @@ bgBullishContraction = input.color(color.new(color.green, 92), "Bullish Contract
 bgBearishContraction = input.color(color.new(color.red, 92), "Bearish Contraction BG", group="Status Table")
 bgBullish = input.color(color.new(color.green, 88), "Bullish BG", group="Status Table")
 bgBearish = input.color(color.new(color.red, 88), "Bearish BG", group="Status Table")
-bgNeutralConsolidation = input.color(color.new(color.gray, 90), "Neutral Consolidation BG", group="Status Table")
+bgNeutralContraction = input.color(color.new(color.gray, 90), "Neutral Contraction BG", group="Status Table")
 
 // ============================================================================
 // EMA CALCULATIONS
@@ -199,6 +199,10 @@ bool anyInStatus = tf1InStatus or tf2InStatus or tf3InStatus or tf4InStatus
 bool allBull = anyInStatus and (not tf1InStatus or tf1Bull) and (not tf2InStatus or tf2Bull) and (not tf3InStatus or tf3Bull) and (not tf4InStatus or tf4Bull)
 bool allBear = anyInStatus and (not tf1InStatus or tf1Bear) and (not tf2InStatus or tf2Bear) and (not tf3InStatus or tf3Bear) and (not tf4InStatus or tf4Bear)
 
+// Position-only agreement (ignores the slope filter). Fallback used when requireSlope rejects slope-confirmed alignment but cloud positions still agree.
+bool allBullPos = anyInStatus and (not tf1InStatus or tf1Fast > tf1Slow) and (not tf2InStatus or tf2Fast > tf2Slow) and (not tf3InStatus or tf3Fast > tf3Slow) and (not tf4InStatus or tf4Fast > tf4Slow)
+bool allBearPos = anyInStatus and (not tf1InStatus or tf1Fast < tf1Slow) and (not tf2InStatus or tf2Fast < tf2Slow) and (not tf3InStatus or tf3Fast < tf3Slow) and (not tf4InStatus or tf4Fast < tf4Slow)
+
 // Cloud expanding: the spread between fast and slow EMAs is growing
 tf1BullExpanding = (tf1Fast - tf1Slow) > (tf1FastPrev - tf1SlowPrev)
 tf1BearExpanding = (tf1Slow - tf1Fast) > (tf1SlowPrev - tf1FastPrev)
@@ -231,17 +235,17 @@ tf4BearContracting = (tf4Slow - tf4Fast) < (tf4SlowPrev - tf4FastPrev)
 bool allBullContracting = allBull and (not tf1InStatus or tf1BullContracting) and (not tf2InStatus or tf2BullContracting) and (not tf3InStatus or tf3BullContracting) and (not tf4InStatus or tf4BullContracting)
 bool allBearContracting = allBear and (not tf1InStatus or tf1BearContracting) and (not tf2InStatus or tf2BearContracting) and (not tf3InStatus or tf3BearContracting) and (not tf4InStatus or tf4BearContracting)
 
-// Neutral consolidation: all included TFs are contracting but don't agree on direction
+// Neutral contraction: all included TFs are contracting but cloud positions don't agree on direction
 tf1Contracting = tf1BullContracting or tf1BearContracting
 tf2Contracting = tf2BullContracting or tf2BearContracting
 tf3Contracting = tf3BullContracting or tf3BearContracting
 tf4Contracting = tf4BullContracting or tf4BearContracting
 
 bool allContracting = anyInStatus and (not tf1InStatus or tf1Contracting) and (not tf2InStatus or tf2Contracting) and (not tf3InStatus or tf3Contracting) and (not tf4InStatus or tf4Contracting)
-bool neutralConsolidation = allContracting and not allBull and not allBear
+bool neutralContraction = allContracting and not allBullPos and not allBearPos
 
-string alignment = allBullExpanding ? "Bullish Expansion" : allBearExpanding ? "Bearish Expansion" : allBullContracting ? "Bullish Contraction" : allBearContracting ? "Bearish Contraction" : allBull ? "Bullish" : allBear ? "Bearish" : neutralConsolidation ? "Neutral Consolidation" : "Neutral"
-color alignColor = allBull ? color.green : allBear ? color.red : color.gray
+string alignment = allBullExpanding ? "Bullish Expansion" : allBearExpanding ? "Bearish Expansion" : allBullContracting ? "Bullish Contraction" : allBearContracting ? "Bearish Contraction" : allBull ? "Bullish" : allBear ? "Bearish" : allBullPos ? "Bullish" : allBearPos ? "Bearish" : neutralContraction ? "Neutral Contraction" : "Neutral"
+color alignColor = (allBull or allBullPos) ? color.green : (allBear or allBearPos) ? color.red : color.gray
 
 // ============================================================================
 // STATUS TABLE
@@ -260,14 +264,14 @@ alertcondition(statusChanged and allBullExpanding, "Bullish Expansion", "EMA clo
 alertcondition(statusChanged and allBearExpanding, "Bearish Expansion", "EMA clouds entered Bearish Expansion")
 alertcondition(statusChanged and allBullContracting, "Bullish Contraction", "EMA clouds entered Bullish Contraction")
 alertcondition(statusChanged and allBearContracting, "Bearish Contraction", "EMA clouds entered Bearish Contraction")
-alertcondition(statusChanged and allBull and not allBullExpanding and not allBullContracting, "Bullish", "EMA clouds entered Bullish")
-alertcondition(statusChanged and allBear and not allBearExpanding and not allBearContracting, "Bearish", "EMA clouds entered Bearish")
-alertcondition(statusChanged and neutralConsolidation, "Neutral Consolidation", "EMA clouds entered Neutral Consolidation")
-alertcondition(statusChanged and not allBull and not allBear and not neutralConsolidation, "Neutral", "EMA clouds entered Neutral")
+alertcondition(statusChanged and alignment == "Bullish", "Bullish", "EMA clouds entered Bullish")
+alertcondition(statusChanged and alignment == "Bearish", "Bearish", "EMA clouds entered Bearish")
+alertcondition(statusChanged and neutralContraction, "Neutral Contraction", "EMA clouds entered Neutral Contraction")
+alertcondition(statusChanged and alignment == "Neutral", "Neutral", "EMA clouds entered Neutral")
 alertcondition(statusChanged, "Any Status Change", "EMA cloud trend status changed")
 
 // ============================================================================
 // BACKGROUND COLORS
 // ============================================================================
-color bgCol = not showBgColor ? na : allBullExpanding ? bgBullishExpansion : allBearExpanding ? bgBearishExpansion : allBullContracting ? bgBullishContraction : allBearContracting ? bgBearishContraction : allBull ? bgBullish : allBear ? bgBearish : neutralConsolidation ? bgNeutralConsolidation : na
+color bgCol = not showBgColor ? na : allBullExpanding ? bgBullishExpansion : allBearExpanding ? bgBearishExpansion : allBullContracting ? bgBullishContraction : allBearContracting ? bgBearishContraction : allBull ? bgBullish : allBear ? bgBearish : allBullPos ? bgBullish : allBearPos ? bgBearish : neutralContraction ? bgNeutralContraction : na
 bgcolor(bgCol, title="Trend Status Background")
