@@ -50,6 +50,14 @@ pbRequireMaSlope = input.bool(false, "Require MA Slope Alignment", group="MA Slo
 pbMaSlopeLookback = input.int(1, "MA Slope Lookback (bars)", minval=1, group="MA Slope Filter", tooltip="Compare current SMA to the SMA N bars ago to determine slope direction.")
 
 // ============================================================================
+// ADX FILTER SETTINGS
+// ============================================================================
+pbUseAdxFilter = input.bool(false, "Enable ADX Filter", group="ADX Filter", tooltip="When enabled, a power bar only qualifies if ADX is within the min/max range. Useful for avoiding trendless chop (low ADX) or over-extended moves (high ADX).")
+pbAdxLength = input.int(14, "ADX Length", minval=1, group="ADX Filter", tooltip="Used for both the DI length and the ADX smoothing in ta.dmi().")
+pbMinAdx = input.float(20.0, "Min ADX", minval=0.0, maxval=100.0, step=1.0, group="ADX Filter")
+pbMaxAdx = input.float(100.0, "Max ADX", minval=0.0, maxval=100.0, step=1.0, group="ADX Filter")
+
+// ============================================================================
 // VOLUME FILTER SETTINGS
 // ============================================================================
 pbUseVolumeFilter = input.bool(false, "Enable Volume Filter", group="Volume Filter")
@@ -115,6 +123,8 @@ calcMA(src, len, typ) =>
             ta.wma(2 * ta.wma(src, halfLen) - ta.wma(src, len), sqrtLen)
 
 float volMA = calcMA(volume, pbVolMaLength, pbVolMaType)
+
+[_pbDiPlus, _pbDiMinus, pbAdxValue] = ta.dmi(pbAdxLength, pbAdxLength)
 
 // ============================================================================
 // STATE VARIABLES
@@ -538,9 +548,12 @@ else
     pbVolRatio := not na(volMA) and volMA > 0 ? volume / volMA : 0.0
 bool volumeOk = not pbUseVolumeFilter or pbVolRatio >= pbMinVolRatio
 
+// ADX filter — direction-agnostic, applies equally to bullish and bearish PBs.
+bool adxOk = not pbUseAdxFilter or (not na(pbAdxValue) and pbAdxValue >= pbMinAdx and pbAdxValue <= pbMaxAdx)
+
 // Standalone PB detection (uses the full-strength thresholds).
-bool standaloneBull = opensInEnvelope and meetsAtrSize and meetsBodyRatio and bullQualifies and bullSlopeOk and volumeOk
-bool standaloneBear = opensInEnvelope and meetsAtrSize and meetsBodyRatio and bearQualifies and bearSlopeOk and volumeOk
+bool standaloneBull = opensInEnvelope and meetsAtrSize and meetsBodyRatio and bullQualifies and bullSlopeOk and volumeOk and adxOk
+bool standaloneBear = opensInEnvelope and meetsAtrSize and meetsBodyRatio and bearQualifies and bearSlopeOk and volumeOk and adxOk
 
 // Per-bar "combined component" — each bar in a combined sequence must meet the
 // relaxed size + body-ratio thresholds and be in the sequence's direction.
@@ -573,7 +586,7 @@ else if pbCombineEnabled
             int firstBarOffset = n - 1
             bool firstOpenInEnv = not na(smaUpper[firstBarOffset]) and not na(smaLower[firstBarOffset]) and open[firstBarOffset] <= smaUpper[firstBarOffset] and open[firstBarOffset] >= smaLower[firstBarOffset]
 
-            if firstOpenInEnv and volumeOk
+            if firstOpenInEnv and volumeOk and adxOk
                 if allBull and bullSlopeOk
                     float priorSeqHigh = ta.highest(high, pbBreakoutLookback)[n]
                     bool seqBreaksHigh = pbRequireBos ? bosBullish : (not na(priorSeqHigh) and close > priorSeqHigh)
@@ -645,9 +658,10 @@ alertcondition(isPowerBar, "Any Power Bar", "Power Bar on {{ticker}} ({{interval
 string sizeLabel = pbSizeMethod == "ATR" ? "ATR" : "ABS"
 string sizeSuffix = sizeReference > 0 ? " | size=" + str.tostring(sizeMetric / sizeReference, "#.00") + "x " + sizeLabel : ""
 string combineSuffix = detectedCount > 1 ? "×" + str.tostring(detectedCount) : ""
+string adxSuffix = pbUseAdxFilter and not na(pbAdxValue) ? " | ADX=" + str.tostring(pbAdxValue, "#.0") : ""
 
 if barstate.isconfirmed and isBullishPowerBar
-    alert("Bullish Power Bar" + combineSuffix + " on " + syminfo.ticker + " (" + timeframe.period + ") @ " + str.tostring(close, format.mintick) + " | body=" + str.tostring(bodyRatio * 100, "#.0") + "%" + sizeSuffix + (pbUseVolumeFilter ? " | vol=" + str.tostring(pbVolRatio, "#.00") + "x" : ""), alert.freq_once_per_bar_close)
+    alert("Bullish Power Bar" + combineSuffix + " on " + syminfo.ticker + " (" + timeframe.period + ") @ " + str.tostring(close, format.mintick) + " | body=" + str.tostring(bodyRatio * 100, "#.0") + "%" + sizeSuffix + (pbUseVolumeFilter ? " | vol=" + str.tostring(pbVolRatio, "#.00") + "x" : "") + adxSuffix, alert.freq_once_per_bar_close)
 
 if barstate.isconfirmed and isBearishPowerBar
-    alert("Bearish Power Bar" + combineSuffix + " on " + syminfo.ticker + " (" + timeframe.period + ") @ " + str.tostring(close, format.mintick) + " | body=" + str.tostring(bodyRatio * 100, "#.0") + "%" + sizeSuffix + (pbUseVolumeFilter ? " | vol=" + str.tostring(pbVolRatio, "#.00") + "x" : ""), alert.freq_once_per_bar_close)
+    alert("Bearish Power Bar" + combineSuffix + " on " + syminfo.ticker + " (" + timeframe.period + ") @ " + str.tostring(close, format.mintick) + " | body=" + str.tostring(bodyRatio * 100, "#.0") + "%" + sizeSuffix + (pbUseVolumeFilter ? " | vol=" + str.tostring(pbVolRatio, "#.00") + "x" : "") + adxSuffix, alert.freq_once_per_bar_close)
