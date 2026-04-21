@@ -1,0 +1,58 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("ADX MACD [SB]", overlay=false)
+
+// ──── Inputs ────
+diLength   = input.int(14, "DI Length", minval=1)
+adxSmooth  = input.int(14, "ADX Smoothing", minval=1)
+fastLen    = input.int(9, "Fast MA Length", minval=1)
+slowLen    = input.int(21, "Slow MA Length", minval=1)
+maType     = input.string("EMA", "MA Type", options=["EMA", "SMA"])
+showADX    = input.bool(true, "Show ADX Line")
+showDI     = input.bool(false, "Show +DI / -DI")
+showHist   = input.bool(true, "Show Histogram")
+customLevel = input.float(0, "Custom Level", step=1)
+showCustom  = input.bool(false, "Show Custom Level")
+
+// ──── ADX Calculation ────
+up   = ta.change(high)
+down = -ta.change(low)
+
+plusDM  = na(up) ? na : (up > down and up > 0 ? up : 0)
+minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+
+trur = ta.rma(ta.tr, diLength)
+plusDI  = 100 * ta.rma(plusDM, diLength) / trur
+minusDI = 100 * ta.rma(minusDM, diLength) / trur
+
+dx  = 100 * math.abs(plusDI - minusDI) / (plusDI + minusDI)
+adx = ta.rma(dx, adxSmooth)
+
+// ──── Moving Averages on ADX ────
+maFunc(src, len) =>
+    maType == "EMA" ? ta.ema(src, len) : ta.sma(src, len)
+
+fastMA = maFunc(adx, fastLen)
+slowMA = maFunc(adx, slowLen)
+hist   = fastMA - slowMA
+
+// ──── Colors ────
+fastColor = color.new(color.teal, 0)
+slowColor = color.new(color.orange, 0)
+histColor = hist >= 0 ? (hist > hist[1] ? color.new(color.teal, 0) : color.new(color.teal, 60)) : (hist < hist[1] ? color.new(color.red, 0) : color.new(color.red, 60))
+
+// ──── Plots ────
+plot(showADX ? adx : na, "ADX", color.new(color.white, 50), 1)
+plot(showDI ? plusDI : na, "+DI", color.green, 1)
+plot(showDI ? minusDI : na, "-DI", color.red, 1)
+
+plot(fastMA, "Fast MA", fastColor, 2)
+plot(slowMA, "Slow MA", slowColor, 2)
+plot(showHist ? hist : na, "Histogram", histColor, 1, plot.style_columns)
+
+hline(0, "Zero", color.new(color.gray, 70))
+hline(25, "Trend Threshold", color.new(color.gray, 80), hline.style_dotted)
+
+plot(showCustom ? customLevel : na, "Custom Level", color.new(color.blue, 0), 1, plot.style_line)
