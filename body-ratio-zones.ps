@@ -1,0 +1,115 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Body Ratio Zones [SB]", "BRZ [SB]", overlay=true, max_boxes_count=500)
+
+// ============================================================================
+// SETTINGS
+// ============================================================================
+thresholdInput      = input.float(50.0, "Body Ratio Threshold (%)", minval=0.0, maxval=100.0, step=1.0, group="Settings", tooltip="Candles with a body-to-range ratio below this value form consolidation zones.")
+minConsecutiveInput = input.int(1, "Min Consecutive Candles", minval=1, group="Settings", tooltip="Minimum number of consecutive indecisive candles required to form a zone.")
+maxZonesInput       = input.int(120, "Max Zones", minval=1, group="Settings", tooltip="Maximum number of zones displayed. Oldest zones are removed when exceeded.")
+
+// ============================================================================
+// ZONE DISPLAY
+// ============================================================================
+changeColorOnTouchedInput = input.bool(true, "Change Color On Touched", group="Zone Display", tooltip="Change zone color when price touches it.")
+brokenWhenTouchedInput    = input.bool(false, "Zone Broken When Touched", group="Zone Display", tooltip="If enabled, zones stop extending when touched. If disabled, zones stop extending only when price closes beyond a boundary.")
+colorBarsInput            = input.bool(true, "Color Candles", group="Zone Display", tooltip="Color candles based on body ratio (blue = indecisive, red = decisive).")
+
+// ============================================================================
+// COLORS
+// ============================================================================
+zoneColorInput        = input.color(color.new(color.blue, 70), "Zone Color", group="Colors")
+zoneBorderColorInput  = input.color(color.new(color.blue, 50), "Zone Border Color", group="Colors")
+zoneTouchedColorInput = input.color(color.new(color.gray, 80), "Zone Touched Color", group="Colors")
+decisiveColorInput    = input.color(color.new(color.red, 0), "Decisive Candle Color", group="Colors")
+indecisiveColorInput  = input.color(color.new(color.blue, 0), "Indecisive Candle Color", group="Colors")
+
+// ============================================================================
+// TYPE DEFINITION
+// ============================================================================
+type Zone
+    float top
+    float btm
+    int startLoc
+    int endLoc
+    bool crossed = false
+    int crossedLoc = na
+    bool touched = false
+    int touchedLoc = na
+
+// ============================================================================
+// CALCULATION
+// ============================================================================
+body         = math.abs(close - open)
+candRange    = high - low
+ratio        = candRange > 0 ? body / candRange * 100 : 0.0
+isIndecisive = ratio < thresholdInput
+
+// ============================================================================
+// ZONE BUILDING
+// ============================================================================
+var array<Zone> zones = array.new<Zone>(0)
+var int consecutiveCount = 0
+var float zoneTop = na
+var float zoneBtm = na
+var int zoneStart = na
+
+if isIndecisive
+    consecutiveCount += 1
+    if consecutiveCount == 1
+        zoneTop := high
+        zoneBtm := low
+        zoneStart := bar_index
+    else
+        zoneTop := math.max(zoneTop, high)
+        zoneBtm := math.min(zoneBtm, low)
+else
+    if consecutiveCount >= minConsecutiveInput
+        array.unshift(zones, Zone.new(zoneTop, zoneBtm, zoneStart, bar_index - 1))
+        if array.size(zones) > maxZonesInput
+            array.pop(zones)
+    consecutiveCount := 0
+    zoneTop := na
+    zoneBtm := na
+    zoneStart := na
+
+// ============================================================================
+// ZONE STATUS UPDATES
+// ============================================================================
+if array.size(zones) > 0
+    for i = 0 to array.size(zones) - 1
+        zn = array.get(zones, i)
+        if zn.endLoc < bar_index
+            if not zn.touched and low <= zn.top and high >= zn.btm
+                zn.touched := true
+                zn.touchedLoc := bar_index
+            if not zn.crossed and (close > zn.top or close < zn.btm)
+                zn.crossed := true
+                zn.crossedLoc := bar_index
+
+// ============================================================================
+// DISPLAY
+// ============================================================================
+if barstate.islast
+    // Draw completed zones
+    if array.size(zones) > 0
+        for i = 0 to array.size(zones) - 1
+            zn = array.get(zones, i)
+            if bar_index - zn.startLoc < 4000
+                isBroken = brokenWhenTouchedInput ? zn.touched : zn.crossed
+                zoneEnd = isBroken ? (brokenWhenTouchedInput ? zn.touchedLoc : zn.crossedLoc) : last_bar_index
+                zoneCss = changeColorOnTouchedInput and zn.touched ? zoneTouchedColorInput : zoneColorInput
+                zoneExtend = isBroken ? extend.none : extend.right
+                box.new(zn.startLoc, zn.top, zoneEnd + 1, zn.btm, bgcolor=zoneCss, border_color=zoneBorderColorInput, extend=zoneExtend)
+    // Draw in-progress zone (current consecutive run not yet finalized)
+    if consecutiveCount >= minConsecutiveInput and not na(zoneStart)
+        if bar_index - zoneStart < 4000
+            box.new(zoneStart, zoneTop, bar_index + 1, zoneBtm, bgcolor=zoneColorInput, border_color=zoneBorderColorInput, extend=extend.right)
+
+// ============================================================================
+// BAR COLORING
+// ============================================================================
+barcolor(colorBarsInput ? (isIndecisive ? indecisiveColorInput : decisiveColorInput) : na)
