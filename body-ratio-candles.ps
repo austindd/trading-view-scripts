@@ -1,0 +1,24 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Body Ratio Candles [SB]", "BRC [SB]", overlay=true)
+
+// ============================================================================
+// SETTINGS
+// ============================================================================
+thresholdInput = input.float(50.0, "Body Ratio Threshold (%)", minval=0.0, maxval=100.0, step=1.0, group="Settings", tooltip="Candles with a body-to-range ratio below this value are colored blue (indecisive). Candles at or above this value are colored red (decisive).")
+aboveColor     = input.color(color.new(color.red, 0),  "At/Above Threshold Color", group="Settings")
+belowColor     = input.color(color.new(color.blue, 0), "Below Threshold Color",    group="Settings")
+
+// ============================================================================
+// CALCULATION
+// ============================================================================
+body      = math.abs(close - open)
+candRange = high - low
+ratio     = candRange > 0 ? body / candRange * 100 : 0.0
+
+// ============================================================================
+// COLORING
+// ============================================================================
+barcolor(ratio >= thresholdInput ? aboveColor : belowColor)
