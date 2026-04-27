@@ -7,19 +7,6 @@ indicator("EMA Trend Cloud MTF [SB]", "ETC MTF [SB]", overlay=true)
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
-getMultipliedTF(float mult) =>
-    int newMult = int(math.round(timeframe.multiplier * mult))
-    if timeframe.isseconds
-        str.tostring(newMult) + "S"
-    else if timeframe.isminutes
-        str.tostring(newMult)
-    else if timeframe.isdaily
-        newMult == 1 ? "D" : str.tostring(newMult) + "D"
-    else if timeframe.isweekly
-        newMult == 1 ? "W" : str.tostring(newMult) + "W"
-    else
-        newMult == 1 ? "M" : str.tostring(newMult) + "M"
-
 formatTF(string tf) =>
     string resolved = tf == "" ? timeframe.period : tf
     if str.endswith(resolved, "S") or str.endswith(resolved, "D") or str.endswith(resolved, "W") or str.endswith(resolved, "M")
@@ -110,11 +97,14 @@ bgNeutralContraction = input.color(color.new(color.gray, 90), "Neutral Contracti
 // ============================================================================
 // COMPUTE FINAL TIMEFRAME STRINGS
 // ============================================================================
-string tf1TF = tf1UseMultiplier ? getMultipliedTF(tf1Multiplier) : tf1Timeframe
-string tf2TF = tf2UseMultiplier ? getMultipliedTF(tf2Multiplier) : tf2Timeframe
-string tf3TF = tf3UseMultiplier ? getMultipliedTF(tf3Multiplier) : tf3Timeframe
-string tf4TF = tf4UseMultiplier ? getMultipliedTF(tf4Multiplier) : tf4Timeframe
-string tf5TF = tf5UseMultiplier ? getMultipliedTF(tf5Multiplier) : tf5Timeframe
+// Computed inline (not via function) to preserve "simple string" qualifier
+// required by request.security(). User-defined functions return "series".
+string _chartTFSuffix = timeframe.isseconds ? "S" : timeframe.isminutes ? "" : timeframe.isdaily ? "D" : timeframe.isweekly ? "W" : "M"
+string tf1TF = tf1UseMultiplier ? str.tostring(math.round(timeframe.multiplier * tf1Multiplier)) + _chartTFSuffix : tf1Timeframe
+string tf2TF = tf2UseMultiplier ? str.tostring(math.round(timeframe.multiplier * tf2Multiplier)) + _chartTFSuffix : tf2Timeframe
+string tf3TF = tf3UseMultiplier ? str.tostring(math.round(timeframe.multiplier * tf3Multiplier)) + _chartTFSuffix : tf3Timeframe
+string tf4TF = tf4UseMultiplier ? str.tostring(math.round(timeframe.multiplier * tf4Multiplier)) + _chartTFSuffix : tf4Timeframe
+string tf5TF = tf5UseMultiplier ? str.tostring(math.round(timeframe.multiplier * tf5Multiplier)) + _chartTFSuffix : tf5Timeframe
 
 // ============================================================================
 // EMA CALCULATIONS
