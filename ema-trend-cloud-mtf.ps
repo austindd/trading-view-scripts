@@ -84,6 +84,7 @@ tf5BearColor = input.color(color.new(color.fuchsia, 95), "TF5 Bear Cloud", group
 // STATUS TABLE SETTINGS
 // ============================================================================
 showTable = input.bool(true, "Show Trend Status Table", group="Status Table")
+condensedTable = input.bool(false, "Condensed Mode", tooltip="When enabled, only shows the aggregated status row without individual timeframe rows.", group="Status Table")
 requireSlope = input.bool(true, "Require EMA Slope", tooltip="When enabled, Bull/Bear requires both EMAs sloping in the trend direction. When disabled, only checks fast vs slow EMA position.", group="Status Table")
 showBgColor = input.bool(false, "Show Background Colors", group="Status Table")
 bgBullishExpansion = input.color(color.new(color.green, 85), "Bullish Expansion BG", group="Status Table")
@@ -297,7 +298,8 @@ string alignment = allBullExpanding ? "Bullish Expansion" : allBearExpanding ? "
 // Row 0: Aggregated status
 // Rows 1-5: Individual timeframes
 // Columns: TF Label | Direction (U/D) | Expansion/Contraction (E/C)
-var table statusTable = table.new(position.bottom_right, 3, 6, bgcolor=color.new(color.black, 30), border_width=1)
+int _tableRows = condensedTable ? 1 : 6
+var table statusTable = table.new(position.bottom_right, 3, _tableRows, bgcolor=color.new(color.black, 30), border_width=1)
 
 if showTable and barstate.islast
     // Aggregated status row
@@ -308,50 +310,51 @@ if showTable and barstate.islast
     table.cell(statusTable, 1, 0, aggDir, text_color=color.white, text_size=size.normal, bgcolor=aggBg)
     table.cell(statusTable, 2, 0, aggEC, text_color=color.white, text_size=size.normal, bgcolor=aggBg)
 
-    // TF1 row
-    bool tf1Active = tf1Enabled and not na(tf1Fast)
-    bool tf1Exp = tf1IsBull ? tf1BullExpanding : tf1BearExpanding
-    bool tf1Con = tf1IsBull ? tf1BullContracting : tf1BearContracting
-    color tf1Bg = not tf1Active ? color.new(color.gray, 60) : tf1IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
-    table.cell(statusTable, 0, 1, tf1Active ? formatTF(tf1TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf1Bg)
-    table.cell(statusTable, 1, 1, tf1Active ? (tf1IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf1Bg)
-    table.cell(statusTable, 2, 1, tf1Active ? (tf1Exp ? "E" : tf1Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf1Bg)
+    if not condensedTable
+        // TF1 row
+        bool tf1Active = tf1Enabled and not na(tf1Fast)
+        bool tf1Exp = tf1IsBull ? tf1BullExpanding : tf1BearExpanding
+        bool tf1Con = tf1IsBull ? tf1BullContracting : tf1BearContracting
+        color tf1Bg = not tf1Active ? color.new(color.gray, 60) : tf1IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
+        table.cell(statusTable, 0, 1, tf1Active ? formatTF(tf1TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf1Bg)
+        table.cell(statusTable, 1, 1, tf1Active ? (tf1IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf1Bg)
+        table.cell(statusTable, 2, 1, tf1Active ? (tf1Exp ? "E" : tf1Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf1Bg)
 
-    // TF2 row
-    bool tf2Active = tf2Enabled and not na(tf2Fast)
-    bool tf2Exp = tf2IsBull ? tf2BullExpanding : tf2BearExpanding
-    bool tf2Con = tf2IsBull ? tf2BullContracting : tf2BearContracting
-    color tf2Bg = not tf2Active ? color.new(color.gray, 60) : tf2IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
-    table.cell(statusTable, 0, 2, tf2Active ? formatTF(tf2TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf2Bg)
-    table.cell(statusTable, 1, 2, tf2Active ? (tf2IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf2Bg)
-    table.cell(statusTable, 2, 2, tf2Active ? (tf2Exp ? "E" : tf2Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf2Bg)
+        // TF2 row
+        bool tf2Active = tf2Enabled and not na(tf2Fast)
+        bool tf2Exp = tf2IsBull ? tf2BullExpanding : tf2BearExpanding
+        bool tf2Con = tf2IsBull ? tf2BullContracting : tf2BearContracting
+        color tf2Bg = not tf2Active ? color.new(color.gray, 60) : tf2IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
+        table.cell(statusTable, 0, 2, tf2Active ? formatTF(tf2TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf2Bg)
+        table.cell(statusTable, 1, 2, tf2Active ? (tf2IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf2Bg)
+        table.cell(statusTable, 2, 2, tf2Active ? (tf2Exp ? "E" : tf2Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf2Bg)
 
-    // TF3 row
-    bool tf3Active = tf3Enabled and not na(tf3Fast)
-    bool tf3Exp = tf3IsBull ? tf3BullExpanding : tf3BearExpanding
-    bool tf3Con = tf3IsBull ? tf3BullContracting : tf3BearContracting
-    color tf3Bg = not tf3Active ? color.new(color.gray, 60) : tf3IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
-    table.cell(statusTable, 0, 3, tf3Active ? formatTF(tf3TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf3Bg)
-    table.cell(statusTable, 1, 3, tf3Active ? (tf3IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf3Bg)
-    table.cell(statusTable, 2, 3, tf3Active ? (tf3Exp ? "E" : tf3Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf3Bg)
+        // TF3 row
+        bool tf3Active = tf3Enabled and not na(tf3Fast)
+        bool tf3Exp = tf3IsBull ? tf3BullExpanding : tf3BearExpanding
+        bool tf3Con = tf3IsBull ? tf3BullContracting : tf3BearContracting
+        color tf3Bg = not tf3Active ? color.new(color.gray, 60) : tf3IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
+        table.cell(statusTable, 0, 3, tf3Active ? formatTF(tf3TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf3Bg)
+        table.cell(statusTable, 1, 3, tf3Active ? (tf3IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf3Bg)
+        table.cell(statusTable, 2, 3, tf3Active ? (tf3Exp ? "E" : tf3Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf3Bg)
 
-    // TF4 row
-    bool tf4Active = tf4Enabled and not na(tf4Fast)
-    bool tf4Exp = tf4IsBull ? tf4BullExpanding : tf4BearExpanding
-    bool tf4Con = tf4IsBull ? tf4BullContracting : tf4BearContracting
-    color tf4Bg = not tf4Active ? color.new(color.gray, 60) : tf4IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
-    table.cell(statusTable, 0, 4, tf4Active ? formatTF(tf4TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf4Bg)
-    table.cell(statusTable, 1, 4, tf4Active ? (tf4IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf4Bg)
-    table.cell(statusTable, 2, 4, tf4Active ? (tf4Exp ? "E" : tf4Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf4Bg)
+        // TF4 row
+        bool tf4Active = tf4Enabled and not na(tf4Fast)
+        bool tf4Exp = tf4IsBull ? tf4BullExpanding : tf4BearExpanding
+        bool tf4Con = tf4IsBull ? tf4BullContracting : tf4BearContracting
+        color tf4Bg = not tf4Active ? color.new(color.gray, 60) : tf4IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
+        table.cell(statusTable, 0, 4, tf4Active ? formatTF(tf4TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf4Bg)
+        table.cell(statusTable, 1, 4, tf4Active ? (tf4IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf4Bg)
+        table.cell(statusTable, 2, 4, tf4Active ? (tf4Exp ? "E" : tf4Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf4Bg)
 
-    // TF5 row
-    bool tf5Active = tf5Enabled and not na(tf5Fast)
-    bool tf5Exp = tf5IsBull ? tf5BullExpanding : tf5BearExpanding
-    bool tf5Con = tf5IsBull ? tf5BullContracting : tf5BearContracting
-    color tf5Bg = not tf5Active ? color.new(color.gray, 60) : tf5IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
-    table.cell(statusTable, 0, 5, tf5Active ? formatTF(tf5TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf5Bg)
-    table.cell(statusTable, 1, 5, tf5Active ? (tf5IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf5Bg)
-    table.cell(statusTable, 2, 5, tf5Active ? (tf5Exp ? "E" : tf5Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf5Bg)
+        // TF5 row
+        bool tf5Active = tf5Enabled and not na(tf5Fast)
+        bool tf5Exp = tf5IsBull ? tf5BullExpanding : tf5BearExpanding
+        bool tf5Con = tf5IsBull ? tf5BullContracting : tf5BearContracting
+        color tf5Bg = not tf5Active ? color.new(color.gray, 60) : tf5IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
+        table.cell(statusTable, 0, 5, tf5Active ? formatTF(tf5TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf5Bg)
+        table.cell(statusTable, 1, 5, tf5Active ? (tf5IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf5Bg)
+        table.cell(statusTable, 2, 5, tf5Active ? (tf5Exp ? "E" : tf5Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf5Bg)
 
 // ============================================================================
 // ALERTS
