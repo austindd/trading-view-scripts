@@ -12,6 +12,13 @@ minConsecutiveInput = input.int(1, "Min Consecutive Candles", minval=1, group="S
 maxZonesInput       = input.int(120, "Max Zones", minval=1, group="Settings", tooltip="Maximum number of zones displayed. Oldest zones are removed when exceeded.")
 
 // ============================================================================
+// ATR DISTANCE FILTER
+// ============================================================================
+atrFilterEnabled = input.bool(true, "Enable ATR Distance Filter", group="ATR Distance Filter", tooltip="When enabled, a new zone is rejected if it is too close to any existing unbroken zone.")
+atrLength        = input.int(14, "ATR Length", minval=1, group="ATR Distance Filter")
+minAtrDistance   = input.float(1.0, "Min Distance (ATR Multiple)", minval=0.0, step=0.1, group="ATR Distance Filter", tooltip="Minimum edge-to-edge gap between zones, measured in ATR multiples. Increase to allow fewer, more spaced-out zones.")
+
+// ============================================================================
 // ZONE DISPLAY
 // ============================================================================
 changeColorOnTouchedInput = input.bool(true, "Change Color On Touched", group="Zone Display", tooltip="Change zone color when price touches it.")
@@ -35,6 +42,7 @@ type Zone
     float btm
     int startLoc
     int endLoc
+    bool priceLeft = false
     bool crossed = false
     int crossedLoc = na
     bool touched = false
@@ -47,6 +55,7 @@ body         = math.abs(close - open)
 candRange    = high - low
 ratio        = candRange > 0 ? body / candRange * 100 : 0.0
 isIndecisive = ratio < thresholdInput
+atrValue     = ta.atr(atrLength)
 
 // ============================================================================
 // ZONE BUILDING
@@ -68,9 +77,21 @@ if isIndecisive
         zoneBtm := math.min(zoneBtm, low)
 else
     if consecutiveCount >= minConsecutiveInput
-        array.unshift(zones, Zone.new(zoneTop, zoneBtm, zoneStart, bar_index - 1))
-        if array.size(zones) > maxZonesInput
-            array.pop(zones)
+        // ATR distance filter: reject zone if too close to any unbroken zone
+        passesFilter = true
+        if atrFilterEnabled and not na(atrValue) and array.size(zones) > 0
+            for i = 0 to array.size(zones) - 1
+                zn = array.get(zones, i)
+                isBroken = brokenWhenTouchedInput ? zn.touched : zn.crossed
+                if not isBroken
+                    gap = math.max(0.0, math.max(zoneBtm - zn.top, zn.btm - zoneTop))
+                    if gap < atrValue * minAtrDistance
+                        passesFilter := false
+                        break
+        if passesFilter
+            array.unshift(zones, Zone.new(zoneTop, zoneBtm, zoneStart, bar_index - 1))
+            if array.size(zones) > maxZonesInput
+                array.pop(zones)
     consecutiveCount := 0
     zoneTop := na
     zoneBtm := na
@@ -83,12 +104,19 @@ if array.size(zones) > 0
     for i = 0 to array.size(zones) - 1
         zn = array.get(zones, i)
         if zn.endLoc < bar_index
-            if not zn.touched and low <= zn.top and high >= zn.btm
-                zn.touched := true
-                zn.touchedLoc := bar_index
-            if not zn.crossed and (close > zn.top or close < zn.btm)
-                zn.crossed := true
-                zn.crossedLoc := bar_index
+            if not zn.priceLeft
+                // Price must fully leave the zone before tracking begins
+                if low > zn.top or high < zn.btm
+                    zn.priceLeft := true
+            else
+                if not zn.touched
+                    if low <= zn.top and high >= zn.btm
+                        zn.touched := true
+                        zn.touchedLoc := bar_index
+                if zn.touched and not zn.crossed
+                    if close > zn.top or close < zn.btm
+                        zn.crossed := true
+                        zn.crossedLoc := bar_index
 
 // ============================================================================
 // DISPLAY
