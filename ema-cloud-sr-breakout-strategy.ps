@@ -94,6 +94,33 @@ rrRatio = input.float(1.0, "Risk : Reward Ratio", minval=0.1, step=0.1, tooltip=
 requireSlope = input.bool(true, "Require EMA Slope", tooltip="When enabled, Bull/Bear expansion requires both EMAs sloping in the trend direction.", group="Strategy")
 
 // ============================================================================
+// BREAKOUT CANDLE FILTERS
+// ============================================================================
+useAtrFilter = input.bool(false, "Filter by Candle ATR Size", group="Breakout Candle Filters")
+brkAtrLength = input.int(14, "ATR Length", minval=1, group="Breakout Candle Filters")
+minAtrMultiple = input.float(0.5, "Min ATR Multiple", minval=0.0, step=0.1, tooltip="Breakout candle range (high-low) must be at least this many ATRs.", group="Breakout Candle Filters")
+maxAtrMultiple = input.float(3.0, "Max ATR Multiple", minval=0.1, step=0.1, tooltip="Breakout candle range (high-low) must be at most this many ATRs.", group="Breakout Candle Filters")
+
+useOpenWickFilter = input.bool(false, "Filter by Open-Side Wick", tooltip="The wick on the open side of the body (lower wick for bullish, upper wick for bearish).", group="Breakout Candle Filters")
+minOpenWickRatio = input.float(0.0, "Min Open-Side Wick Ratio", minval=0.0, maxval=1.0, step=0.01, tooltip="As a fraction of the total candle range (0.0 - 1.0).", group="Breakout Candle Filters")
+maxOpenWickRatio = input.float(0.5, "Max Open-Side Wick Ratio", minval=0.0, maxval=1.0, step=0.01, group="Breakout Candle Filters")
+
+useCloseWickFilter = input.bool(false, "Filter by Close-Side Wick", tooltip="The wick on the close side of the body (upper wick for bullish, lower wick for bearish).", group="Breakout Candle Filters")
+minCloseWickRatio = input.float(0.0, "Min Close-Side Wick Ratio", minval=0.0, maxval=1.0, step=0.01, tooltip="As a fraction of the total candle range (0.0 - 1.0).", group="Breakout Candle Filters")
+maxCloseWickRatio = input.float(0.5, "Max Close-Side Wick Ratio", minval=0.0, maxval=1.0, step=0.01, group="Breakout Candle Filters")
+
+// ============================================================================
+// MA ENVELOPE
+// ============================================================================
+useEnvelope = input.bool(false, "Require Open in MA Envelope", tooltip="When enabled, the breakout candle's open must be within the SMA ± ATR envelope.", group="MA Envelope")
+envMaLength = input.int(20, "SMA Length", minval=1, group="MA Envelope")
+envAtrLength = input.int(100, "ATR Length (Envelope)", minval=1, group="MA Envelope")
+envAtrMultiplier = input.float(1.0, "ATR Multiplier", minval=0.1, step=0.1, group="MA Envelope")
+showEnvelope = input.bool(true, "Show Envelope on Chart", group="MA Envelope")
+envMaColor = input.color(color.new(color.blue, 0), "SMA Color", group="MA Envelope")
+envFillColor = input.color(color.new(color.blue, 85), "Envelope Fill Color", group="MA Envelope")
+
+// ============================================================================
 // DISPLAY SETTINGS
 // ============================================================================
 showTable = input.bool(true, "Show Trend Status Table", group="Display")
@@ -248,10 +275,40 @@ plot(resistance, "Resistance", color=ta.change(resistance) ? na : color.red, lin
 plot(support, "Support", color=ta.change(support) ? na : color.blue, linewidth=2, style=plot.style_stepline, offset=-(rightBars + 1))
 
 // ============================================================================
+// BREAKOUT CANDLE FILTERS
+// ============================================================================
+float brkAtr = ta.atr(brkAtrLength)
+float candleRange = high - low
+bool atrOk = not useAtrFilter or (not na(brkAtr) and brkAtr > 0 and candleRange >= minAtrMultiple * brkAtr and candleRange <= maxAtrMultiple * brkAtr)
+
+// Wick ratios — open-side is the wick near the open, close-side near the close
+bool isBullCandle = close > open
+float openWick = isBullCandle ? (open - low) : (high - open)
+float closeWick = isBullCandle ? (high - close) : (close - low)
+float openWickRatio = candleRange > 0 ? openWick / candleRange : 0
+float closeWickRatio = candleRange > 0 ? closeWick / candleRange : 0
+bool openWickOk = not useOpenWickFilter or (openWickRatio >= minOpenWickRatio and openWickRatio <= maxOpenWickRatio)
+bool closeWickOk = not useCloseWickFilter or (closeWickRatio >= minCloseWickRatio and closeWickRatio <= maxCloseWickRatio)
+
+// MA Envelope
+float envMa = ta.sma(close, envMaLength)
+float envAtr = ta.atr(envAtrLength)
+float envUpper = envMa + envAtr * envAtrMultiplier
+float envLower = envMa - envAtr * envAtrMultiplier
+bool envelopeOk = not useEnvelope or (not na(envUpper) and not na(envLower) and open <= envUpper and open >= envLower)
+
+// Plot MA Envelope
+color envSlopeColor = envMa > envMa[1] ? color.green : envMa < envMa[1] ? color.red : color.gray
+envMaPlot = plot(showEnvelope and useEnvelope ? envMa : na, "Envelope SMA", color=envSlopeColor, linewidth=2)
+envUpperPlot = plot(showEnvelope and useEnvelope ? envUpper : na, "Envelope Upper", color=envMaColor, linewidth=1)
+envLowerPlot = plot(showEnvelope and useEnvelope ? envLower : na, "Envelope Lower", color=envMaColor, linewidth=1)
+fill(envUpperPlot, envLowerPlot, color=envFillColor, title="Envelope Fill")
+
+// ============================================================================
 // STRATEGY LOGIC
 // ============================================================================
-bool longBreakout = ta.crossover(close, resistance) and allBullExpanding and volumeOk
-bool shortBreakout = ta.crossunder(close, support) and allBearExpanding and volumeOk
+bool longBreakout = ta.crossover(close, resistance) and allBullExpanding and volumeOk and atrOk and openWickOk and closeWickOk and envelopeOk
+bool shortBreakout = ta.crossunder(close, support) and allBearExpanding and volumeOk and atrOk and openWickOk and closeWickOk and envelopeOk
 bool isFlat = strategy.position_size == 0
 
 if isFlat and longBreakout
