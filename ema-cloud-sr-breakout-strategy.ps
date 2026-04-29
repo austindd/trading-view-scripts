@@ -1,0 +1,329 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+strategy("EMA Cloud S/R Breakout [SB]", "ETC S/R BK [SB]", overlay=true, process_orders_on_close=true, pyramiding=0, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_type=strategy.commission.percent, commission_value=0.1)
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+formatTF(string tf) =>
+    string resolved = tf == "" ? timeframe.period : tf
+    if str.endswith(resolved, "S") or str.endswith(resolved, "D") or str.endswith(resolved, "W") or str.endswith(resolved, "M")
+        resolved
+    else
+        float mins = str.tonumber(resolved)
+        if not na(mins) and mins >= 60 and int(mins) % 60 == 0
+            str.tostring(int(mins / 60)) + "H"
+        else
+            resolved + "m"
+
+// ============================================================================
+// EMA SETTINGS
+// ============================================================================
+fastLen = input.int(9, "Fast EMA Length", minval=1, group="EMA Settings")
+slowLen = input.int(21, "Slow EMA Length", minval=1, group="EMA Settings")
+
+// ============================================================================
+// TIMEFRAME 1 SETTINGS
+// ============================================================================
+tf1Enabled = input.bool(true, "Show TF1 Cloud", group="Timeframe 1")
+tf1InStatus = input.bool(true, "Include TF1 in Trend Status", group="Timeframe 1")
+tf1UseMultiplier = input.bool(false, "Use Chart TF Multiplier", tooltip="When enabled, uses a multiple of the chart timeframe instead of the fixed timeframe setting.", group="Timeframe 1")
+tf1Multiplier = input.float(1.0, "Chart TF Multiplier", minval=1.0, step=0.5, tooltip="Multiplier applied to the chart timeframe. E.g. 2.0 on a 5m chart = 10m.", group="Timeframe 1")
+tf1Timeframe = input.timeframe("", "TF1 Timeframe", group="Timeframe 1")
+tf1BullColor = input.color(color.new(color.green, 95), "TF1 Bull Cloud", group="Timeframe 1")
+tf1BearColor = input.color(color.new(color.red, 95), "TF1 Bear Cloud", group="Timeframe 1")
+
+// ============================================================================
+// TIMEFRAME 2 SETTINGS
+// ============================================================================
+tf2Enabled = input.bool(true, "Show TF2 Cloud", group="Timeframe 2")
+tf2InStatus = input.bool(true, "Include TF2 in Trend Status", group="Timeframe 2")
+tf2UseMultiplier = input.bool(false, "Use Chart TF Multiplier", tooltip="When enabled, uses a multiple of the chart timeframe instead of the fixed timeframe setting.", group="Timeframe 2")
+tf2Multiplier = input.float(1.0, "Chart TF Multiplier", minval=1.0, step=0.5, tooltip="Multiplier applied to the chart timeframe. E.g. 2.0 on a 5m chart = 10m.", group="Timeframe 2")
+tf2Timeframe = input.timeframe("15", "TF2 Timeframe", group="Timeframe 2")
+tf2BullColor = input.color(color.new(color.blue, 95), "TF2 Bull Cloud", group="Timeframe 2")
+tf2BearColor = input.color(color.new(color.orange, 95), "TF2 Bear Cloud", group="Timeframe 2")
+
+// ============================================================================
+// TIMEFRAME 3 SETTINGS
+// ============================================================================
+tf3Enabled = input.bool(true, "Show TF3 Cloud", group="Timeframe 3")
+tf3InStatus = input.bool(true, "Include TF3 in Trend Status", group="Timeframe 3")
+tf3UseMultiplier = input.bool(false, "Use Chart TF Multiplier", tooltip="When enabled, uses a multiple of the chart timeframe instead of the fixed timeframe setting.", group="Timeframe 3")
+tf3Multiplier = input.float(1.0, "Chart TF Multiplier", minval=1.0, step=0.5, tooltip="Multiplier applied to the chart timeframe. E.g. 2.0 on a 5m chart = 10m.", group="Timeframe 3")
+tf3Timeframe = input.timeframe("60", "TF3 Timeframe", group="Timeframe 3")
+tf3BullColor = input.color(color.new(color.teal, 95), "TF3 Bull Cloud", group="Timeframe 3")
+tf3BearColor = input.color(color.new(color.purple, 95), "TF3 Bear Cloud", group="Timeframe 3")
+
+// ============================================================================
+// TIMEFRAME 4 SETTINGS
+// ============================================================================
+tf4Enabled = input.bool(true, "Show TF4 Cloud", group="Timeframe 4")
+tf4InStatus = input.bool(true, "Include TF4 in Trend Status", group="Timeframe 4")
+tf4UseMultiplier = input.bool(false, "Use Chart TF Multiplier", tooltip="When enabled, uses a multiple of the chart timeframe instead of the fixed timeframe setting.", group="Timeframe 4")
+tf4Multiplier = input.float(1.0, "Chart TF Multiplier", minval=1.0, step=0.5, tooltip="Multiplier applied to the chart timeframe. E.g. 2.0 on a 5m chart = 10m.", group="Timeframe 4")
+tf4Timeframe = input.timeframe("D", "TF4 Timeframe", group="Timeframe 4")
+tf4BullColor = input.color(color.new(color.lime, 95), "TF4 Bull Cloud", group="Timeframe 4")
+tf4BearColor = input.color(color.new(color.maroon, 95), "TF4 Bear Cloud", group="Timeframe 4")
+
+// ============================================================================
+// TIMEFRAME 5 SETTINGS
+// ============================================================================
+tf5Enabled = input.bool(false, "Show TF5 Cloud", group="Timeframe 5")
+tf5InStatus = input.bool(false, "Include TF5 in Trend Status", group="Timeframe 5")
+tf5UseMultiplier = input.bool(false, "Use Chart TF Multiplier", tooltip="When enabled, uses a multiple of the chart timeframe instead of the fixed timeframe setting.", group="Timeframe 5")
+tf5Multiplier = input.float(1.0, "Chart TF Multiplier", minval=1.0, step=0.5, tooltip="Multiplier applied to the chart timeframe. E.g. 2.0 on a 5m chart = 10m.", group="Timeframe 5")
+tf5Timeframe = input.timeframe("W", "TF5 Timeframe", group="Timeframe 5")
+tf5BullColor = input.color(color.new(color.aqua, 95), "TF5 Bull Cloud", group="Timeframe 5")
+tf5BearColor = input.color(color.new(color.fuchsia, 95), "TF5 Bear Cloud", group="Timeframe 5")
+
+// ============================================================================
+// S/R SETTINGS
+// ============================================================================
+leftBars = input.int(15, "Left Bars", minval=1, group="Support / Resistance")
+rightBars = input.int(15, "Right Bars", minval=1, group="Support / Resistance")
+useVolumeFilter = input.bool(false, "Require Volume Confirmation", tooltip="When enabled, S/R breaks must be accompanied by a volume spike (short EMA > long EMA by threshold %).", group="Support / Resistance")
+volumeThresh = input.int(20, "Volume Threshold (%)", minval=0, group="Support / Resistance")
+
+// ============================================================================
+// STRATEGY SETTINGS
+// ============================================================================
+rrRatio = input.float(1.0, "Risk : Reward Ratio", minval=0.1, step=0.1, tooltip="Target distance as a multiple of the risk (stop) distance. 1.0 = 1:1 R:R.", group="Strategy")
+requireSlope = input.bool(true, "Require EMA Slope", tooltip="When enabled, Bull/Bear expansion requires both EMAs sloping in the trend direction.", group="Strategy")
+
+// ============================================================================
+// DISPLAY SETTINGS
+// ============================================================================
+showTable = input.bool(true, "Show Trend Status Table", group="Display")
+condensedTable = input.bool(true, "Condensed Table", group="Display")
+
+// ============================================================================
+// COMPUTE FINAL TIMEFRAME STRINGS
+// ============================================================================
+string _chartTFSuffix = timeframe.isseconds ? "S" : timeframe.isminutes ? "" : timeframe.isdaily ? "D" : timeframe.isweekly ? "W" : "M"
+string tf1TF = tf1UseMultiplier ? str.tostring(math.round(timeframe.multiplier * tf1Multiplier)) + _chartTFSuffix : tf1Timeframe
+string tf2TF = tf2UseMultiplier ? str.tostring(math.round(timeframe.multiplier * tf2Multiplier)) + _chartTFSuffix : tf2Timeframe
+string tf3TF = tf3UseMultiplier ? str.tostring(math.round(timeframe.multiplier * tf3Multiplier)) + _chartTFSuffix : tf3Timeframe
+string tf4TF = tf4UseMultiplier ? str.tostring(math.round(timeframe.multiplier * tf4Multiplier)) + _chartTFSuffix : tf4Timeframe
+string tf5TF = tf5UseMultiplier ? str.tostring(math.round(timeframe.multiplier * tf5Multiplier)) + _chartTFSuffix : tf5Timeframe
+
+// ============================================================================
+// EMA CALCULATIONS
+// ============================================================================
+[tf1Fast, tf1Slow, tf1FastPrev, tf1SlowPrev] = request.security(syminfo.tickerid, tf1TF, [ta.ema(close, fastLen), ta.ema(close, slowLen), ta.ema(close, fastLen)[1], ta.ema(close, slowLen)[1]])
+[tf2Fast, tf2Slow, tf2FastPrev, tf2SlowPrev] = request.security(syminfo.tickerid, tf2TF, [ta.ema(close, fastLen), ta.ema(close, slowLen), ta.ema(close, fastLen)[1], ta.ema(close, slowLen)[1]])
+[tf3Fast, tf3Slow, tf3FastPrev, tf3SlowPrev] = request.security(syminfo.tickerid, tf3TF, [ta.ema(close, fastLen), ta.ema(close, slowLen), ta.ema(close, fastLen)[1], ta.ema(close, slowLen)[1]])
+[tf4Fast, tf4Slow, tf4FastPrev, tf4SlowPrev] = request.security(syminfo.tickerid, tf4TF, [ta.ema(close, fastLen), ta.ema(close, slowLen), ta.ema(close, fastLen)[1], ta.ema(close, slowLen)[1]])
+[tf5Fast, tf5Slow, tf5FastPrev, tf5SlowPrev] = request.security(syminfo.tickerid, tf5TF, [ta.ema(close, fastLen), ta.ema(close, slowLen), ta.ema(close, fastLen)[1], ta.ema(close, slowLen)[1]])
+
+// ============================================================================
+// CLOUD STATE
+// ============================================================================
+tf1IsBull = tf1Fast > tf1Slow
+tf2IsBull = tf2Fast > tf2Slow
+tf3IsBull = tf3Fast > tf3Slow
+tf4IsBull = tf4Fast > tf4Slow
+tf5IsBull = tf5Fast > tf5Slow
+
+// ============================================================================
+// PLOTS & FILLS
+// ============================================================================
+tf1FastPlot = plot(tf1Enabled ? tf1Fast : na, "TF1 Fast EMA", color=tf1IsBull ? color.new(tf1BullColor, 30) : color.new(tf1BearColor, 30), linewidth=1)
+tf1SlowPlot = plot(tf1Enabled ? tf1Slow : na, "TF1 Slow EMA", color=tf1IsBull ? color.new(tf1BullColor, 30) : color.new(tf1BearColor, 30), linewidth=1)
+fill(tf1FastPlot, tf1SlowPlot, color=tf1IsBull ? tf1BullColor : tf1BearColor, title="TF1 Cloud")
+
+tf2FastPlot = plot(tf2Enabled ? tf2Fast : na, "TF2 Fast EMA", color=tf2IsBull ? color.new(tf2BullColor, 30) : color.new(tf2BearColor, 30), linewidth=1)
+tf2SlowPlot = plot(tf2Enabled ? tf2Slow : na, "TF2 Slow EMA", color=tf2IsBull ? color.new(tf2BullColor, 30) : color.new(tf2BearColor, 30), linewidth=1)
+fill(tf2FastPlot, tf2SlowPlot, color=tf2IsBull ? tf2BullColor : tf2BearColor, title="TF2 Cloud")
+
+tf3FastPlot = plot(tf3Enabled ? tf3Fast : na, "TF3 Fast EMA", color=tf3IsBull ? color.new(tf3BullColor, 30) : color.new(tf3BearColor, 30), linewidth=1)
+tf3SlowPlot = plot(tf3Enabled ? tf3Slow : na, "TF3 Slow EMA", color=tf3IsBull ? color.new(tf3BullColor, 30) : color.new(tf3BearColor, 30), linewidth=1)
+fill(tf3FastPlot, tf3SlowPlot, color=tf3IsBull ? tf3BullColor : tf3BearColor, title="TF3 Cloud")
+
+tf4FastPlot = plot(tf4Enabled ? tf4Fast : na, "TF4 Fast EMA", color=tf4IsBull ? color.new(tf4BullColor, 30) : color.new(tf4BearColor, 30), linewidth=1)
+tf4SlowPlot = plot(tf4Enabled ? tf4Slow : na, "TF4 Slow EMA", color=tf4IsBull ? color.new(tf4BullColor, 30) : color.new(tf4BearColor, 30), linewidth=1)
+fill(tf4FastPlot, tf4SlowPlot, color=tf4IsBull ? tf4BullColor : tf4BearColor, title="TF4 Cloud")
+
+tf5FastPlot = plot(tf5Enabled ? tf5Fast : na, "TF5 Fast EMA", color=tf5IsBull ? color.new(tf5BullColor, 30) : color.new(tf5BearColor, 30), linewidth=1)
+tf5SlowPlot = plot(tf5Enabled ? tf5Slow : na, "TF5 Slow EMA", color=tf5IsBull ? color.new(tf5BullColor, 30) : color.new(tf5BearColor, 30), linewidth=1)
+fill(tf5FastPlot, tf5SlowPlot, color=tf5IsBull ? tf5BullColor : tf5BearColor, title="TF5 Cloud")
+
+// ============================================================================
+// ALIGNMENT CHECK
+// ============================================================================
+tf1SlopeUp = tf1Fast > tf1FastPrev and tf1Slow > tf1SlowPrev
+tf1SlopeDown = tf1Fast < tf1FastPrev and tf1Slow < tf1SlowPrev
+tf1Bull = tf1Fast > tf1Slow and (not requireSlope or tf1SlopeUp)
+tf1Bear = tf1Fast < tf1Slow and (not requireSlope or tf1SlopeDown)
+
+tf2SlopeUp = tf2Fast > tf2FastPrev and tf2Slow > tf2SlowPrev
+tf2SlopeDown = tf2Fast < tf2FastPrev and tf2Slow < tf2SlowPrev
+tf2Bull = tf2Fast > tf2Slow and (not requireSlope or tf2SlopeUp)
+tf2Bear = tf2Fast < tf2Slow and (not requireSlope or tf2SlopeDown)
+
+tf3SlopeUp = tf3Fast > tf3FastPrev and tf3Slow > tf3SlowPrev
+tf3SlopeDown = tf3Fast < tf3FastPrev and tf3Slow < tf3SlowPrev
+tf3Bull = tf3Fast > tf3Slow and (not requireSlope or tf3SlopeUp)
+tf3Bear = tf3Fast < tf3Slow and (not requireSlope or tf3SlopeDown)
+
+tf4SlopeUp = tf4Fast > tf4FastPrev and tf4Slow > tf4SlowPrev
+tf4SlopeDown = tf4Fast < tf4FastPrev and tf4Slow < tf4SlowPrev
+tf4Bull = tf4Fast > tf4Slow and (not requireSlope or tf4SlopeUp)
+tf4Bear = tf4Fast < tf4Slow and (not requireSlope or tf4SlopeDown)
+
+tf5SlopeUp = tf5Fast > tf5FastPrev and tf5Slow > tf5SlowPrev
+tf5SlopeDown = tf5Fast < tf5FastPrev and tf5Slow < tf5SlowPrev
+tf5Bull = tf5Fast > tf5Slow and (not requireSlope or tf5SlopeUp)
+tf5Bear = tf5Fast < tf5Slow and (not requireSlope or tf5SlopeDown)
+
+bool anyInStatus = tf1InStatus or tf2InStatus or tf3InStatus or tf4InStatus or tf5InStatus
+bool allBull = anyInStatus and (not tf1InStatus or tf1Bull) and (not tf2InStatus or tf2Bull) and (not tf3InStatus or tf3Bull) and (not tf4InStatus or tf4Bull) and (not tf5InStatus or tf5Bull)
+bool allBear = anyInStatus and (not tf1InStatus or tf1Bear) and (not tf2InStatus or tf2Bear) and (not tf3InStatus or tf3Bear) and (not tf4InStatus or tf4Bear) and (not tf5InStatus or tf5Bear)
+
+// Cloud expanding
+tf1BullExpanding = (tf1Fast - tf1Slow) > (tf1FastPrev - tf1SlowPrev)
+tf1BearExpanding = (tf1Slow - tf1Fast) > (tf1SlowPrev - tf1FastPrev)
+tf2BullExpanding = (tf2Fast - tf2Slow) > (tf2FastPrev - tf2SlowPrev)
+tf2BearExpanding = (tf2Slow - tf2Fast) > (tf2SlowPrev - tf2FastPrev)
+tf3BullExpanding = (tf3Fast - tf3Slow) > (tf3FastPrev - tf3SlowPrev)
+tf3BearExpanding = (tf3Slow - tf3Fast) > (tf3SlowPrev - tf3FastPrev)
+tf4BullExpanding = (tf4Fast - tf4Slow) > (tf4FastPrev - tf4SlowPrev)
+tf4BearExpanding = (tf4Slow - tf4Fast) > (tf4SlowPrev - tf4FastPrev)
+tf5BullExpanding = (tf5Fast - tf5Slow) > (tf5FastPrev - tf5SlowPrev)
+tf5BearExpanding = (tf5Slow - tf5Fast) > (tf5SlowPrev - tf5FastPrev)
+
+bool allBullExpanding = allBull and (not tf1InStatus or tf1BullExpanding) and (not tf2InStatus or tf2BullExpanding) and (not tf3InStatus or tf3BullExpanding) and (not tf4InStatus or tf4BullExpanding) and (not tf5InStatus or tf5BullExpanding)
+bool allBearExpanding = allBear and (not tf1InStatus or tf1BearExpanding) and (not tf2InStatus or tf2BearExpanding) and (not tf3InStatus or tf3BearExpanding) and (not tf4InStatus or tf4BearExpanding) and (not tf5InStatus or tf5BearExpanding)
+
+// Cloud contracting (for table display)
+tf1BullContracting = (tf1Fast - tf1Slow) < (tf1FastPrev - tf1SlowPrev)
+tf1BearContracting = (tf1Slow - tf1Fast) < (tf1SlowPrev - tf1FastPrev)
+tf2BullContracting = (tf2Fast - tf2Slow) < (tf2FastPrev - tf2SlowPrev)
+tf2BearContracting = (tf2Slow - tf2Fast) < (tf2SlowPrev - tf2FastPrev)
+tf3BullContracting = (tf3Fast - tf3Slow) < (tf3FastPrev - tf3SlowPrev)
+tf3BearContracting = (tf3Slow - tf3Fast) < (tf3SlowPrev - tf3FastPrev)
+tf4BullContracting = (tf4Fast - tf4Slow) < (tf4FastPrev - tf4SlowPrev)
+tf4BearContracting = (tf4Slow - tf4Fast) < (tf4SlowPrev - tf4FastPrev)
+tf5BullContracting = (tf5Fast - tf5Slow) < (tf5FastPrev - tf5SlowPrev)
+tf5BearContracting = (tf5Slow - tf5Fast) < (tf5SlowPrev - tf5FastPrev)
+
+bool allBullContracting = allBull and (not tf1InStatus or tf1BullContracting) and (not tf2InStatus or tf2BullContracting) and (not tf3InStatus or tf3BullContracting) and (not tf4InStatus or tf4BullContracting) and (not tf5InStatus or tf5BullContracting)
+bool allBearContracting = allBear and (not tf1InStatus or tf1BearContracting) and (not tf2InStatus or tf2BearContracting) and (not tf3InStatus or tf3BearContracting) and (not tf4InStatus or tf4BearContracting) and (not tf5InStatus or tf5BearContracting)
+
+bool allBullPos = anyInStatus and (not tf1InStatus or tf1Fast > tf1Slow) and (not tf2InStatus or tf2Fast > tf2Slow) and (not tf3InStatus or tf3Fast > tf3Slow) and (not tf4InStatus or tf4Fast > tf4Slow) and (not tf5InStatus or tf5Fast > tf5Slow)
+bool allBearPos = anyInStatus and (not tf1InStatus or tf1Fast < tf1Slow) and (not tf2InStatus or tf2Fast < tf2Slow) and (not tf3InStatus or tf3Fast < tf3Slow) and (not tf4InStatus or tf4Fast < tf4Slow) and (not tf5InStatus or tf5Fast < tf5Slow)
+
+tf1Contracting = tf1BullContracting or tf1BearContracting
+tf2Contracting = tf2BullContracting or tf2BearContracting
+tf3Contracting = tf3BullContracting or tf3BearContracting
+tf4Contracting = tf4BullContracting or tf4BearContracting
+tf5Contracting = tf5BullContracting or tf5BearContracting
+
+bool allContracting = anyInStatus and (not tf1InStatus or tf1Contracting) and (not tf2InStatus or tf2Contracting) and (not tf3InStatus or tf3Contracting) and (not tf4InStatus or tf4Contracting) and (not tf5InStatus or tf5Contracting)
+bool neutralContraction = allContracting and not allBullPos and not allBearPos
+
+// ============================================================================
+// SUPPORT & RESISTANCE
+// ============================================================================
+float pivotH = ta.pivothigh(leftBars, rightBars)[1]
+var float resistance = na
+if not na(pivotH)
+    resistance := pivotH
+
+float pivotL = ta.pivotlow(leftBars, rightBars)[1]
+var float support = na
+if not na(pivotL)
+    support := pivotL
+
+// Volume oscillator (optional filter)
+volShort = ta.ema(volume, 5)
+volLong = ta.ema(volume, 10)
+volOsc = 100 * (volShort - volLong) / volLong
+bool volumeOk = not useVolumeFilter or volOsc > volumeThresh
+
+// Plot S/R levels
+plot(resistance, "Resistance", color=ta.change(resistance) ? na : color.red, linewidth=2, style=plot.style_stepline, offset=-(rightBars + 1))
+plot(support, "Support", color=ta.change(support) ? na : color.blue, linewidth=2, style=plot.style_stepline, offset=-(rightBars + 1))
+
+// ============================================================================
+// STRATEGY LOGIC
+// ============================================================================
+bool longBreakout = ta.crossover(close, resistance) and allBullExpanding and volumeOk
+bool shortBreakout = ta.crossunder(close, support) and allBearExpanding and volumeOk
+bool isFlat = strategy.position_size == 0
+
+if isFlat and longBreakout
+    strategy.entry("Long", strategy.long)
+    float longStop = low - syminfo.mintick
+    float longRisk = close - longStop
+    strategy.exit("Long Exit", "Long", stop=longStop, limit=close + longRisk * rrRatio)
+
+if isFlat and shortBreakout
+    strategy.entry("Short", strategy.short)
+    float shortStop = high + syminfo.mintick
+    float shortRisk = shortStop - close
+    strategy.exit("Short Exit", "Short", stop=shortStop, limit=close - shortRisk * rrRatio)
+
+// ============================================================================
+// STATUS TABLE
+// ============================================================================
+string alignment = allBullExpanding ? "Bullish Expansion" : allBearExpanding ? "Bearish Expansion" : allBullContracting ? "Bullish Contraction" : allBearContracting ? "Bearish Contraction" : allBull ? "Bullish" : allBear ? "Bearish" : allBullPos ? "Bullish" : allBearPos ? "Bearish" : neutralContraction ? "Neutral Contraction" : "Neutral"
+
+int _tableRows = condensedTable ? 1 : 6
+var table statusTable = table.new(position.bottom_right, 3, _tableRows, bgcolor=color.new(color.black, 30), border_width=1)
+
+if showTable and barstate.islast
+    string aggDir = (allBull or allBullPos) ? "U" : (allBear or allBearPos) ? "D" : "-"
+    string aggEC = (allBullExpanding or allBearExpanding) ? "E" : (allBullContracting or allBearContracting or neutralContraction) ? "C" : "-"
+    color aggBg = (allBull or allBullPos) ? color.new(color.green, 40) : (allBear or allBearPos) ? color.new(color.red, 40) : color.new(color.gray, 40)
+    table.cell(statusTable, 0, 0, "", text_color=color.white, text_size=size.normal, bgcolor=aggBg)
+    table.cell(statusTable, 1, 0, aggDir, text_color=color.white, text_size=size.normal, bgcolor=aggBg)
+    table.cell(statusTable, 2, 0, aggEC, text_color=color.white, text_size=size.normal, bgcolor=aggBg)
+
+    if not condensedTable
+        // TF1 row
+        bool tf1Active = tf1Enabled and not na(tf1Fast)
+        bool tf1Exp = tf1IsBull ? tf1BullExpanding : tf1BearExpanding
+        bool tf1Con = tf1IsBull ? tf1BullContracting : tf1BearContracting
+        color tf1Bg = not tf1Active ? color.new(color.gray, 60) : tf1IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
+        table.cell(statusTable, 0, 1, tf1Active ? formatTF(tf1TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf1Bg)
+        table.cell(statusTable, 1, 1, tf1Active ? (tf1IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf1Bg)
+        table.cell(statusTable, 2, 1, tf1Active ? (tf1Exp ? "E" : tf1Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf1Bg)
+
+        // TF2 row
+        bool tf2Active = tf2Enabled and not na(tf2Fast)
+        bool tf2Exp = tf2IsBull ? tf2BullExpanding : tf2BearExpanding
+        bool tf2Con = tf2IsBull ? tf2BullContracting : tf2BearContracting
+        color tf2Bg = not tf2Active ? color.new(color.gray, 60) : tf2IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
+        table.cell(statusTable, 0, 2, tf2Active ? formatTF(tf2TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf2Bg)
+        table.cell(statusTable, 1, 2, tf2Active ? (tf2IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf2Bg)
+        table.cell(statusTable, 2, 2, tf2Active ? (tf2Exp ? "E" : tf2Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf2Bg)
+
+        // TF3 row
+        bool tf3Active = tf3Enabled and not na(tf3Fast)
+        bool tf3Exp = tf3IsBull ? tf3BullExpanding : tf3BearExpanding
+        bool tf3Con = tf3IsBull ? tf3BullContracting : tf3BearContracting
+        color tf3Bg = not tf3Active ? color.new(color.gray, 60) : tf3IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
+        table.cell(statusTable, 0, 3, tf3Active ? formatTF(tf3TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf3Bg)
+        table.cell(statusTable, 1, 3, tf3Active ? (tf3IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf3Bg)
+        table.cell(statusTable, 2, 3, tf3Active ? (tf3Exp ? "E" : tf3Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf3Bg)
+
+        // TF4 row
+        bool tf4Active = tf4Enabled and not na(tf4Fast)
+        bool tf4Exp = tf4IsBull ? tf4BullExpanding : tf4BearExpanding
+        bool tf4Con = tf4IsBull ? tf4BullContracting : tf4BearContracting
+        color tf4Bg = not tf4Active ? color.new(color.gray, 60) : tf4IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
+        table.cell(statusTable, 0, 4, tf4Active ? formatTF(tf4TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf4Bg)
+        table.cell(statusTable, 1, 4, tf4Active ? (tf4IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf4Bg)
+        table.cell(statusTable, 2, 4, tf4Active ? (tf4Exp ? "E" : tf4Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf4Bg)
+
+        // TF5 row
+        bool tf5Active = tf5Enabled and not na(tf5Fast)
+        bool tf5Exp = tf5IsBull ? tf5BullExpanding : tf5BearExpanding
+        bool tf5Con = tf5IsBull ? tf5BullContracting : tf5BearContracting
+        color tf5Bg = not tf5Active ? color.new(color.gray, 60) : tf5IsBull ? color.new(color.green, 50) : color.new(color.red, 50)
+        table.cell(statusTable, 0, 5, tf5Active ? formatTF(tf5TF) : "-", text_color=color.white, text_size=size.small, bgcolor=tf5Bg)
+        table.cell(statusTable, 1, 5, tf5Active ? (tf5IsBull ? "U" : "D") : "-", text_color=color.white, text_size=size.small, bgcolor=tf5Bg)
+        table.cell(statusTable, 2, 5, tf5Active ? (tf5Exp ? "E" : tf5Con ? "C" : "-") : "-", text_color=color.white, text_size=size.small, bgcolor=tf5Bg)
