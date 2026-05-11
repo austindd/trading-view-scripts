@@ -20,6 +20,7 @@ minSig       = input.float(5.0, "Min Significance (% max)", minval=0, maxval=50,
 extendRight  = input.int(50,    "Extend Zones Right",       minval=0,              group=gC)
 supplyColor  = input.color(color.new(color.red,   80),      "Supply (above price)",group=gC)
 demandColor  = input.color(color.new(color.green, 80),      "Demand (below price)",group=gC)
+extendToLocal= input.bool(false,"Extend to Local Peak/Trough",                     group=gC, tooltip="Expands each cliff zone to cover from the local volume trough (low-volume side) to the local volume peak (high-volume side).")
 showBorder   = input.bool(true, "Show Zone Border",                                group=gC)
 showLabel    = input.bool(true, "Show Ratio Label",                                group=gC)
 
@@ -119,14 +120,14 @@ if barstate.islast
                 if v > 0
                     bLo = lo + bin * binSize
                     bHi = bLo + binSize
-                    w   = math.max(1, math.round((v / maxVol) * profBarsWide))
+                    w   = math.min(math.max(1, math.round((v / maxVol) * profBarsWide)), 500)
                     pb  = box.new(profLeft, bHi, profLeft + w, bLo,
                          border_color=na, bgcolor=profileColor, xloc=xloc.bar_index)
                     array.push(profBoxes, pb)
 
         // 5. Detect cliffs and draw zones
         refPrice  = close
-        zoneRight = bar_index + extendRight
+        zoneRight = bar_index + math.min(extendRight, 500)
         sigFloor  = maxVol * minSig / 100
 
         for bin = 0 to numBins - 2
@@ -147,8 +148,29 @@ if barstate.islast
                     ratio := 999.0
 
                 if cliff
-                    zTop = lo + (bin + 2) * binSize
-                    zBot = lo + bin * binSize
+                    int eBin = bin + 1
+                    int sBin = bin
+
+                    if extendToLocal
+                        // Determine high/low volume sides
+                        bool highSideUp = v2 > v1
+                        // Expand toward the local peak on the high-volume side
+                        if highSideUp
+                            while eBin < numBins - 1 and array.get(vols, eBin + 1) >= array.get(vols, eBin)
+                                eBin += 1
+                        else
+                            while sBin > 0 and array.get(vols, sBin - 1) >= array.get(vols, sBin)
+                                sBin -= 1
+                        // Expand toward the local trough on the low-volume side
+                        if highSideUp
+                            while sBin > 0 and array.get(vols, sBin - 1) <= array.get(vols, sBin)
+                                sBin -= 1
+                        else
+                            while eBin < numBins - 1 and array.get(vols, eBin + 1) <= array.get(vols, eBin)
+                                eBin += 1
+
+                    zTop = lo + (eBin + 1) * binSize
+                    zBot = lo + sBin * binSize
                     zMid = (zTop + zBot) / 2
                     zCol = zMid > refPrice ? supplyColor : demandColor
                     brd  = showBorder ? color.new(zCol, 30) : color.new(zCol, 100)
