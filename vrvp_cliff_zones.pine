@@ -156,18 +156,34 @@ if barstate.islast
                         bool highSideUp = v2 > v1
                         // Expand toward the local peak on the high-volume side
                         if highSideUp
-                            while eBin < numBins - 1 and array.get(vols, eBin + 1) >= array.get(vols, eBin)
-                                eBin += 1
+                            bool peakWalk = true
+                            while eBin < numBins - 1 and peakWalk
+                                if array.get(vols, eBin + 1) > array.get(vols, eBin)
+                                    eBin += 1
+                                else
+                                    peakWalk := false
                         else
-                            while sBin > 0 and array.get(vols, sBin - 1) >= array.get(vols, sBin)
-                                sBin -= 1
+                            bool peakWalk = true
+                            while sBin > 0 and peakWalk
+                                if array.get(vols, sBin - 1) > array.get(vols, sBin)
+                                    sBin -= 1
+                                else
+                                    peakWalk := false
                         // Expand toward the local trough on the low-volume side
                         if highSideUp
-                            while sBin > 0 and array.get(vols, sBin - 1) <= array.get(vols, sBin)
-                                sBin -= 1
+                            bool troughWalk = true
+                            while sBin > 0 and troughWalk
+                                if array.get(vols, sBin - 1) < array.get(vols, sBin) and array.get(vols, sBin) > 0
+                                    sBin -= 1
+                                else
+                                    troughWalk := false
                         else
-                            while eBin < numBins - 1 and array.get(vols, eBin + 1) <= array.get(vols, eBin)
-                                eBin += 1
+                            bool troughWalk = true
+                            while eBin < numBins - 1 and troughWalk
+                                if array.get(vols, eBin + 1) < array.get(vols, eBin) and array.get(vols, eBin) > 0
+                                    eBin += 1
+                                else
+                                    troughWalk := false
 
                     zTop = lo + (eBin + 1) * binSize
                     zBot = lo + sBin * binSize
