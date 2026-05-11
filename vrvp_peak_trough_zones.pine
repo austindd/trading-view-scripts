@@ -1,0 +1,212 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("VRVP Peak & Trough Zones [SB]", shorttitle="VRVP P/T [SB]",
+     overlay=true, max_boxes_count=500, max_labels_count=100, max_bars_back=5000)
+
+// ─── Inputs ──────────────────────────────────────────────────────────
+gP = "Profile"
+numBins      = input.int(100,  "Number of Bins",            minval=20, maxval=500, group=gP)
+useVisible   = input.bool(true,"Use Visible Range",                                group=gP, tooltip="If on, the profile recomputes from the bars currently visible on the chart. If off, uses a fixed lookback.")
+lookback     = input.int(500,  "Lookback (fallback)",       minval=20,             group=gP)
+profileWidth = input.int(25,   "Profile Width (% of bars)", minval=5, maxval=80,   group=gP)
+showProfile  = input.bool(true,"Show Volume Profile",                              group=gP)
+profileColor = input.color(color.new(color.blue, 70), "Profile Color",             group=gP)
+
+gS = "Smoothing"
+smoothRadius = input.int(0,     "Smoothing Radius",          minval=0, maxval=20,  group=gS, tooltip="Each bin is averaged with this many neighbors on each side. 0 = no smoothing. Higher values merge small peaks/troughs into broader ones.")
+
+gZ = "Peak / Trough Zones"
+showPeaks    = input.bool(true, "Show Peak Zones",                                 group=gZ)
+showTroughs  = input.bool(true, "Show Trough Zones",                               group=gZ)
+minSig       = input.float(5.0, "Min Significance (% max)", minval=0, maxval=50, step=0.5, group=gZ, tooltip="Ignore peaks/troughs where the bin volume is below this % of the max-volume bin.")
+extendRight  = input.int(50,    "Extend Zones Right",       minval=0,              group=gZ)
+peakColor    = input.color(color.new(color.orange, 75),     "Peak Color",          group=gZ)
+troughColor  = input.color(color.new(#2196F3,      75),     "Trough Color",        group=gZ)
+showBorder   = input.bool(true, "Show Zone Border",                                group=gZ)
+showLabel    = input.bool(true, "Show Label",                                      group=gZ)
+
+// ─── Persistent storage ──────────────────────────────────────────────
+var box[]   profBoxes  = array.new<box>()
+var box[]   zoneBoxes  = array.new<box>()
+var label[] zoneLabels = array.new<label>()
+
+// ─── Helpers ─────────────────────────────────────────────────────────
+clearAll() =>
+    if array.size(profBoxes) > 0
+        for i = 0 to array.size(profBoxes) - 1
+            box.delete(array.get(profBoxes, i))
+        array.clear(profBoxes)
+    if array.size(zoneBoxes) > 0
+        for i = 0 to array.size(zoneBoxes) - 1
+            box.delete(array.get(zoneBoxes, i))
+        array.clear(zoneBoxes)
+    if array.size(zoneLabels) > 0
+        for i = 0 to array.size(zoneLabels) - 1
+            label.delete(array.get(zoneLabels, i))
+        array.clear(zoneLabels)
+
+getStartIdx() =>
+    int s = na
+    if useVisible
+        leftT = chart.left_visible_bar_time
+        if not na(leftT)
+            maxScan = math.min(5000, bar_index)
+            for i = 0 to maxScan
+                if time[i] <= leftT
+                    s := bar_index - i
+                    break
+            if na(s)
+                s := bar_index - maxScan
+    if na(s)
+        s := math.max(0, bar_index - lookback)
+    s
+
+// ─── Build & draw (last bar only) ───────────────────────────────────
+if barstate.islast
+    clearAll()
+
+    startIdx = getStartIdx()
+    nBars    = bar_index - startIdx + 1
+
+    // 1. Range high / low
+    float hi = -1e20
+    float lo =  1e20
+    for i = 0 to nBars - 1
+        h = high[i]
+        l = low[i]
+        if not na(h) and h > hi
+            hi := h
+        if not na(l) and l < lo
+            lo := l
+
+    if hi > lo
+        binSize = (hi - lo) / numBins
+        vols    = array.new<float>(numBins, 0.0)
+
+        // 2. Distribute each bar's volume across the bins it spans
+        for i = 0 to nBars - 1
+            bH = high[i]
+            bL = low[i]
+            bV = volume[i]
+            if not (na(bH) or na(bL) or na(bV) or bV <= 0)
+                rng = bH - bL
+                if rng <= 0
+                    bin = math.max(0, math.min(numBins - 1, math.floor((bH - lo) / binSize)))
+                    array.set(vols, bin, array.get(vols, bin) + bV)
+                else
+                    sB  = math.max(0, math.floor((bL - lo) / binSize))
+                    eB  = math.min(numBins - 1, math.floor((bH - lo) / binSize))
+                    vpp = bV / rng
+                    for b = sB to eB
+                        bLo = lo + b * binSize
+                        bHi = bLo + binSize
+                        ov  = math.min(bH, bHi) - math.max(bL, bLo)
+                        if ov > 0
+                            array.set(vols, b, array.get(vols, b) + ov * vpp)
+
+        // 3. Smooth the volume profile
+        smoothed = array.new<float>(numBins, 0.0)
+        if smoothRadius > 0
+            for bin = 0 to numBins - 1
+                int wStart = math.max(0, bin - smoothRadius)
+                int wEnd   = math.min(numBins - 1, bin + smoothRadius)
+                float sum  = 0.0
+                int   cnt  = 0
+                for k = wStart to wEnd
+                    sum += array.get(vols, k)
+                    cnt += 1
+                array.set(smoothed, bin, sum / cnt)
+        else
+            for bin = 0 to numBins - 1
+                array.set(smoothed, bin, array.get(vols, bin))
+
+        // 4. Max volume for scaling (from smoothed)
+        float maxVol = 0.0
+        for j = 0 to numBins - 1
+            v = array.get(smoothed, j)
+            if v > maxVol
+                maxVol := v
+
+        // 5. Draw profile histogram (using smoothed values)
+        profBarsWide = math.max(20, math.round(nBars * profileWidth / 100))
+        profLeft     = bar_index
+
+        if showProfile and maxVol > 0
+            for bin = 0 to numBins - 1
+                v = array.get(smoothed, bin)
+                if v > 0
+                    bLo = lo + bin * binSize
+                    bHi = bLo + binSize
+                    w   = math.min(math.max(1, math.round((v / maxVol) * profBarsWide)), 500)
+                    pb  = box.new(profLeft, bHi, profLeft + w, bLo,
+                         border_color=na, bgcolor=profileColor, xloc=xloc.bar_index)
+                    array.push(profBoxes, pb)
+
+        // 6. Detect peaks and troughs, draw zones (using smoothed values)
+        zoneRight = bar_index + math.min(extendRight, 500)
+        sigFloor  = maxVol * minSig / 100
+
+        for bin = 1 to numBins - 2
+            vPrev = array.get(smoothed, bin - 1)
+            vCur  = array.get(smoothed, bin)
+            vNext = array.get(smoothed, bin + 1)
+
+            bool isPeak   = showPeaks   and vCur > vPrev and vCur > vNext and vCur >= sigFloor
+            bool isTrough = showTroughs and vCur < vPrev and vCur < vNext and vPrev >= sigFloor and vNext >= sigFloor
+
+            if isPeak or isTrough
+                // Walk outward to find the full extent of the peak/trough
+                int sBin = bin
+                int eBin = bin
+
+                if isPeak
+                    // Expand while volume is rising toward the peak
+                    bool walkDown = true
+                    while sBin > 0 and walkDown
+                        if array.get(smoothed, sBin - 1) < array.get(smoothed, sBin)
+                            sBin -= 1
+                        else
+                            walkDown := false
+                    bool walkUp = true
+                    while eBin < numBins - 1 and walkUp
+                        if array.get(smoothed, eBin + 1) < array.get(smoothed, eBin)
+                            eBin += 1
+                        else
+                            walkUp := false
+                else
+                    // Expand while volume is falling toward the trough
+                    bool walkDown = true
+                    while sBin > 0 and walkDown
+                        if array.get(smoothed, sBin - 1) > array.get(smoothed, sBin)
+                            sBin -= 1
+                        else
+                            walkDown := false
+                    bool walkUp = true
+                    while eBin < numBins - 1 and walkUp
+                        if array.get(smoothed, eBin + 1) > array.get(smoothed, eBin)
+                            eBin += 1
+                        else
+                            walkUp := false
+
+                zTop = lo + (eBin + 1) * binSize
+                zBot = lo + sBin * binSize
+                zMid = (zTop + zBot) / 2
+                zCol = isPeak ? peakColor : troughColor
+                brd  = showBorder ? color.new(zCol, 30) : color.new(zCol, 100)
+
+                zb = box.new(startIdx, zTop, zoneRight, zBot,
+                     border_color=brd, border_width=1,
+                     bgcolor=zCol, xloc=xloc.bar_index)
+                array.push(zoneBoxes, zb)
+
+                if showLabel
+                    txt = isPeak ? "peak" : "trough"
+                    lb  = label.new(zoneRight, zMid, text=txt,
+                         style=label.style_label_left,
+                         color=color.new(zCol, 50),
+                         textcolor=color.white,
+                         size=size.small,
+                         xloc=xloc.bar_index)
+                    array.push(zoneLabels, lb)
