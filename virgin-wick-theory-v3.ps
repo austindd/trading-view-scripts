@@ -1,0 +1,298 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Virgin Wick Theory V3 [SB]", "VWT3 [SB]", overlay = true
+  , max_lines_count  = 500
+  , max_boxes_count  = 500
+  , max_labels_count = 500
+  , max_bars_back    = 5000)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Inputs
+////////////////////////////////////////////////////////////////////////////////
+
+grpVWT = "Virgin Wick (HTF)"
+grpPOI = "POI"
+grpFVG = "FVG/IFVG (LTF)"
+grpSig = "Signals"
+
+// HTF / VWT
+htfTF          = input.timeframe("60",  "HTF Timeframe",            group = grpVWT)
+showBullSetup  = input.bool(true,       "Enable Bullish Setups",    group = grpVWT)
+showBearSetup  = input.bool(true,       "Enable Bearish Setups",    group = grpVWT)
+maxStoredWicks = input.int(50,          "Max Stored Wicks",         group = grpVWT, minval = 1, tooltip = "Maximum HTF wicks tracked in memory.")
+
+// POI line
+poiCandles     = input.int(1,           "POI Lifespan (HTF Candles)", group = grpPOI, minval = 1, tooltip = "Number of HTF candles the POI remains active after a wick reclaim.")
+poiColorBull   = input.color(color.rgb(7, 188, 212),   "Bullish POI Color", group = grpPOI)
+poiColorBear   = input.color(color.rgb(171, 71, 189),  "Bearish POI Color", group = grpPOI)
+poiWidth       = input.int(2,           "POI Line Width",           group = grpPOI, minval = 1)
+
+// LTF FVG/IFVG
+fvgTF          = input.timeframe("",    "LTF Timeframe",            group = grpFVG, tooltip = "Timeframe for FVG detection. Leave blank for chart timeframe.")
+minSizePerc    = input.float(0.1,       "Min Gap Size (%)",         group = grpFVG, minval = 0.0, step = 0.05)
+fvgLongevity   = input.int(100,         "FVG Longevity (TF Bars)",  group = grpFVG, minval = 1)
+maxFvgZones    = input.int(50,          "Max FVG Zones",            group = grpFVG, minval = 1)
+showFvgZones   = input.bool(true,       "Show FVG/IFVG Boxes",      group = grpFVG)
+bullColor      = input.color(color.new(#00ffb3, 70),  "Bullish FVG Color",  group = grpFVG)
+bearColor      = input.color(color.new(#ff0077, 70),  "Bearish FVG Color",  group = grpFVG)
+invBorder      = input.color(#ff9a3b,                 "Inversion Border",   group = grpFVG)
+
+// Signals
+sigColorBull   = input.color(color.lime, "Bullish Signal Color",    group = grpSig)
+sigColorBear   = input.color(color.red,  "Bearish Signal Color",    group = grpSig)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Types
+////////////////////////////////////////////////////////////////////////////////
+
+type FVGZone
+    box   boxId
+    float top
+    float bottom
+    int   startBar
+    int   tfBarsAlive
+    int   direction       // 1 = bullish FVG, -1 = bearish FVG
+    bool  isInverted
+    bool  isMitigated
+
+type POI
+    line  poiLine
+    float level
+    int   direction       // 1 = bullish setup, -1 = bearish setup
+    int   createdBar
+    int   expiryTime      // unix ms
+    bool  armed           // price has retraced past the POI level
+    bool  fired           // signal already fired (one-shot)
+
+////////////////////////////////////////////////////////////////////////////////
+//// State
+////////////////////////////////////////////////////////////////////////////////
+
+var FVGZone[] zones     = array.new<FVGZone>()
+var POI[]     pois      = array.new<POI>()
+var float[]   wickHighs = array.new_float()
+var float[]   wickLows  = array.new_float()
+
+////////////////////////////////////////////////////////////////////////////////
+//// HTF / LTF Data
+////////////////////////////////////////////////////////////////////////////////
+
+[htfH, htfL, htfO, htfC, htfT] = request.security(syminfo.tickerid, htfTF,
+  [high, low, open, close, time],
+  lookahead = barmerge.lookahead_off)
+
+bool htfNewCandle = ta.change(htfT) != 0
+int  htfPeriodMs  = timeframe.in_seconds(htfTF) * 1000
+int  poiDurMs     = htfPeriodMs * poiCandles
+
+[tfHigh, tfLow, tfClose, tfTime, tfVol] = request.security(syminfo.tickerid, fvgTF,
+  [high, low, close, time, volume],
+  lookahead = barmerge.lookahead_off)
+
+bool tfNewCandle = ta.change(tfTime) != 0
+
+// LTF candle history (index 0 = newest completed candle)
+// Per CLAUDE.md: tfHigh (no [1]) IS the just-completed candle when tfNewCandle fires
+var float[] hHigh  = array.new<float>(5, na)
+var float[] hLow   = array.new<float>(5, na)
+var float[] hClose = array.new<float>(5, na)
+var float[] hVol   = array.new<float>(5, na)
+var int[]   hBar   = array.new<int>(5, na)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Per-bar signal flags (reset every bar)
+////////////////////////////////////////////////////////////////////////////////
+
+bool bullIfvgEvent  = false   // a bearish FVG just flipped to bullish IFVG (close > top)
+bool bearIfvgEvent  = false   // a bullish FVG just flipped to bearish IFVG (close < bottom)
+bool bullSetupFired = false   // armed bullish POI fired (full VWT-IFVG continuation)
+bool bearSetupFired = false   // armed bearish POI fired
+
+////////////////////////////////////////////////////////////////////////////////
+//// HTF wick reclaim → POI creation, then new wick capture
+//// (Per CLAUDE.md: at htfNewCandle, htfH/htfL/htfO/htfC = just-completed candle)
+////////////////////////////////////////////////////////////////////////////////
+
+if htfNewCandle
+    // 1) Check reclaim against existing stored wicks (using just-completed candle)
+    if showBullSetup and array.size(wickHighs) > 0
+        for i = array.size(wickHighs) - 1 to 0
+            w = array.get(wickHighs, i)
+            if htfC > w
+                // Bullish reclaim — create POI
+                tStart = time
+                tEnd   = time + poiDurMs
+                ln = line.new(tStart, w, tEnd, w, xloc = xloc.bar_time, color = poiColorBull, width = poiWidth)
+                pois.push(POI.new(ln, w, 1, bar_index, tEnd, false, false))
+                array.remove(wickHighs, i)
+            else if htfH >= w and htfC <= w
+                // Wick was tagged but not reclaimed — discard
+                array.remove(wickHighs, i)
+
+    if showBearSetup and array.size(wickLows) > 0
+        for i = array.size(wickLows) - 1 to 0
+            w = array.get(wickLows, i)
+            if htfC < w
+                tStart = time
+                tEnd   = time + poiDurMs
+                ln = line.new(tStart, w, tEnd, w, xloc = xloc.bar_time, color = poiColorBear, width = poiWidth)
+                pois.push(POI.new(ln, w, -1, bar_index, tEnd, false, false))
+                array.remove(wickLows, i)
+            else if htfL <= w and htfC >= w
+                array.remove(wickLows, i)
+
+    // 2) Capture the just-completed candle's wicks (if any) for future reclaims
+    if htfH > math.max(htfO, htfC)
+        array.push(wickHighs, htfH)
+    if htfL < math.min(htfO, htfC)
+        array.push(wickLows, htfL)
+
+    while array.size(wickHighs) > maxStoredWicks
+        array.shift(wickHighs)
+    while array.size(wickLows) > maxStoredWicks
+        array.shift(wickLows)
+
+////////////////////////////////////////////////////////////////////////////////
+//// LTF FVG Detection (from FVG/IFVG V3)
+////////////////////////////////////////////////////////////////////////////////
+
+if tfNewCandle
+    if zones.size() > 0
+        for i = 0 to zones.size() - 1
+            z = zones.get(i)
+            if not z.isMitigated
+                z.tfBarsAlive := z.tfBarsAlive + 1
+
+    array.unshift(hHigh,  tfHigh)
+    array.unshift(hLow,   tfLow)
+    array.unshift(hClose, tfClose)
+    array.unshift(hVol,   tfVol)
+    array.unshift(hBar,   bar_index)
+    if array.size(hHigh) > 5
+        array.pop(hHigh)
+        array.pop(hLow)
+        array.pop(hClose)
+        array.pop(hVol)
+        array.pop(hBar)
+
+    if array.size(hHigh) >= 3
+        h0High  = array.get(hHigh,  0)
+        h0Low   = array.get(hLow,   0)
+        h1Close = array.get(hClose, 1)
+        h1Vol   = array.get(hVol,   1)
+        h1Bar   = array.get(hBar,   1)
+        h2High  = array.get(hHigh,  2)
+        h2Low   = array.get(hLow,   2)
+
+        threshold = h1Close * (minSizePerc / 100)
+        bullGap   = h0Low - h2High
+        bearGap   = h2Low - h0High
+
+        if bullGap > threshold
+            zTop    = h0Low
+            zBot    = h2High
+            initCol = showFvgZones ? bullColor : color.new(chart.bg_color, 100)
+            b = box.new(h1Bar, zTop, bar_index + 3, zBot,
+              border_color = na, bgcolor = initCol,
+              text = str.tostring(h1Vol, format.volume),
+              text_size = size.tiny, text_color = chart.fg_color, text_halign = text.align_left)
+            zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, 1, false, false))
+            if zones.size() > maxFvgZones
+                oldest = zones.shift()
+                oldest.boxId.delete()
+
+        if bearGap > threshold
+            zTop    = h2Low
+            zBot    = h0High
+            initCol = showFvgZones ? bearColor : color.new(chart.bg_color, 100)
+            b = box.new(h1Bar, zTop, bar_index + 3, zBot,
+              border_color = na, bgcolor = initCol,
+              text = str.tostring(h1Vol, format.volume),
+              text_size = size.tiny, text_color = chart.fg_color, text_halign = text.align_left)
+            zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, -1, false, false))
+            if zones.size() > maxFvgZones
+                oldest = zones.shift()
+                oldest.boxId.delete()
+
+////////////////////////////////////////////////////////////////////////////////
+//// LTF FVG Lifecycle + IFVG event detection
+////////////////////////////////////////////////////////////////////////////////
+
+if zones.size() > 0
+    for i = zones.size() - 1 to 0
+        z = zones.get(i)
+        if not z.isMitigated
+            if z.tfBarsAlive > fvgLongevity
+                z.isMitigated := true
+                z.boxId.set_right(z.boxId.get_left() + 5)
+            else
+                z.boxId.set_right(bar_index + 3)
+
+                if z.direction == 1
+                    if not z.isInverted
+                        if close < z.bottom
+                            // bullish FVG flipped → bearish IFVG (resistance)
+                            z.isInverted := true
+                            bearIfvgEvent := true
+                            z.boxId.set_bgcolor(color.new(bearColor, 90))
+                            z.boxId.set_border_color(invBorder)
+                            z.boxId.set_border_style(line.style_dotted)
+                    else
+                        if close > z.top
+                            z.isMitigated := true
+                            z.boxId.delete()
+                else
+                    if not z.isInverted
+                        if close > z.top
+                            // bearish FVG flipped → bullish IFVG (support)
+                            z.isInverted := true
+                            bullIfvgEvent := true
+                            z.boxId.set_bgcolor(color.new(bullColor, 90))
+                            z.boxId.set_border_color(invBorder)
+                            z.boxId.set_border_style(line.style_dotted)
+                    else
+                        if close < z.bottom
+                            z.isMitigated := true
+                            z.boxId.delete()
+
+////////////////////////////////////////////////////////////////////////////////
+//// POI Lifecycle + Signal Firing
+////   - Bullish POI arms when low <= level (price retraced back below breakout)
+////   - Fires when a bullish IFVG event occurs while armed
+////   - Symmetric for bearish
+////////////////////////////////////////////////////////////////////////////////
+
+if pois.size() > 0
+    for i = pois.size() - 1 to 0
+        p = pois.get(i)
+        if time > p.expiryTime
+            pois.remove(i)
+        else if not p.fired
+            if p.direction == 1
+                if not p.armed
+                    if low <= p.level
+                        p.armed := true
+                if p.armed
+                    if bullIfvgEvent
+                        p.fired := true
+                        bullSetupFired := true
+            else
+                if not p.armed
+                    if high >= p.level
+                        p.armed := true
+                if p.armed
+                    if bearIfvgEvent
+                        p.fired := true
+                        bearSetupFired := true
+
+////////////////////////////////////////////////////////////////////////////////
+//// Plotting + Alerts
+////////////////////////////////////////////////////////////////////////////////
+
+plotshape(bullSetupFired, "Bullish VWT-IFVG", shape.triangleup,   location.belowbar, sigColorBull, size = size.small)
+plotshape(bearSetupFired, "Bearish VWT-IFVG", shape.triangledown, location.abovebar, sigColorBear, size = size.small)
+
+alertcondition(bullSetupFired, "Bullish VWT-IFVG Continuation", "Bullish VWT-IFVG continuation signal")
+alertcondition(bearSetupFired, "Bearish VWT-IFVG Continuation", "Bearish VWT-IFVG continuation signal")

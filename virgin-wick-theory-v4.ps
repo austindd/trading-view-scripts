@@ -1,0 +1,604 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Virgin Wick Theory V4 [SB]", "VWT4 [SB]", overlay = true
+  , max_lines_count  = 500
+  , max_boxes_count  = 500
+  , max_labels_count = 500
+  , max_bars_back    = 5000)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Inputs
+////////////////////////////////////////////////////////////////////////////////
+
+grpVWT  = "Virgin Wick (HTF)"
+grpPOI  = "POI"
+grpHtf  = "HTF FVGs (Tap)"
+grpLtf  = "LTF IFVGs (Entry)"
+grpTrd  = "Trade Levels"
+grpSig  = "Signals"
+
+// === VWT (HTF wick reclaim → POI) ===
+htfTF          = input.timeframe("60",  "HTF Timeframe",            group = grpVWT)
+showBullSetup  = input.bool(true,       "Enable Bullish Setups",    group = grpVWT)
+showBearSetup  = input.bool(true,       "Enable Bearish Setups",    group = grpVWT)
+maxStoredWicks = input.int(50,          "Max Stored Wicks",         group = grpVWT, minval = 1)
+
+// === POI ===
+poiCandles     = input.int(1,           "POI Lifespan (HTF Candles)", group = grpPOI, minval = 1)
+poiColorBull   = input.color(color.rgb(7, 188, 212),  "Bullish POI Color", group = grpPOI)
+poiColorBear   = input.color(color.rgb(171, 71, 189), "Bearish POI Color", group = grpPOI)
+poiWidth       = input.int(2,           "POI Line Width",            group = grpPOI, minval = 1)
+
+// === HTF FVG taps (3 timeframes monitored) ===
+htfFvgTf1      = input.timeframe("5",   "HTF FVG TF 1",              group = grpHtf)
+htfFvgTf2      = input.timeframe("10",  "HTF FVG TF 2",              group = grpHtf)
+htfFvgTf3      = input.timeframe("15",  "HTF FVG TF 3",              group = grpHtf)
+htfFvgMinPerc  = input.float(0.05,      "HTF FVG Min Gap (%)",       group = grpHtf, minval = 0.0, step = 0.05)
+htfFvgLongevity= input.int(100,         "HTF FVG Longevity (TF Bars)", group = grpHtf, minval = 1)
+maxHtfFvgZones = input.int(40,          "Max HTF FVG Zones (per TF)", group = grpHtf, minval = 1)
+showHtfFvgs    = input.bool(true,       "Show HTF FVG Boxes",        group = grpHtf)
+htfBullCol     = input.color(color.new(#0099ff, 80), "HTF Bullish FVG Color", group = grpHtf)
+htfBearCol     = input.color(color.new(#ff7700, 80), "HTF Bearish FVG Color", group = grpHtf)
+
+// === LTF IFVG (2 timeframes monitored for entry) ===
+ltfIfvgTf1     = input.timeframe("1",   "LTF IFVG TF 1",             group = grpLtf)
+ltfIfvgTf2     = input.timeframe("2",   "LTF IFVG TF 2",             group = grpLtf)
+ltfFvgMinPerc  = input.float(0.02,      "LTF FVG Min Gap (%)",       group = grpLtf, minval = 0.0, step = 0.01)
+ltfFvgLongevity= input.int(200,         "LTF FVG Longevity (TF Bars)", group = grpLtf, minval = 1)
+maxLtfFvgZones = input.int(40,          "Max LTF FVG Zones (per TF)", group = grpLtf, minval = 1)
+showLtfFvgs    = input.bool(true,       "Show LTF FVG Boxes",        group = grpLtf)
+ltfBullCol     = input.color(color.new(#00ffb3, 70), "LTF Bullish FVG Color", group = grpLtf)
+ltfBearCol     = input.color(color.new(#ff0077, 70), "LTF Bearish FVG Color", group = grpLtf)
+invBorder      = input.color(#ff9a3b,                "Inversion Border",      group = grpLtf)
+
+// === Trade / TP / SL ===
+pivLeft        = input.int(5,           "Pivot Left",                group = grpTrd, minval = 1, tooltip = "Bars to the left for ta.pivothigh / ta.pivotlow.")
+pivRight       = input.int(5,           "Pivot Right",               group = grpTrd, minval = 1, tooltip = "Bars to the right for pivot confirmation (introduces a lag).")
+riskMult       = input.float(2.0,       "Max R:R (TP Cap)",          group = grpTrd, minval = 0.5, step = 0.5, tooltip = "TP is capped at this multiple of risk.")
+showTrades     = input.bool(true,       "Show Trade Levels",         group = grpTrd)
+entryCol       = input.color(color.aqua,    "Entry Line Color",      group = grpTrd)
+slCol          = input.color(color.red,     "Stop Loss Color",       group = grpTrd)
+tpCol          = input.color(color.lime,    "Take Profit Color",     group = grpTrd)
+
+// === Signal markers ===
+sigColorBull   = input.color(color.lime, "Bullish Signal Color",     group = grpSig)
+sigColorBear   = input.color(color.red,  "Bearish Signal Color",     group = grpSig)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Types
+////////////////////////////////////////////////////////////////////////////////
+
+type FVGZone
+    box   boxId
+    float top
+    float bottom
+    int   startBar
+    int   tfBarsAlive
+    int   direction       // 1 = bullish FVG, -1 = bearish FVG
+    bool  isInverted
+    bool  isMitigated
+    int   invertedBar     // bar_index when isInverted latched (na while not inverted)
+    float invertedHigh    // chart-TF high on the inversion bar (na while not inverted)
+    float invertedLow     // chart-TF low on the inversion bar (na while not inverted)
+
+type POI
+    line  poiLine
+    float level
+    int   direction       // 1 = bullish setup, -1 = bearish setup
+    int   createdBar
+    int   armedBar
+    int   lastFireBar     // bar of most recent fire (initialized to createdBar)
+    int   expiryTime      // unix ms
+    bool  armed
+    bool  htfFvgTapped
+    bool  hasActiveTrade
+    float lowestSinceArmed
+    float highestSinceArmed
+
+type Trade
+    POI   poi
+    int   direction
+    int   entryBar
+    float entry
+    float sl
+    float tp
+    line  slLine
+    line  tpLine
+    line  entryLine
+    label entryLabel
+    bool  closed
+    bool  hitTp
+    bool  hitSl
+
+////////////////////////////////////////////////////////////////////////////////
+//// State
+////////////////////////////////////////////////////////////////////////////////
+
+var POI[]   pois   = array.new<POI>()
+var Trade[] trades = array.new<Trade>()
+var float[] wickHighs = array.new_float()
+var float[] wickLows  = array.new_float()
+
+// HTF FVG zones — separate array per TF (so aging is per-TF correct)
+var FVGZone[] htf1Zones = array.new<FVGZone>()
+var FVGZone[] htf2Zones = array.new<FVGZone>()
+var FVGZone[] htf3Zones = array.new<FVGZone>()
+
+// LTF IFVG zones — separate array per TF
+var FVGZone[] ltf1Zones = array.new<FVGZone>()
+var FVGZone[] ltf2Zones = array.new<FVGZone>()
+
+// History (5 fields per TF × 5 TFs)
+var float[] htf1HHigh  = array.new<float>(5, na)
+var float[] htf1HLow   = array.new<float>(5, na)
+var float[] htf1HClose = array.new<float>(5, na)
+var float[] htf1HVol   = array.new<float>(5, na)
+var int[]   htf1HBar   = array.new<int>(5, na)
+var float[] htf2HHigh  = array.new<float>(5, na)
+var float[] htf2HLow   = array.new<float>(5, na)
+var float[] htf2HClose = array.new<float>(5, na)
+var float[] htf2HVol   = array.new<float>(5, na)
+var int[]   htf2HBar   = array.new<int>(5, na)
+var float[] htf3HHigh  = array.new<float>(5, na)
+var float[] htf3HLow   = array.new<float>(5, na)
+var float[] htf3HClose = array.new<float>(5, na)
+var float[] htf3HVol   = array.new<float>(5, na)
+var int[]   htf3HBar   = array.new<int>(5, na)
+var float[] ltf1HHigh  = array.new<float>(5, na)
+var float[] ltf1HLow   = array.new<float>(5, na)
+var float[] ltf1HClose = array.new<float>(5, na)
+var float[] ltf1HVol   = array.new<float>(5, na)
+var int[]   ltf1HBar   = array.new<int>(5, na)
+var float[] ltf2HHigh  = array.new<float>(5, na)
+var float[] ltf2HLow   = array.new<float>(5, na)
+var float[] ltf2HClose = array.new<float>(5, na)
+var float[] ltf2HVol   = array.new<float>(5, na)
+var int[]   ltf2HBar   = array.new<int>(5, na)
+
+// Pivot tracking for TP target
+var float[] pivotHighs = array.new_float()
+var float[] pivotLows  = array.new_float()
+
+////////////////////////////////////////////////////////////////////////////////
+//// Per-bar flags
+////////////////////////////////////////////////////////////////////////////////
+
+bool bullSetupFired = false
+bool bearSetupFired = false
+
+////////////////////////////////////////////////////////////////////////////////
+//// HTF data + wick → POI logic (per CLAUDE.md: htfH/htfC = just-completed candle)
+////////////////////////////////////////////////////////////////////////////////
+
+[htfH, htfL, htfO, htfC, htfT] = request.security(syminfo.tickerid, htfTF,
+  [high, low, open, close, time],
+  lookahead = barmerge.lookahead_off)
+
+bool htfNewCandle = ta.change(htfT) != 0
+int  htfPeriodMs  = timeframe.in_seconds(htfTF) * 1000
+int  poiDurMs     = htfPeriodMs * poiCandles
+
+if htfNewCandle
+    // Reclaim check against stored wicks
+    if showBullSetup and array.size(wickHighs) > 0
+        for i = array.size(wickHighs) - 1 to 0
+            w = array.get(wickHighs, i)
+            if htfC > w
+                tStart = time
+                tEnd   = time + poiDurMs
+                ln = line.new(tStart, w, tEnd, w, xloc = xloc.bar_time, color = poiColorBull, width = poiWidth)
+                pois.push(POI.new(ln, w, 1, bar_index, bar_index, bar_index, tEnd,
+                  false, false, false, low, high))
+                array.remove(wickHighs, i)
+            else if htfH >= w and htfC <= w
+                array.remove(wickHighs, i)
+
+    if showBearSetup and array.size(wickLows) > 0
+        for i = array.size(wickLows) - 1 to 0
+            w = array.get(wickLows, i)
+            if htfC < w
+                tStart = time
+                tEnd   = time + poiDurMs
+                ln = line.new(tStart, w, tEnd, w, xloc = xloc.bar_time, color = poiColorBear, width = poiWidth)
+                pois.push(POI.new(ln, w, -1, bar_index, bar_index, bar_index, tEnd,
+                  false, false, false, low, high))
+                array.remove(wickLows, i)
+            else if htfL <= w and htfC >= w
+                array.remove(wickLows, i)
+
+    // Capture the just-completed candle's wicks
+    if htfH > math.max(htfO, htfC)
+        array.push(wickHighs, htfH)
+    if htfL < math.min(htfO, htfC)
+        array.push(wickLows, htfL)
+
+    while array.size(wickHighs) > maxStoredWicks
+        array.shift(wickHighs)
+    while array.size(wickLows) > maxStoredWicks
+        array.shift(wickLows)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Pivot tracking (chart TF)
+////////////////////////////////////////////////////////////////////////////////
+
+ph = ta.pivothigh(pivLeft, pivRight)
+pl = ta.pivotlow(pivLeft, pivRight)
+
+if not na(ph)
+    array.push(pivotHighs, ph)
+    while array.size(pivotHighs) > 200
+        array.shift(pivotHighs)
+if not na(pl)
+    array.push(pivotLows, pl)
+    while array.size(pivotLows) > 200
+        array.shift(pivotLows)
+
+findPivotHighAbove(float entry) =>
+    float nearest = na
+    if array.size(pivotHighs) > 0
+        for i = 0 to array.size(pivotHighs) - 1
+            p = array.get(pivotHighs, i)
+            if p > entry
+                if na(nearest)
+                    nearest := p
+                else if p < nearest
+                    nearest := p
+    nearest
+
+findPivotLowBelow(float entry) =>
+    float nearest = na
+    if array.size(pivotLows) > 0
+        for i = 0 to array.size(pivotLows) - 1
+            p = array.get(pivotLows, i)
+            if p < entry
+                if na(nearest)
+                    nearest := p
+                else if p > nearest
+                    nearest := p
+    nearest
+
+////////////////////////////////////////////////////////////////////////////////
+//// FVG data (5 timeframes)
+////////////////////////////////////////////////////////////////////////////////
+
+[htf1H, htf1L, htf1C, htf1T, htf1V] = request.security(syminfo.tickerid, htfFvgTf1, [high, low, close, time, volume], lookahead = barmerge.lookahead_off)
+[htf2H, htf2L, htf2C, htf2T, htf2V] = request.security(syminfo.tickerid, htfFvgTf2, [high, low, close, time, volume], lookahead = barmerge.lookahead_off)
+[htf3H, htf3L, htf3C, htf3T, htf3V] = request.security(syminfo.tickerid, htfFvgTf3, [high, low, close, time, volume], lookahead = barmerge.lookahead_off)
+[ltf1H, ltf1L, ltf1C, ltf1T, ltf1V] = request.security(syminfo.tickerid, ltfIfvgTf1, [high, low, close, time, volume], lookahead = barmerge.lookahead_off)
+[ltf2H, ltf2L, ltf2C, ltf2T, ltf2V] = request.security(syminfo.tickerid, ltfIfvgTf2, [high, low, close, time, volume], lookahead = barmerge.lookahead_off)
+
+bool htf1New = ta.change(htf1T) != 0
+bool htf2New = ta.change(htf2T) != 0
+bool htf3New = ta.change(htf3T) != 0
+bool ltf1New = ta.change(ltf1T) != 0
+bool ltf2New = ta.change(ltf2T) != 0
+
+////////////////////////////////////////////////////////////////////////////////
+//// processNewCandle: age zones for this TF, push history, detect FVG
+////////////////////////////////////////////////////////////////////////////////
+
+processNewCandle(bool newCandle, float tH, float tL, float tC, float tV,
+                 float[] hH, float[] hL, float[] hC, float[] hV, int[] hB,
+                 FVGZone[] zones, float minPerc, int maxZ,
+                 color bullCol, color bearCol, bool showZones) =>
+    if newCandle
+        if zones.size() > 0
+            for i = 0 to zones.size() - 1
+                z = zones.get(i)
+                if not z.isMitigated
+                    z.tfBarsAlive := z.tfBarsAlive + 1
+
+        array.unshift(hH, tH)
+        array.unshift(hL, tL)
+        array.unshift(hC, tC)
+        array.unshift(hV, tV)
+        array.unshift(hB, bar_index)
+        if array.size(hH) > 5
+            array.pop(hH)
+            array.pop(hL)
+            array.pop(hC)
+            array.pop(hV)
+            array.pop(hB)
+
+        if array.size(hH) >= 3
+            h0H = array.get(hH, 0)
+            h0L = array.get(hL, 0)
+            h1C = array.get(hC, 1)
+            h1V = array.get(hV, 1)
+            h1B = array.get(hB, 1)
+            h2H = array.get(hH, 2)
+            h2L = array.get(hL, 2)
+            thr = h1C * (minPerc / 100)
+
+            if (h0L - h2H) > thr
+                zTop = h0L
+                zBot = h2H
+                initCol = showZones ? bullCol : color.new(chart.bg_color, 100)
+                b = box.new(h1B, zTop, bar_index + 3, zBot,
+                  border_color = na, bgcolor = initCol,
+                  text = str.tostring(h1V, format.volume),
+                  text_size = size.tiny, text_color = chart.fg_color, text_halign = text.align_left)
+                zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, 1, false, false, na, na, na))
+                if zones.size() > maxZ
+                    oldest = zones.shift()
+                    oldest.boxId.delete()
+
+            if (h2L - h0H) > thr
+                zTop = h2L
+                zBot = h0H
+                initCol = showZones ? bearCol : color.new(chart.bg_color, 100)
+                b = box.new(h1B, zTop, bar_index + 3, zBot,
+                  border_color = na, bgcolor = initCol,
+                  text = str.tostring(h1V, format.volume),
+                  text_size = size.tiny, text_color = chart.fg_color, text_halign = text.align_left)
+                zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, -1, false, false, na, na, na))
+                if zones.size() > maxZ
+                    oldest = zones.shift()
+                    oldest.boxId.delete()
+
+processNewCandle(htf1New, htf1H, htf1L, htf1C, htf1V, htf1HHigh, htf1HLow, htf1HClose, htf1HVol, htf1HBar, htf1Zones, htfFvgMinPerc, maxHtfFvgZones, htfBullCol, htfBearCol, showHtfFvgs)
+processNewCandle(htf2New, htf2H, htf2L, htf2C, htf2V, htf2HHigh, htf2HLow, htf2HClose, htf2HVol, htf2HBar, htf2Zones, htfFvgMinPerc, maxHtfFvgZones, htfBullCol, htfBearCol, showHtfFvgs)
+processNewCandle(htf3New, htf3H, htf3L, htf3C, htf3V, htf3HHigh, htf3HLow, htf3HClose, htf3HVol, htf3HBar, htf3Zones, htfFvgMinPerc, maxHtfFvgZones, htfBullCol, htfBearCol, showHtfFvgs)
+processNewCandle(ltf1New, ltf1H, ltf1L, ltf1C, ltf1V, ltf1HHigh, ltf1HLow, ltf1HClose, ltf1HVol, ltf1HBar, ltf1Zones, ltfFvgMinPerc, maxLtfFvgZones, ltfBullCol, ltfBearCol, showLtfFvgs)
+processNewCandle(ltf2New, ltf2H, ltf2L, ltf2C, ltf2V, ltf2HHigh, ltf2HLow, ltf2HClose, ltf2HVol, ltf2HBar, ltf2Zones, ltfFvgMinPerc, maxLtfFvgZones, ltfBullCol, ltfBearCol, showLtfFvgs)
+
+////////////////////////////////////////////////////////////////////////////////
+//// HTF FVG lifecycle (simple — no inversion handling)
+////////////////////////////////////////////////////////////////////////////////
+
+updateHtfFvgLifecycle(FVGZone[] zones, int longevity) =>
+    if zones.size() > 0
+        for i = zones.size() - 1 to 0
+            z = zones.get(i)
+            if not z.isMitigated
+                if z.tfBarsAlive > longevity
+                    z.isMitigated := true
+                    z.boxId.set_right(z.boxId.get_left() + 5)
+                else
+                    z.boxId.set_right(bar_index + 3)
+                    if z.direction == 1
+                        if close < z.bottom
+                            z.isMitigated := true
+                            z.boxId.delete()
+                    else
+                        if close > z.top
+                            z.isMitigated := true
+                            z.boxId.delete()
+
+updateHtfFvgLifecycle(htf1Zones, htfFvgLongevity)
+updateHtfFvgLifecycle(htf2Zones, htfFvgLongevity)
+updateHtfFvgLifecycle(htf3Zones, htfFvgLongevity)
+
+////////////////////////////////////////////////////////////////////////////////
+//// LTF IFVG lifecycle (with inversion detection)
+////////////////////////////////////////////////////////////////////////////////
+
+updateLtfIfvgLifecycle(FVGZone[] zones, int longevity, color bullCol, color bearCol, color invBdr) =>
+    if zones.size() > 0
+        for i = zones.size() - 1 to 0
+            z = zones.get(i)
+            if not z.isMitigated
+                if z.tfBarsAlive > longevity
+                    z.isMitigated := true
+                    z.boxId.set_right(z.boxId.get_left() + 5)
+                else
+                    z.boxId.set_right(bar_index + 3)
+                    if z.direction == 1
+                        if not z.isInverted
+                            if close < z.bottom
+                                z.isInverted := true
+                                z.invertedBar := bar_index
+                                z.invertedHigh := high
+                                z.invertedLow := low
+                                z.boxId.set_bgcolor(color.new(bearCol, 50))
+                                z.boxId.set_border_color(invBdr)
+                                z.boxId.set_border_style(line.style_dotted)
+                        else
+                            if close > z.top
+                                z.isMitigated := true
+                                z.boxId.delete()
+                    else
+                        if not z.isInverted
+                            if close > z.top
+                                z.isInverted := true
+                                z.invertedBar := bar_index
+                                z.invertedHigh := high
+                                z.invertedLow := low
+                                z.boxId.set_bgcolor(color.new(bullCol, 50))
+                                z.boxId.set_border_color(invBdr)
+                                z.boxId.set_border_style(line.style_dotted)
+                        else
+                            if close < z.bottom
+                                z.isMitigated := true
+                                z.boxId.delete()
+
+updateLtfIfvgLifecycle(ltf1Zones, ltfFvgLongevity, ltfBullCol, ltfBearCol, invBorder)
+updateLtfIfvgLifecycle(ltf2Zones, ltfFvgLongevity, ltfBullCol, ltfBearCol, invBorder)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Helpers: tap-check + IFVG-match
+////////////////////////////////////////////////////////////////////////////////
+
+// Tap = current bar overlapped a direction-matched, unmitigated HTF FVG zone
+checkTapInZones(FVGZone[] zones, int dir) =>
+    bool result = false
+    if zones.size() > 0
+        for i = 0 to zones.size() - 1
+            z = zones.get(i)
+            if not z.isMitigated and z.direction == dir
+                hit = z.direction == 1 ? (low <= z.top and high >= z.bottom) : (high >= z.bottom and low <= z.top)
+                if hit
+                    result := true
+                    break
+    result
+
+// Find the most recently inverted, spatially valid, post-lastFire IFVG zone for this POI.
+// Spatial rule: (a) the IFVG zone itself sits on the right side of POI, AND
+//               (b) the confirming candle (chart-TF bar where the inversion latched)
+//                   is fully on the right side of POI — for bullish, high < POI level.
+findMatchingIfvg(FVGZone[] zones, POI p) =>
+    FVGZone result = na
+    int wantDir = p.direction == 1 ? -1 : 1   // bullish setup wants a flipped bearish FVG
+    if zones.size() > 0
+        for i = 0 to zones.size() - 1
+            z = zones.get(i)
+            if z.isInverted and not z.isMitigated and z.direction == wantDir and z.invertedBar > p.lastFireBar
+                zoneOk      = p.direction == 1 ? (z.top < p.level)         : (z.bottom > p.level)
+                confCandleOk = p.direction == 1 ? (z.invertedHigh < p.level) : (z.invertedLow > p.level)
+                if zoneOk and confCandleOk
+                    if na(result)
+                        result := z
+                    else if z.invertedBar > result.invertedBar
+                        result := z
+    result
+
+////////////////////////////////////////////////////////////////////////////////
+//// Fire a POI → create a Trade
+////////////////////////////////////////////////////////////////////////////////
+
+firePoi(POI p, FVGZone ifvg, Trade[] trades) =>
+    bool fired = false
+    entry = close
+
+    if p.direction == 1
+        sl = p.lowestSinceArmed
+        risk = entry - sl
+        if risk > 0
+            pivH = findPivotHighAbove(entry)
+            rrTp = entry + riskMult * risk
+            tp = na(pivH) ? rrTp : math.min(pivH, rrTp)
+            if tp > entry
+                slLn = line.new(bar_index, sl, bar_index + 5, sl, color = slCol, width = 2)
+                tpLn = line.new(bar_index, tp, bar_index + 5, tp, color = tpCol, width = 2)
+                enLn = line.new(bar_index, entry, bar_index + 5, entry, color = entryCol, width = 1, style = line.style_dashed)
+                enLb = label.new(bar_index, entry, "BUY", color = entryCol, textcolor = color.white, style = label.style_label_left, size = size.tiny)
+                t = Trade.new(p, 1, bar_index, entry, sl, tp, slLn, tpLn, enLn, enLb, false, false, false)
+                trades.push(t)
+                p.hasActiveTrade := true
+                p.lastFireBar := bar_index
+                fired := true
+    else
+        sl = p.highestSinceArmed
+        risk = sl - entry
+        if risk > 0
+            pivL = findPivotLowBelow(entry)
+            rrTp = entry - riskMult * risk
+            tp = na(pivL) ? rrTp : math.max(pivL, rrTp)
+            if tp < entry
+                slLn = line.new(bar_index, sl, bar_index + 5, sl, color = slCol, width = 2)
+                tpLn = line.new(bar_index, tp, bar_index + 5, tp, color = tpCol, width = 2)
+                enLn = line.new(bar_index, entry, bar_index + 5, entry, color = entryCol, width = 1, style = line.style_dashed)
+                enLb = label.new(bar_index, entry, "SELL", color = entryCol, textcolor = color.white, style = label.style_label_left, size = size.tiny)
+                t = Trade.new(p, -1, bar_index, entry, sl, tp, slLn, tpLn, enLn, enLb, false, false, false)
+                trades.push(t)
+                p.hasActiveTrade := true
+                p.lastFireBar := bar_index
+                fired := true
+    fired
+
+////////////////////////////////////////////////////////////////////////////////
+//// Per-bar POI state machine
+////   - Arm on retracement through level
+////   - Track SL extreme (lowest/highest since armed)
+////   - Latch htfFvgTapped on any direction-matched HTF FVG overlap
+////   - On every armed+tapped+!hasActiveTrade bar, look for a fresh IFVG → fire
+////////////////////////////////////////////////////////////////////////////////
+
+if pois.size() > 0
+    for i = 0 to pois.size() - 1
+        p = pois.get(i)
+
+        // Arm latch
+        if not p.armed
+            if p.direction == 1 and low <= p.level
+                p.armed := true
+                p.armedBar := bar_index
+                p.lowestSinceArmed := low
+                p.highestSinceArmed := high
+            else if p.direction == -1 and high >= p.level
+                p.armed := true
+                p.armedBar := bar_index
+                p.lowestSinceArmed := low
+                p.highestSinceArmed := high
+
+        // Track extremes (since armed) — used for SL even on subsequent re-fires
+        if p.armed
+            p.lowestSinceArmed := math.min(p.lowestSinceArmed, low)
+            p.highestSinceArmed := math.max(p.highestSinceArmed, high)
+
+        // Tap latch (only within POI active window)
+        if p.armed and not p.htfFvgTapped and time <= p.expiryTime
+            tapped = checkTapInZones(htf1Zones, p.direction) or checkTapInZones(htf2Zones, p.direction) or checkTapInZones(htf3Zones, p.direction)
+            if tapped
+                p.htfFvgTapped := true
+
+        // Fire check: requires all three latches + no active trade + within window
+        if p.armed and p.htfFvgTapped and not p.hasActiveTrade and time <= p.expiryTime
+            z1 = findMatchingIfvg(ltf1Zones, p)
+            z2 = findMatchingIfvg(ltf2Zones, p)
+            FVGZone chosen = na
+            if not na(z1)
+                chosen := z1
+            if not na(z2)
+                if na(chosen)
+                    chosen := z2
+                else if z2.invertedBar > chosen.invertedBar
+                    chosen := z2
+
+            if not na(chosen)
+                if firePoi(p, chosen, trades)
+                    if p.direction == 1
+                        bullSetupFired := true
+                    else
+                        bearSetupFired := true
+
+////////////////////////////////////////////////////////////////////////////////
+//// Trade lifecycle — extend lines, detect SL/TP hit, release POI for re-fire
+////////////////////////////////////////////////////////////////////////////////
+
+if trades.size() > 0
+    for i = 0 to trades.size() - 1
+        t = trades.get(i)
+        if not t.closed
+            t.slLine.set_x2(bar_index + 5)
+            t.tpLine.set_x2(bar_index + 5)
+            t.entryLine.set_x2(bar_index + 5)
+
+            if t.direction == 1
+                if low <= t.sl
+                    t.closed := true
+                    t.hitSl := true
+                    t.poi.hasActiveTrade := false
+                    t.slLine.set_color(color.new(slCol, 60))
+                    t.tpLine.set_color(color.new(tpCol, 80))
+                else if high >= t.tp
+                    t.closed := true
+                    t.hitTp := true
+                    t.poi.hasActiveTrade := false
+                    t.tpLine.set_color(color.new(tpCol, 0))
+                    t.slLine.set_color(color.new(slCol, 80))
+            else
+                if high >= t.sl
+                    t.closed := true
+                    t.hitSl := true
+                    t.poi.hasActiveTrade := false
+                    t.slLine.set_color(color.new(slCol, 60))
+                    t.tpLine.set_color(color.new(tpCol, 80))
+                else if low <= t.tp
+                    t.closed := true
+                    t.hitTp := true
+                    t.poi.hasActiveTrade := false
+                    t.tpLine.set_color(color.new(tpCol, 0))
+                    t.slLine.set_color(color.new(slCol, 80))
+
+////////////////////////////////////////////////////////////////////////////////
+//// Plotting + Alerts
+////////////////////////////////////////////////////////////////////////////////
+
+plotshape(bullSetupFired, "Bullish VWT-IFVG", shape.triangleup,   location.belowbar, sigColorBull, size = size.small)
+plotshape(bearSetupFired, "Bearish VWT-IFVG", shape.triangledown, location.abovebar, sigColorBear, size = size.small)
+
+alertcondition(bullSetupFired, "Bullish VWT-IFVG", "Bullish VWT-IFVG signal")
+alertcondition(bearSetupFired, "Bearish VWT-IFVG", "Bearish VWT-IFVG signal")
