@@ -1,0 +1,198 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
+// © scientificbest
+
+//@version=5
+indicator("FVG/IFVG V3 [SB]", "FVG/IFVG V3 [SB]", overlay = true
+  , max_boxes_count = 500
+  , max_bars_back   = 5000)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Inputs
+////////////////////////////////////////////////////////////////////////////////
+
+grpDetect = "Detection"
+grpStyle  = "Style"
+
+tfInput     = input.timeframe("",    "Timeframe",                    group = grpDetect, tooltip = "Timeframe for FVG detection. Leave blank to use the chart timeframe.")
+dispMode    = input.string("Both",   "Display Mode",                 group = grpDetect, options = ["Bullish Only", "Bearish Only", "Both"])
+minSizePerc = input.float(0.1,       "Min Gap Size (%)",             group = grpDetect, minval = 0.0, step = 0.05, tooltip = "The FVG gap must be at least this percentage of the middle candle's close price to qualify.")
+longevity   = input.int(100,         "Max Zone Longevity (TF Bars)", group = grpDetect, minval = 1,   tooltip = "Unmitigated zones expire after this many TF candles.")
+maxZones    = input.int(50,          "Max Active Zones",             group = grpDetect, minval = 1)
+showOnlyInv = input.bool(false,      "Show Only Inversion Zones",    group = grpDetect, tooltip = "Hide regular FVGs; only display zones after they flip to IFVGs.")
+
+bullColor   = input.color(color.new(#00ffb3, 70), "Bullish FVG Color",  group = grpStyle)
+bearColor   = input.color(color.new(#ff0077, 70), "Bearish FVG Color",  group = grpStyle)
+invBorder   = input.color(#ff9a3b,                "Inversion Border",   group = grpStyle)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Type Definition
+////////////////////////////////////////////////////////////////////////////////
+
+type FVGZone
+    box   boxId
+    float top
+    float bottom
+    int   startBar      // CTF bar_index when zone was created
+    int   tfBarsAlive   // number of TF candles elapsed since creation
+    int   direction     // 1 = bullish, -1 = bearish
+    bool  isInverted
+    bool  isMitigated
+
+////////////////////////////////////////////////////////////////////////////////
+//// Zone Array
+////////////////////////////////////////////////////////////////////////////////
+
+var FVGZone[] zones = array.new<FVGZone>()
+
+////////////////////////////////////////////////////////////////////////////////
+//// Timeframe Data
+////////////////////////////////////////////////////////////////////////////////
+
+[tfHigh, tfLow, tfClose, tfTime, tfVol] = request.security(
+  syminfo.tickerid, tfInput,
+  [high, low, close, time, volume],
+  lookahead = barmerge.lookahead_off)
+
+bool tfNewCandle = ta.change(tfTime) != 0
+
+// OHLC history: index 0 = most recently completed TF candle
+// Per CLAUDE.md critical note: at tfNewCandle, tfHigh == the just-completed candle (no [1] offset)
+var float[] hHigh  = array.new<float>(5, na)
+var float[] hLow   = array.new<float>(5, na)
+var float[] hClose = array.new<float>(5, na)
+var float[] hVol   = array.new<float>(5, na)
+var int[]   hBar   = array.new<int>(5, na)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Alert Flags (non-var: reset to false every bar)
+////////////////////////////////////////////////////////////////////////////////
+
+bool newBullFVG = false
+bool newBearFVG = false
+
+////////////////////////////////////////////////////////////////////////////////
+//// Main Logic: New TF Candle
+////////////////////////////////////////////////////////////////////////////////
+
+if tfNewCandle
+    // Age all active zones by one TF bar before creating new ones (new zones start at 0)
+    if zones.size() > 0
+        for i = 0 to zones.size() - 1
+            z = zones.get(i)
+            if not z.isMitigated
+                z.tfBarsAlive := z.tfBarsAlive + 1
+
+    // Push just-completed TF candle into front of history
+    array.unshift(hHigh,  tfHigh)
+    array.unshift(hLow,   tfLow)
+    array.unshift(hClose, tfClose)
+    array.unshift(hVol,   tfVol)
+    array.unshift(hBar,   bar_index)
+    if array.size(hHigh) > 5
+        array.pop(hHigh)
+        array.pop(hLow)
+        array.pop(hClose)
+        array.pop(hVol)
+        array.pop(hBar)
+
+    // Detect FVG pattern: need 3 completed TF candles
+    // h[0] = newest candle, h[1] = middle candle, h[2] = oldest of the three
+    if array.size(hHigh) >= 3
+        h0High  = array.get(hHigh,  0)
+        h0Low   = array.get(hLow,   0)
+        h1Low   = array.get(hLow,   1)
+        h1High  = array.get(hHigh,  1)
+        h1Close = array.get(hClose, 1)
+        h1Vol   = array.get(hVol,   1)
+        h1Bar   = array.get(hBar,   1)
+        h2High  = array.get(hHigh,  2)
+        h2Low   = array.get(hLow,   2)
+
+        threshold = h1Close * (minSizePerc / 100)
+
+        // Bullish FVG: gap between h[2].high and h[0].low
+        bullGap = h0Low - h2High
+        // Bearish FVG: gap between h[2].low and h[0].high
+        bearGap = h2Low - h0High
+
+        showBull = dispMode == "Bullish Only" or dispMode == "Both"
+        showBear = dispMode == "Bearish Only" or dispMode == "Both"
+
+        if bullGap > threshold and showBull
+            zTop    = h0Low
+            zBot    = h2High
+            initCol = showOnlyInv ? color.new(chart.bg_color, 100) : bullColor
+            b       = box.new(h1Bar, zTop, bar_index + 3, zBot,
+              border_color = na, bgcolor = initCol,
+              text = str.tostring(h1Vol, format.volume),
+              text_size = size.tiny, text_color = chart.fg_color, text_halign = text.align_left)
+            zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, 1, false, false))
+            newBullFVG := true
+            if zones.size() > maxZones
+                oldest = zones.shift()
+                oldest.boxId.delete()
+
+        if bearGap > threshold and showBear
+            zTop    = h2Low
+            zBot    = h0High
+            initCol = showOnlyInv ? color.new(chart.bg_color, 100) : bearColor
+            b       = box.new(h1Bar, zTop, bar_index + 3, zBot,
+              border_color = na, bgcolor = initCol,
+              text = str.tostring(h1Vol, format.volume),
+              text_size = size.tiny, text_color = chart.fg_color, text_halign = text.align_left)
+            zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, -1, false, false))
+            newBearFVG := true
+            if zones.size() > maxZones
+                oldest = zones.shift()
+                oldest.boxId.delete()
+
+////////////////////////////////////////////////////////////////////////////////
+//// Zone Lifecycle (runs every CTF bar)
+////////////////////////////////////////////////////////////////////////////////
+
+if zones.size() > 0
+    for i = zones.size() - 1 to 0
+        z = zones.get(i)
+        if not z.isMitigated
+            if z.tfBarsAlive > longevity
+                // Retire: shrink to small historical marker
+                z.isMitigated := true
+                z.boxId.set_right(z.boxId.get_left() + 5)
+            else
+                // Extend box to current bar
+                z.boxId.set_right(bar_index + 3)
+
+                // Bullish zone: support flips to resistance when close breaks below bottom;
+                // IFVG is fully mitigated when close reclaims above top
+                if z.direction == 1
+                    if not z.isInverted
+                        if close < z.bottom
+                            z.isInverted := true
+                            z.boxId.set_bgcolor(color.new(bearColor, 90))
+                            z.boxId.set_border_color(invBorder)
+                            z.boxId.set_border_style(line.style_dotted)
+                    else
+                        if close > z.top
+                            z.isMitigated := true
+                            z.boxId.delete()
+
+                // Bearish zone: resistance flips to support when close breaks above top;
+                // IFVG is fully mitigated when close drops back below bottom
+                else
+                    if not z.isInverted
+                        if close > z.top
+                            z.isInverted := true
+                            z.boxId.set_bgcolor(color.new(bullColor, 90))
+                            z.boxId.set_border_color(invBorder)
+                            z.boxId.set_border_style(line.style_dotted)
+                    else
+                        if close < z.bottom
+                            z.isMitigated := true
+                            z.boxId.delete()
+
+////////////////////////////////////////////////////////////////////////////////
+//// Alerts
+////////////////////////////////////////////////////////////////////////////////
+
+alertcondition(newBullFVG, "Bullish FVG Created", "Bullish FVG zone created")
+alertcondition(newBearFVG, "Bearish FVG Created", "Bearish FVG zone created")
