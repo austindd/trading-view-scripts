@@ -34,8 +34,8 @@ isBear = close < open
 ltfCloses = request.security_lower_tf(syminfo.tickerid, ltf, close)
 midpoint  = (high + low) / 2.0
 
-int topCount = 0
-int botCount = 0
+float topCount = 0
+float botCount = 0
 
 if array.size(ltfCloses) > 0
     for i = 0 to array.size(ltfCloses) - 1
