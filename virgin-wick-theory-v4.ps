@@ -24,6 +24,7 @@ htfTF          = input.timeframe("60",  "HTF Timeframe",            group = grpV
 showBullSetup  = input.bool(true,       "Enable Bullish Setups",    group = grpVWT)
 showBearSetup  = input.bool(true,       "Enable Bearish Setups",    group = grpVWT)
 maxStoredWicks = input.int(50,          "Max Stored Wicks",         group = grpVWT, minval = 1)
+minBodyRatio   = input.float(0.5,       "Min Body/Range Ratio",     group = grpVWT, minval = 0.0, maxval = 1.0, step = 0.05, tooltip = "The HTF candle that reclaims a virgin wick must have |close-open|/(high-low) at least this value to create a POI. Filters out indecisive breakouts.")
 
 // === POI ===
 poiCandles     = input.int(1,           "POI Lifespan (HTF Candles)", group = grpPOI, minval = 1)
@@ -48,6 +49,7 @@ ltfIfvgTf2     = input.timeframe("2",   "LTF IFVG TF 2",             group = grp
 ltfFvgMinPerc  = input.float(0.02,      "LTF FVG Min Gap (%)",       group = grpLtf, minval = 0.0, step = 0.01)
 ltfFvgLongevity= input.int(200,         "LTF FVG Longevity (TF Bars)", group = grpLtf, minval = 1)
 maxLtfFvgZones = input.int(40,          "Max LTF FVG Zones (per TF)", group = grpLtf, minval = 1)
+maxBarsToInvert= input.int(10,          "Max TF Candles to Invert",  group = grpLtf, minval = 1, tooltip = "Maximum number of TF candles between the original FVG forming and it flipping to an IFVG. FVGs that take longer to invert can't fire a signal.")
 showLtfFvgs    = input.bool(true,       "Show LTF FVG Boxes",        group = grpLtf)
 ltfBullCol     = input.color(color.new(#00ffb3, 70), "LTF Bullish FVG Color", group = grpLtf)
 ltfBearCol     = input.color(color.new(#ff0077, 70), "LTF Bearish FVG Color", group = grpLtf)
@@ -80,6 +82,7 @@ type FVGZone
     bool  isInverted
     bool  isMitigated
     int   invertedBar     // bar_index when isInverted latched (na while not inverted)
+    int   barsToInvert    // tfBarsAlive snapshot at inversion (TF candles from FVG → IFVG)
     float invertedHigh    // chart-TF high on the inversion bar (na while not inverted)
     float invertedLow     // chart-TF low on the inversion bar (na while not inverted)
 
@@ -134,27 +137,22 @@ var FVGZone[] ltf2Zones = array.new<FVGZone>()
 var float[] htf1HHigh  = array.new<float>(5, na)
 var float[] htf1HLow   = array.new<float>(5, na)
 var float[] htf1HClose = array.new<float>(5, na)
-var float[] htf1HVol   = array.new<float>(5, na)
 var int[]   htf1HBar   = array.new<int>(5, na)
 var float[] htf2HHigh  = array.new<float>(5, na)
 var float[] htf2HLow   = array.new<float>(5, na)
 var float[] htf2HClose = array.new<float>(5, na)
-var float[] htf2HVol   = array.new<float>(5, na)
 var int[]   htf2HBar   = array.new<int>(5, na)
 var float[] htf3HHigh  = array.new<float>(5, na)
 var float[] htf3HLow   = array.new<float>(5, na)
 var float[] htf3HClose = array.new<float>(5, na)
-var float[] htf3HVol   = array.new<float>(5, na)
 var int[]   htf3HBar   = array.new<int>(5, na)
 var float[] ltf1HHigh  = array.new<float>(5, na)
 var float[] ltf1HLow   = array.new<float>(5, na)
 var float[] ltf1HClose = array.new<float>(5, na)
-var float[] ltf1HVol   = array.new<float>(5, na)
 var int[]   ltf1HBar   = array.new<int>(5, na)
 var float[] ltf2HHigh  = array.new<float>(5, na)
 var float[] ltf2HLow   = array.new<float>(5, na)
 var float[] ltf2HClose = array.new<float>(5, na)
-var float[] ltf2HVol   = array.new<float>(5, na)
 var int[]   ltf2HBar   = array.new<int>(5, na)
 
 // Pivot tracking for TP target
@@ -181,16 +179,23 @@ int  htfPeriodMs  = timeframe.in_seconds(htfTF) * 1000
 int  poiDurMs     = htfPeriodMs * poiCandles
 
 if htfNewCandle
+    // Body/range ratio of the just-completed HTF candle (the would-be breakout candle)
+    float htfRange = htfH - htfL
+    float htfBody  = math.abs(htfC - htfO)
+    float htfBodyRangeRatio = htfRange > 0 ? htfBody / htfRange : 0.0
+    bool  htfBodyOk = htfBodyRangeRatio >= minBodyRatio
+
     // Reclaim check against stored wicks
     if showBullSetup and array.size(wickHighs) > 0
         for i = array.size(wickHighs) - 1 to 0
             w = array.get(wickHighs, i)
             if htfC > w
-                tStart = time
-                tEnd   = time + poiDurMs
-                ln = line.new(tStart, w, tEnd, w, xloc = xloc.bar_time, color = poiColorBull, width = poiWidth)
-                pois.push(POI.new(ln, w, 1, bar_index, bar_index, bar_index, tEnd,
-                  false, false, false, low, high))
+                if htfBodyOk
+                    tStart = time
+                    tEnd   = time + poiDurMs
+                    ln = line.new(tStart, w, tEnd, w, xloc = xloc.bar_time, color = poiColorBull, width = poiWidth)
+                    pois.push(POI.new(ln, w, 1, bar_index, bar_index, bar_index, tEnd,
+                      false, false, false, low, high))
                 array.remove(wickHighs, i)
             else if htfH >= w and htfC <= w
                 array.remove(wickHighs, i)
@@ -199,11 +204,12 @@ if htfNewCandle
         for i = array.size(wickLows) - 1 to 0
             w = array.get(wickLows, i)
             if htfC < w
-                tStart = time
-                tEnd   = time + poiDurMs
-                ln = line.new(tStart, w, tEnd, w, xloc = xloc.bar_time, color = poiColorBear, width = poiWidth)
-                pois.push(POI.new(ln, w, -1, bar_index, bar_index, bar_index, tEnd,
-                  false, false, false, low, high))
+                if htfBodyOk
+                    tStart = time
+                    tEnd   = time + poiDurMs
+                    ln = line.new(tStart, w, tEnd, w, xloc = xloc.bar_time, color = poiColorBear, width = poiWidth)
+                    pois.push(POI.new(ln, w, -1, bar_index, bar_index, bar_index, tEnd,
+                      false, false, false, low, high))
                 array.remove(wickLows, i)
             else if htfL <= w and htfC >= w
                 array.remove(wickLows, i)
@@ -263,11 +269,11 @@ findPivotLowBelow(float entry) =>
 //// FVG data (5 timeframes)
 ////////////////////////////////////////////////////////////////////////////////
 
-[htf1H, htf1L, htf1C, htf1T, htf1V] = request.security(syminfo.tickerid, htfFvgTf1, [high, low, close, time, volume], lookahead = barmerge.lookahead_off)
-[htf2H, htf2L, htf2C, htf2T, htf2V] = request.security(syminfo.tickerid, htfFvgTf2, [high, low, close, time, volume], lookahead = barmerge.lookahead_off)
-[htf3H, htf3L, htf3C, htf3T, htf3V] = request.security(syminfo.tickerid, htfFvgTf3, [high, low, close, time, volume], lookahead = barmerge.lookahead_off)
-[ltf1H, ltf1L, ltf1C, ltf1T, ltf1V] = request.security(syminfo.tickerid, ltfIfvgTf1, [high, low, close, time, volume], lookahead = barmerge.lookahead_off)
-[ltf2H, ltf2L, ltf2C, ltf2T, ltf2V] = request.security(syminfo.tickerid, ltfIfvgTf2, [high, low, close, time, volume], lookahead = barmerge.lookahead_off)
+[htf1H, htf1L, htf1C, htf1T] = request.security(syminfo.tickerid, htfFvgTf1, [high, low, close, time], lookahead = barmerge.lookahead_off)
+[htf2H, htf2L, htf2C, htf2T] = request.security(syminfo.tickerid, htfFvgTf2, [high, low, close, time], lookahead = barmerge.lookahead_off)
+[htf3H, htf3L, htf3C, htf3T] = request.security(syminfo.tickerid, htfFvgTf3, [high, low, close, time], lookahead = barmerge.lookahead_off)
+[ltf1H, ltf1L, ltf1C, ltf1T] = request.security(syminfo.tickerid, ltfIfvgTf1, [high, low, close, time], lookahead = barmerge.lookahead_off)
+[ltf2H, ltf2L, ltf2C, ltf2T] = request.security(syminfo.tickerid, ltfIfvgTf2, [high, low, close, time], lookahead = barmerge.lookahead_off)
 
 bool htf1New = ta.change(htf1T) != 0
 bool htf2New = ta.change(htf2T) != 0
@@ -279,8 +285,8 @@ bool ltf2New = ta.change(ltf2T) != 0
 //// processNewCandle: age zones for this TF, push history, detect FVG
 ////////////////////////////////////////////////////////////////////////////////
 
-processNewCandle(bool newCandle, float tH, float tL, float tC, float tV,
-                 float[] hH, float[] hL, float[] hC, float[] hV, int[] hB,
+processNewCandle(bool newCandle, float tH, float tL, float tC,
+                 float[] hH, float[] hL, float[] hC, int[] hB,
                  FVGZone[] zones, float minPerc, int maxZ,
                  color bullCol, color bearCol, bool showZones) =>
     if newCandle
@@ -293,20 +299,17 @@ processNewCandle(bool newCandle, float tH, float tL, float tC, float tV,
         array.unshift(hH, tH)
         array.unshift(hL, tL)
         array.unshift(hC, tC)
-        array.unshift(hV, tV)
         array.unshift(hB, bar_index)
         if array.size(hH) > 5
             array.pop(hH)
             array.pop(hL)
             array.pop(hC)
-            array.pop(hV)
             array.pop(hB)
 
         if array.size(hH) >= 3
             h0H = array.get(hH, 0)
             h0L = array.get(hL, 0)
             h1C = array.get(hC, 1)
-            h1V = array.get(hV, 1)
             h1B = array.get(hB, 1)
             h2H = array.get(hH, 2)
             h2L = array.get(hL, 2)
@@ -317,10 +320,8 @@ processNewCandle(bool newCandle, float tH, float tL, float tC, float tV,
                 zBot = h2H
                 initCol = showZones ? bullCol : color.new(chart.bg_color, 100)
                 b = box.new(h1B, zTop, bar_index + 3, zBot,
-                  border_color = na, bgcolor = initCol,
-                  text = str.tostring(h1V, format.volume),
-                  text_size = size.tiny, text_color = chart.fg_color, text_halign = text.align_left)
-                zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, 1, false, false, na, na, na))
+                  border_color = na, bgcolor = initCol)
+                zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, 1, false, false, na, na, na, na))
                 if zones.size() > maxZ
                     oldest = zones.shift()
                     oldest.boxId.delete()
@@ -330,19 +331,17 @@ processNewCandle(bool newCandle, float tH, float tL, float tC, float tV,
                 zBot = h0H
                 initCol = showZones ? bearCol : color.new(chart.bg_color, 100)
                 b = box.new(h1B, zTop, bar_index + 3, zBot,
-                  border_color = na, bgcolor = initCol,
-                  text = str.tostring(h1V, format.volume),
-                  text_size = size.tiny, text_color = chart.fg_color, text_halign = text.align_left)
-                zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, -1, false, false, na, na, na))
+                  border_color = na, bgcolor = initCol)
+                zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, -1, false, false, na, na, na, na))
                 if zones.size() > maxZ
                     oldest = zones.shift()
                     oldest.boxId.delete()
 
-processNewCandle(htf1New, htf1H, htf1L, htf1C, htf1V, htf1HHigh, htf1HLow, htf1HClose, htf1HVol, htf1HBar, htf1Zones, htfFvgMinPerc, maxHtfFvgZones, htfBullCol, htfBearCol, showHtfFvgs)
-processNewCandle(htf2New, htf2H, htf2L, htf2C, htf2V, htf2HHigh, htf2HLow, htf2HClose, htf2HVol, htf2HBar, htf2Zones, htfFvgMinPerc, maxHtfFvgZones, htfBullCol, htfBearCol, showHtfFvgs)
-processNewCandle(htf3New, htf3H, htf3L, htf3C, htf3V, htf3HHigh, htf3HLow, htf3HClose, htf3HVol, htf3HBar, htf3Zones, htfFvgMinPerc, maxHtfFvgZones, htfBullCol, htfBearCol, showHtfFvgs)
-processNewCandle(ltf1New, ltf1H, ltf1L, ltf1C, ltf1V, ltf1HHigh, ltf1HLow, ltf1HClose, ltf1HVol, ltf1HBar, ltf1Zones, ltfFvgMinPerc, maxLtfFvgZones, ltfBullCol, ltfBearCol, showLtfFvgs)
-processNewCandle(ltf2New, ltf2H, ltf2L, ltf2C, ltf2V, ltf2HHigh, ltf2HLow, ltf2HClose, ltf2HVol, ltf2HBar, ltf2Zones, ltfFvgMinPerc, maxLtfFvgZones, ltfBullCol, ltfBearCol, showLtfFvgs)
+processNewCandle(htf1New, htf1H, htf1L, htf1C, htf1HHigh, htf1HLow, htf1HClose, htf1HBar, htf1Zones, htfFvgMinPerc, maxHtfFvgZones, htfBullCol, htfBearCol, showHtfFvgs)
+processNewCandle(htf2New, htf2H, htf2L, htf2C, htf2HHigh, htf2HLow, htf2HClose, htf2HBar, htf2Zones, htfFvgMinPerc, maxHtfFvgZones, htfBullCol, htfBearCol, showHtfFvgs)
+processNewCandle(htf3New, htf3H, htf3L, htf3C, htf3HHigh, htf3HLow, htf3HClose, htf3HBar, htf3Zones, htfFvgMinPerc, maxHtfFvgZones, htfBullCol, htfBearCol, showHtfFvgs)
+processNewCandle(ltf1New, ltf1H, ltf1L, ltf1C, ltf1HHigh, ltf1HLow, ltf1HClose, ltf1HBar, ltf1Zones, ltfFvgMinPerc, maxLtfFvgZones, ltfBullCol, ltfBearCol, showLtfFvgs)
+processNewCandle(ltf2New, ltf2H, ltf2L, ltf2C, ltf2HHigh, ltf2HLow, ltf2HClose, ltf2HBar, ltf2Zones, ltfFvgMinPerc, maxLtfFvgZones, ltfBullCol, ltfBearCol, showLtfFvgs)
 
 ////////////////////////////////////////////////////////////////////////////////
 //// HTF FVG lifecycle (simple — no inversion handling)
@@ -390,6 +389,7 @@ updateLtfIfvgLifecycle(FVGZone[] zones, int longevity, color bullCol, color bear
                             if close < z.bottom
                                 z.isInverted := true
                                 z.invertedBar := bar_index
+                                z.barsToInvert := z.tfBarsAlive
                                 z.invertedHigh := high
                                 z.invertedLow := low
                                 z.boxId.set_bgcolor(color.new(bearCol, 50))
@@ -404,6 +404,7 @@ updateLtfIfvgLifecycle(FVGZone[] zones, int longevity, color bullCol, color bear
                             if close > z.top
                                 z.isInverted := true
                                 z.invertedBar := bar_index
+                                z.barsToInvert := z.tfBarsAlive
                                 z.invertedHigh := high
                                 z.invertedLow := low
                                 z.boxId.set_bgcolor(color.new(bullCol, 50))
@@ -445,9 +446,10 @@ findMatchingIfvg(FVGZone[] zones, POI p) =>
         for i = 0 to zones.size() - 1
             z = zones.get(i)
             if z.isInverted and not z.isMitigated and z.direction == wantDir and z.invertedBar > p.lastFireBar
-                zoneOk      = p.direction == 1 ? (z.top < p.level)         : (z.bottom > p.level)
+                barsOk       = z.barsToInvert <= maxBarsToInvert
+                zoneOk       = p.direction == 1 ? (z.top < p.level)         : (z.bottom > p.level)
                 confCandleOk = p.direction == 1 ? (z.invertedHigh < p.level) : (z.invertedLow > p.level)
-                if zoneOk and confCandleOk
+                if barsOk and zoneOk and confCandleOk
                     if na(result)
                         result := z
                     else if z.invertedBar > result.invertedBar
