@@ -95,7 +95,7 @@ type POI
     int   lastFireBar     // bar of most recent fire (initialized to createdBar)
     int   expiryTime      // unix ms
     bool  armed
-    bool  htfFvgTapped
+    FVGZone[] tappedFvgs
     bool  hasActiveTrade
     float lowestSinceArmed
     float highestSinceArmed
@@ -195,7 +195,7 @@ if htfNewCandle
                     tEnd   = time + poiDurMs
                     ln = line.new(tStart, w, tEnd, w, xloc = xloc.bar_time, color = poiColorBull, width = poiWidth)
                     pois.push(POI.new(ln, w, 1, bar_index, bar_index, bar_index, tEnd,
-                      false, false, false, low, high))
+                      false, array.new<FVGZone>(), false, low, high))
                 array.remove(wickHighs, i)
             else if htfH >= w and htfC <= w
                 array.remove(wickHighs, i)
@@ -209,7 +209,7 @@ if htfNewCandle
                     tEnd   = time + poiDurMs
                     ln = line.new(tStart, w, tEnd, w, xloc = xloc.bar_time, color = poiColorBear, width = poiWidth)
                     pois.push(POI.new(ln, w, -1, bar_index, bar_index, bar_index, tEnd,
-                      false, false, false, low, high))
+                      false, array.new<FVGZone>(), false, low, high))
                 array.remove(wickLows, i)
             else if htfL <= w and htfC >= w
                 array.remove(wickLows, i)
@@ -422,17 +422,23 @@ updateLtfIfvgLifecycle(ltf2Zones, ltfFvgLongevity, ltfBullCol, ltfBearCol, invBo
 //// Helpers: tap-check + IFVG-match
 ////////////////////////////////////////////////////////////////////////////////
 
-// Tap = current bar overlapped a direction-matched, unmitigated HTF FVG zone
-checkTapInZones(FVGZone[] zones, int dir) =>
-    bool result = false
+// Collect direction-matched, unmitigated HTF FVG zones that the current bar overlaps
+collectTappedZones(FVGZone[] zones, int dir, FVGZone[] tapped) =>
     if zones.size() > 0
         for i = 0 to zones.size() - 1
             z = zones.get(i)
             if not z.isMitigated and z.direction == dir
-                hit = z.direction == 1 ? (low <= z.top and high >= z.bottom) : (high >= z.bottom and low <= z.top)
-                if hit
-                    result := true
-                    break
+                if low <= z.top and high >= z.bottom
+                    tapped.push(z)
+
+// Check if any previously tapped FVG is still unmitigated
+hasLiveTappedFvg(FVGZone[] tapped) =>
+    bool result = false
+    if tapped.size() > 0
+        for i = 0 to tapped.size() - 1
+            if not tapped.get(i).isMitigated
+                result := true
+                break
     result
 
 // Find the most recently inverted, spatially valid, post-lastFire IFVG zone for this POI.
@@ -457,42 +463,61 @@ findMatchingIfvg(FVGZone[] zones, POI p) =>
     result
 
 ////////////////////////////////////////////////////////////////////////////////
+//// Blocking FVG check — reject if an untouched HTF FVG sits between entry & TP
+////////////////////////////////////////////////////////////////////////////////
+
+hasBlockingFvg(FVGZone[] zones, float lo, float hi) =>
+    bool result = false
+    if zones.size() > 0
+        for i = 0 to zones.size() - 1
+            z = zones.get(i)
+            if not z.isMitigated and z.top > lo and z.bottom < hi
+                result := true
+                break
+    result
+
+pathBlocked(float entry, float tp) =>
+    float lo = math.min(entry, tp)
+    float hi = math.max(entry, tp)
+    hasBlockingFvg(htf1Zones, lo, hi) or hasBlockingFvg(htf2Zones, lo, hi) or hasBlockingFvg(htf3Zones, lo, hi)
+
+////////////////////////////////////////////////////////////////////////////////
 //// Fire a POI → create a Trade
 ////////////////////////////////////////////////////////////////////////////////
 
-firePoi(POI p, FVGZone ifvg, Trade[] trades) =>
+firePoi(POI p, FVGZone ifvg, Trade[] trades, string ifvgTf) =>
     bool fired = false
     entry = close
 
-    if p.direction == 1
+    if p.direction == 1 and entry < p.level
         sl = p.lowestSinceArmed
         risk = entry - sl
         if risk > 0
             pivH = findPivotHighAbove(entry)
             rrTp = entry + riskMult * risk
             tp = na(pivH) ? rrTp : math.min(pivH, rrTp)
-            if tp > entry
+            if tp > entry and not pathBlocked(entry, tp)
                 slLn = line.new(bar_index, sl, bar_index + 5, sl, color = slCol, width = 2)
                 tpLn = line.new(bar_index, tp, bar_index + 5, tp, color = tpCol, width = 2)
                 enLn = line.new(bar_index, entry, bar_index + 5, entry, color = entryCol, width = 1, style = line.style_dashed)
-                enLb = label.new(bar_index, entry, "BUY", color = entryCol, textcolor = color.white, style = label.style_label_left, size = size.tiny)
+                enLb = label.new(bar_index, entry, "BUY (" + ifvgTf + ")", color = entryCol, textcolor = color.white, style = label.style_label_left, size = size.tiny)
                 t = Trade.new(p, 1, bar_index, entry, sl, tp, slLn, tpLn, enLn, enLb, false, false, false)
                 trades.push(t)
                 p.hasActiveTrade := true
                 p.lastFireBar := bar_index
                 fired := true
-    else
+    else if p.direction == -1 and entry > p.level
         sl = p.highestSinceArmed
         risk = sl - entry
         if risk > 0
             pivL = findPivotLowBelow(entry)
             rrTp = entry - riskMult * risk
             tp = na(pivL) ? rrTp : math.max(pivL, rrTp)
-            if tp < entry
+            if tp < entry and not pathBlocked(entry, tp)
                 slLn = line.new(bar_index, sl, bar_index + 5, sl, color = slCol, width = 2)
                 tpLn = line.new(bar_index, tp, bar_index + 5, tp, color = tpCol, width = 2)
                 enLn = line.new(bar_index, entry, bar_index + 5, entry, color = entryCol, width = 1, style = line.style_dashed)
-                enLb = label.new(bar_index, entry, "SELL", color = entryCol, textcolor = color.white, style = label.style_label_left, size = size.tiny)
+                enLb = label.new(bar_index, entry, "SELL (" + ifvgTf + ")", color = entryCol, textcolor = color.white, style = label.style_label_left, size = size.tiny)
                 t = Trade.new(p, -1, bar_index, entry, sl, tp, slLn, tpLn, enLn, enLb, false, false, false)
                 trades.push(t)
                 p.hasActiveTrade := true
@@ -504,8 +529,8 @@ firePoi(POI p, FVGZone ifvg, Trade[] trades) =>
 //// Per-bar POI state machine
 ////   - Arm on retracement through level
 ////   - Track SL extreme (lowest/highest since armed)
-////   - Latch htfFvgTapped on any direction-matched HTF FVG overlap
-////   - On every armed+tapped+!hasActiveTrade bar, look for a fresh IFVG → fire
+////   - Collect tapped HTF FVG zones; at least one must survive to fire
+////   - On every armed+liveTap+!hasActiveTrade bar, look for a fresh IFVG → fire
 ////////////////////////////////////////////////////////////////////////////////
 
 if pois.size() > 0
@@ -530,27 +555,31 @@ if pois.size() > 0
             p.lowestSinceArmed := math.min(p.lowestSinceArmed, low)
             p.highestSinceArmed := math.max(p.highestSinceArmed, high)
 
-        // Tap latch (only within POI active window)
-        if p.armed and not p.htfFvgTapped and time <= p.expiryTime
-            tapped = checkTapInZones(htf1Zones, p.direction) or checkTapInZones(htf2Zones, p.direction) or checkTapInZones(htf3Zones, p.direction)
-            if tapped
-                p.htfFvgTapped := true
+        // Collect tapped HTF FVG zones (only within POI active window)
+        if p.armed and time <= p.expiryTime
+            collectTappedZones(htf1Zones, p.direction, p.tappedFvgs)
+            collectTappedZones(htf2Zones, p.direction, p.tappedFvgs)
+            collectTappedZones(htf3Zones, p.direction, p.tappedFvgs)
 
-        // Fire check: requires all three latches + no active trade + within window
-        if p.armed and p.htfFvgTapped and not p.hasActiveTrade and time <= p.expiryTime
+        // Fire check: armed + at least one tapped FVG still alive + no active trade + within window
+        if p.armed and hasLiveTappedFvg(p.tappedFvgs) and not p.hasActiveTrade and time <= p.expiryTime
             z1 = findMatchingIfvg(ltf1Zones, p)
             z2 = findMatchingIfvg(ltf2Zones, p)
             FVGZone chosen = na
+            string chosenTf = ""
             if not na(z1)
                 chosen := z1
+                chosenTf := ltfIfvgTf1
             if not na(z2)
                 if na(chosen)
                     chosen := z2
+                    chosenTf := ltfIfvgTf2
                 else if z2.invertedBar > chosen.invertedBar
                     chosen := z2
+                    chosenTf := ltfIfvgTf2
 
             if not na(chosen)
-                if firePoi(p, chosen, trades)
+                if firePoi(p, chosen, trades, chosenTf)
                     if p.direction == 1
                         bullSetupFired := true
                     else
