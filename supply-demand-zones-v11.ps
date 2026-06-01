@@ -1,0 +1,257 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
+// © scientificbest
+
+//@version=5
+indicator("Supply & Demand Zones V11 (Single Candle) [SB]", "S&D Zones V11 [SB]", overlay = true
+  , max_bars_back = 5000
+  , max_lines_count  = 500
+  , max_labels_count = 500
+  , max_boxes_count  = 500)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Inputs
+////////////////////////////////////////////////////////////////////////////////
+
+grp1 = 'Zone Detection'
+grp2 = 'Display'
+grp3 = 'Colors'
+
+// Zone Detection
+period                          = input.int(3, title='Lookback Period', minval=1, maxval=500, group=grp1, tooltip='Number of bars sampled to compute the z-score baseline.') + 1
+significanceThreshold           = input.float(1.0, title='Significance Threshold', minval=0, step=0.05, group=grp1, tooltip='Z-score threshold a candle must exceed to be considered an explosive strong-move candle. Higher = fewer, stronger zones.')
+minMoveToZoneRatioInput         = input.float(0.75, title='Minimum Move-to-Zone Ratio', minval=0, step=0.05, group=grp1, tooltip='Minimum ratio of the candle body (the move) to the zone height (the wick that forms the zone). Filters zones with poor risk:reward.')
+maxNumberOfZonesInput           = input.int(120, title='Max Number of Zones', minval=1, group=grp1)
+
+// Display
+showZonesInput                  = input.bool(true,  title='Show Zones', group=grp2)
+showStrongMovesInput            = input.bool(false, title='Show Strong Move Candle Body', group=grp2, tooltip='Overlays a box on the explosive candle body (the move that created the zone).')
+changeColorOnTouchedInput       = input.bool(true,  title='Change Color When Touched', group=grp2)
+brokenWhenTouchedInput          = input.bool(false, title='Zone Broken When Touched', group=grp2, tooltip='When enabled, a zone stops extending as soon as price touches it, rather than waiting for a full cross.')
+
+// Colors
+supplyZoneColorInput            = input.color(color.new(color.red,    70), title='Supply Zone Color',              group=grp3)
+supplyZoneBorderColorInput      = input.color(color.new(color.red,    50), title='Supply Zone Border Color',       group=grp3)
+supplyStrongMoveColorInput      = input.color(color.new(color.orange, 80), title='Supply Strong Move Color',       group=grp3)
+supplyStrongMoveBorderColorInput= input.color(color.new(color.orange, 50), title='Supply Strong Move Border Color',group=grp3)
+demandZoneColorInput            = input.color(color.new(color.green,  70), title='Demand Zone Color',              group=grp3)
+demandZoneBorderColorInput      = input.color(color.new(color.green,  50), title='Demand Zone Border Color',       group=grp3)
+demandStrongMoveColorInput      = input.color(color.new(color.blue,   80), title='Demand Strong Move Color',       group=grp3)
+demandStrongMoveBorderColorInput= input.color(color.new(color.blue,   50), title='Demand Strong Move Border Color',group=grp3)
+zoneTouchedColorInput           = input.color(color.new(color.gray,   80), title='Zone Touched Color',             group=grp3)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Type Definitions
+////////////////////////////////////////////////////////////////////////////////
+
+type StrongMove
+    int   dir        = na
+    int   startLoc   = na
+    int   endLoc     = na
+    float startPrice = na  // zone bottom (supply) or zone top (demand)
+    float endPrice   = na  // close of the explosive candle
+
+type Zone
+    int        dir        = na
+    float      top        = na
+    float      btm        = na
+    int        startLoc   = na
+    int        endLoc     = na
+    StrongMove strongMove = na
+    bool       crossed    = false
+    int        crossedLoc = na
+    bool       touched    = false
+    int        touchedLoc = na
+
+////////////////////////////////////////////////////////////////////////////////
+//// Z-Score Calculation
+////////////////////////////////////////////////////////////////////////////////
+
+diff        = close - math.avg(close[1], close[1], close[2])
+sampleAvg   = ta.sma(diff, period)
+sampleStdev = ta.stdev(diff, period)
+z           = (diff - sampleAvg) / (sampleStdev / math.sqrt(period))
+z_abs       = math.abs(z)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Per-Bar Candle Properties
+////////////////////////////////////////////////////////////////////////////////
+
+candleBodyRange = math.abs(open - close)
+candleRange     = high - low
+candleBodyRatio = candleRange > 0 ? candleBodyRange / candleRange : 0.0
+candleBodyUp    = close > open
+candleBodyDown  = close < open
+
+// An "explosive" candle must exceed the significance threshold and have a
+// substantial body relative to its total range.
+isExplosiveSupply = z_abs > significanceThreshold and candleBodyDown and candleBodyRatio > 0.4
+isExplosiveDemand = z_abs > significanceThreshold and candleBodyUp   and candleBodyRatio > 0.4
+
+// Compute the same flags for the previous bar (used to detect the *first*
+// candle in a consecutive explosive run).
+prevBodyRatio = candleRange[1] > 0 ? math.abs(open[1] - close[1]) / candleRange[1] : 0.0
+isPrevExplosiveSupply = z_abs[1] > significanceThreshold and close[1] < open[1] and prevBodyRatio > 0.4
+isPrevExplosiveDemand = z_abs[1] > significanceThreshold and close[1] > open[1] and prevBodyRatio > 0.4
+
+////////////////////////////////////////////////////////////////////////////////
+//// Zone Arrays & Alert Variables
+////////////////////////////////////////////////////////////////////////////////
+
+var supplyZones = array.new<Zone>(0)
+var demandZones = array.new<Zone>(0)
+
+var bool  supplyZoneCreated    = false
+var bool  demandZoneCreated    = false
+var float supplyZoneCreatedTop = na
+var float supplyZoneCreatedBtm = na
+var float demandZoneCreatedTop = na
+var float demandZoneCreatedBtm = na
+
+////////////////////////////////////////////////////////////////////////////////
+//// Zone Detection
+////////////////////////////////////////////////////////////////////////////////
+
+// Supply zone — formed by the first bearish explosive candle in a consecutive run.
+//
+// Zone boundaries:
+//   top = high of the explosive candle     (absolute extreme where supply appeared)
+//   btm = open of the explosive candle     (where the bearish body begins — the "origin")
+//
+// Move-to-zone ratio = body size / zone height = (open - close) / (high - open)
+// This filters out candles whose body is small relative to their upper wick.
+identifySupplyZone() =>
+    Zone result = na
+    if isExplosiveSupply and not isPrevExplosiveSupply
+        zoneTop    = high
+        zoneBtm    = open
+        zoneHeight = zoneTop - zoneBtm
+        moveSize   = open - close  // body of the bearish candle
+        passesRatio = zoneHeight > 0 and moveSize / zoneHeight > minMoveToZoneRatioInput
+        if passesRatio
+            sm     = StrongMove.new(dir=-1, startLoc=bar_index, endLoc=bar_index, startPrice=open, endPrice=close)
+            result := Zone.new(dir=-1, top=zoneTop, btm=zoneBtm, startLoc=bar_index - 1, endLoc=bar_index, strongMove=sm)
+            array.unshift(supplyZones, result)
+            if array.size(supplyZones) > maxNumberOfZonesInput
+                array.pop(supplyZones)
+    result
+
+// Demand zone — formed by the first bullish explosive candle in a consecutive run.
+//
+// Zone boundaries:
+//   top = open of the explosive candle     (where the bullish body begins — the "origin")
+//   btm = low of the explosive candle      (absolute extreme where demand appeared)
+//
+// Move-to-zone ratio = body size / zone height = (close - open) / (open - low)
+identifyDemandZone() =>
+    Zone result = na
+    if isExplosiveDemand and not isPrevExplosiveDemand
+        zoneTop    = open
+        zoneBtm    = low
+        zoneHeight = zoneTop - zoneBtm
+        moveSize   = close - open  // body of the bullish candle
+        passesRatio = zoneHeight > 0 and moveSize / zoneHeight > minMoveToZoneRatioInput
+        if passesRatio
+            sm     = StrongMove.new(dir=1, startLoc=bar_index, endLoc=bar_index, startPrice=open, endPrice=close)
+            result := Zone.new(dir=1, top=zoneTop, btm=zoneBtm, startLoc=bar_index - 1, endLoc=bar_index, strongMove=sm)
+            array.unshift(demandZones, result)
+            if array.size(demandZones) > maxNumberOfZonesInput
+                array.pop(demandZones)
+    result
+
+////////////////////////////////////////////////////////////////////////////////
+//// Zone Status Update (touched / crossed)
+////////////////////////////////////////////////////////////////////////////////
+
+updateZoneStatus(array<Zone> zones, bool isSupplyZone) =>
+    if array.size(zones) > 0
+        for i = 0 to array.size(zones) - 1
+            zn = array.get(zones, i)
+            if zn.endLoc < bar_index
+                if isSupplyZone
+                    if not zn.touched and high > zn.btm
+                        zn.touched    := true
+                        zn.touchedLoc := bar_index
+                    if not zn.crossed and high > zn.top
+                        zn.crossed    := true
+                        zn.crossedLoc := bar_index
+                else
+                    if not zn.touched and low < zn.top
+                        zn.touched    := true
+                        zn.touchedLoc := bar_index
+                    if not zn.crossed and low < zn.btm
+                        zn.crossed    := true
+                        zn.crossedLoc := bar_index
+
+////////////////////////////////////////////////////////////////////////////////
+//// Display Functions
+////////////////////////////////////////////////////////////////////////////////
+
+displayZone(Zone zn, color zoneCss, color zoneBorderCss, color strongMoveCss, color strongMoveBorderCss, color zoneTouchedCss) =>
+    if bar_index - zn.startLoc < 4000
+        zoneEnd  = brokenWhenTouchedInput ? (zn.touched ? zn.touchedLoc : last_bar_index) : (zn.crossed ? zn.crossedLoc : last_bar_index)
+        fillCss  = changeColorOnTouchedInput and zn.touched ? zoneTouchedCss : zoneCss
+        box.new(zn.startLoc, zn.top, zoneEnd + 1, zn.btm, bgcolor=fillCss, border_color=zoneBorderCss)
+        if showStrongMovesInput
+            sm = zn.strongMove
+            // Draw a box over the candle body to highlight the explosive move
+            bodyTop = sm.dir == -1 ? sm.startPrice : sm.endPrice
+            bodyBtm = sm.dir == -1 ? sm.endPrice   : sm.startPrice
+            box.new(sm.startLoc, bodyTop, sm.endLoc + 1, bodyBtm, bgcolor=strongMoveCss, border_color=strongMoveBorderCss)
+
+displayZoneList(array<Zone> zoneList, color zoneCss, color zoneBorderCss, color strongMoveCss, color strongMoveBorderCss, color zoneTouchedCss) =>
+    if barstate.islast and showZonesInput
+        if zoneList.size() > 0
+            for i = 0 to zoneList.size() - 1
+                displayZone(zoneList.get(i), zoneCss, zoneBorderCss, strongMoveCss, strongMoveBorderCss, zoneTouchedCss)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Main Logic
+////////////////////////////////////////////////////////////////////////////////
+
+sZone = identifySupplyZone()
+dZone = identifyDemandZone()
+
+if not na(sZone)
+    supplyZoneCreated    := true
+    supplyZoneCreatedTop := sZone.top
+    supplyZoneCreatedBtm := sZone.btm
+
+if not na(dZone)
+    demandZoneCreated    := true
+    demandZoneCreatedTop := dZone.top
+    demandZoneCreatedBtm := dZone.btm
+
+updateZoneStatus(supplyZones, true)
+updateZoneStatus(demandZones, false)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Plotting
+////////////////////////////////////////////////////////////////////////////////
+
+for bx in box.all
+    bx.delete()
+
+for l in line.all
+    l.delete()
+
+displayZoneList(supplyZones, supplyZoneColorInput, supplyZoneBorderColorInput, supplyStrongMoveColorInput, supplyStrongMoveBorderColorInput, zoneTouchedColorInput)
+displayZoneList(demandZones, demandZoneColorInput, demandZoneBorderColorInput, demandStrongMoveColorInput, demandStrongMoveBorderColorInput, zoneTouchedColorInput)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Alerts
+////////////////////////////////////////////////////////////////////////////////
+
+plot(supplyZoneCreatedTop, title='Supply Zone Created Top',    display=display.none)
+plot(supplyZoneCreatedBtm, title='Supply Zone Created Bottom', display=display.none)
+plot(demandZoneCreatedTop, title='Demand Zone Created Top',    display=display.none)
+plot(demandZoneCreatedBtm, title='Demand Zone Created Bottom', display=display.none)
+
+alertcondition(supplyZoneCreated, title='Supply Zone Created', message='Supply Zone Created, Top: {{plot("Supply Zone Created Top")}}, Bottom: {{plot("Supply Zone Created Bottom")}}')
+alertcondition(demandZoneCreated, title='Demand Zone Created', message='Demand Zone Created, Top: {{plot("Demand Zone Created Top")}}, Bottom: {{plot("Demand Zone Created Bottom")}}')
+
+supplyZoneCreated    := false
+supplyZoneCreatedTop := na
+supplyZoneCreatedBtm := na
+demandZoneCreated    := false
+demandZoneCreatedTop := na
+demandZoneCreatedBtm := na
