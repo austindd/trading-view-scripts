@@ -85,6 +85,7 @@ type FVGZone
     int   barsToInvert    // tfBarsAlive snapshot at inversion (TF candles from FVG → IFVG)
     float invertedHigh    // chart-TF high on the inversion bar (na while not inverted)
     float invertedLow     // chart-TF low on the inversion bar (na while not inverted)
+    int   lastExtTfAge    // TF candles since creation/last merge (0 = this candle, 1 = prev)
 
 type POI
     line  poiLine
@@ -295,6 +296,7 @@ processNewCandle(bool newCandle, float tH, float tL, float tC,
                 z = zones.get(i)
                 if not z.isMitigated
                     z.tfBarsAlive := z.tfBarsAlive + 1
+                    z.lastExtTfAge := z.lastExtTfAge + 1
 
         array.unshift(hH, tH)
         array.unshift(hL, tL)
@@ -318,24 +320,50 @@ processNewCandle(bool newCandle, float tH, float tL, float tC,
             if (h0L - h2H) > thr
                 zTop = h0L
                 zBot = h2H
-                initCol = showZones ? bullCol : color.new(chart.bg_color, 100)
-                b = box.new(h1B, zTop, bar_index + 3, zBot,
-                  border_color = na, bgcolor = initCol)
-                zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, 1, false, false, na, na, na, na))
-                if zones.size() > maxZ
-                    oldest = zones.shift()
-                    oldest.boxId.delete()
+                bool merged = false
+                if zones.size() > 0
+                    for i = zones.size() - 1 to 0
+                        z = zones.get(i)
+                        if not z.isMitigated and not z.isInverted and z.direction == 1 and z.lastExtTfAge == 1
+                            z.top := math.max(z.top, zTop)
+                            z.bottom := math.min(z.bottom, zBot)
+                            z.boxId.set_top(z.top)
+                            z.boxId.set_bottom(z.bottom)
+                            z.lastExtTfAge := 0
+                            merged := true
+                            break
+                if not merged
+                    initCol = showZones ? bullCol : color.new(chart.bg_color, 100)
+                    b = box.new(h1B, zTop, bar_index + 3, zBot,
+                      border_color = na, bgcolor = initCol)
+                    zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, 1, false, false, na, na, na, na, 0))
+                    if zones.size() > maxZ
+                        oldest = zones.shift()
+                        oldest.boxId.delete()
 
             if (h2L - h0H) > thr
                 zTop = h2L
                 zBot = h0H
-                initCol = showZones ? bearCol : color.new(chart.bg_color, 100)
-                b = box.new(h1B, zTop, bar_index + 3, zBot,
-                  border_color = na, bgcolor = initCol)
-                zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, -1, false, false, na, na, na, na))
-                if zones.size() > maxZ
-                    oldest = zones.shift()
-                    oldest.boxId.delete()
+                bool merged = false
+                if zones.size() > 0
+                    for i = zones.size() - 1 to 0
+                        z = zones.get(i)
+                        if not z.isMitigated and not z.isInverted and z.direction == -1 and z.lastExtTfAge == 1
+                            z.top := math.max(z.top, zTop)
+                            z.bottom := math.min(z.bottom, zBot)
+                            z.boxId.set_top(z.top)
+                            z.boxId.set_bottom(z.bottom)
+                            z.lastExtTfAge := 0
+                            merged := true
+                            break
+                if not merged
+                    initCol = showZones ? bearCol : color.new(chart.bg_color, 100)
+                    b = box.new(h1B, zTop, bar_index + 3, zBot,
+                      border_color = na, bgcolor = initCol)
+                    zones.push(FVGZone.new(b, zTop, zBot, bar_index, 0, -1, false, false, na, na, na, na, 0))
+                    if zones.size() > maxZ
+                        oldest = zones.shift()
+                        oldest.boxId.delete()
 
 processNewCandle(htf1New, htf1H, htf1L, htf1C, htf1HHigh, htf1HLow, htf1HClose, htf1HBar, htf1Zones, htfFvgMinPerc, maxHtfFvgZones, htfBullCol, htfBearCol, showHtfFvgs)
 processNewCandle(htf2New, htf2H, htf2L, htf2C, htf2HHigh, htf2HLow, htf2HClose, htf2HBar, htf2Zones, htfFvgMinPerc, maxHtfFvgZones, htfBullCol, htfBearCol, showHtfFvgs)
