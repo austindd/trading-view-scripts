@@ -1,0 +1,950 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Market Structure Mapper V9 [SB]", "MSM V9 [SB]", overlay=true, max_lines_count=250, max_labels_count=250, max_boxes_count=500)
+
+// Single-timeframe market structure mapper, derived from MSM V8.
+// Changes vs V8: only one (configurable) structure timeframe, no debug output,
+// no price-scale side labels, and a configurable cap on how many extended
+// lines are shown per side of price (separately for unbroken and swept levels).
+
+// Ensure sufficient historical buffer for lookback functions
+max_bars_back(high, 5000)
+max_bars_back(low, 5000)
+max_bars_back(open, 5000)
+max_bars_back(close, 5000)
+max_bars_back(time, 5000)
+
+// ============================================================================
+// STRUCTURE SETTINGS
+// ============================================================================
+structureTimeframe = input.timeframe("", "Structure Timeframe", tooltip="Timeframe used for structure detection. 'Chart' uses the chart's own timeframe.", group="Structure")
+showStructureLines = input.bool(true, "Show Structure Lines (Peaks/Valleys)", group="Structure")
+showBosLabels = input.bool(true, "Show BOS / CHOCH Labels", group="Structure")
+
+highColor = input.color(color.new(color.red, 0), "High Color", group="Structure")
+lowColor = input.color(color.new(color.green, 0), "Low Color", group="Structure")
+bosColor = input.color(color.new(color.black, 0), "BOS Color", group="Structure")
+
+// ============================================================================
+// EXTENDED LINE SETTINGS
+// ============================================================================
+// A level's line keeps extending to the right until the level is broken. These
+// settings cap how many of those extended lines stay visible, counted from the
+// current price outwards, separately above/below price and per level type.
+maxUnbrokenLinesPerSide = input.int(1, "Unbroken Lines Per Side", minval=0, maxval=15, tooltip="How many unbroken (never-swept) levels stay drawn on each side of price. 0 hides them all.", group="Extended Lines")
+maxSweptLinesPerSide = input.int(1, "Swept Lines Per Side", minval=0, maxval=15, tooltip="How many swept levels stay drawn on each side of price. 0 hides them all.", group="Extended Lines")
+
+// ============================================================================
+// ZONE SETTINGS
+// ============================================================================
+showZones = input.bool(true, "Show Zones", group="Zones")
+zonesUseFullSwings = input.bool(false, "Zones: Use Full Swings", tooltip="On: the zone spans the whole swing. Off: walk back from the swing extreme through same-direction candles.", group="Zones")
+showBrokenZones = input.bool(false, "Show Broken Zones", group="Zones")
+extendBrokenZones = input.bool(false, "Extend Broken Zones to Current Bar", group="Zones")
+maxZonesPerSide = input.int(20, "Max Zones Per Side", minval=1, maxval=250, group="Zones")
+zoneBreakOnWick = input.bool(false, "Break Zones on Wick (not just close)", group="Zones")
+zoneBreakOnFirstTouch = input.bool(false, "Break Zones on First Touch", group="Zones")
+zoneBreakOnTouchAfterCreation = input.bool(false, "Break Zones on Touch After Creation", group="Zones")
+
+demandZoneColor = input.color(color.new(color.green, 85), "Demand Zone Color", group="Zones")
+demandZoneBorderColor = input.color(color.new(color.green, 50), "Demand Zone Border", group="Zones")
+supplyZoneColor = input.color(color.new(color.red, 85), "Supply Zone Color", group="Zones")
+supplyZoneBorderColor = input.color(color.new(color.red, 50), "Supply Zone Border", group="Zones")
+
+// CHOCH (Change of Character) — a BOS in the direction opposite the previous
+// directional event, with no intermediate structure point formed between them.
+detectChoch = input.bool(true, "Detect CHOCH (Change of Character)", group="CHOCH")
+chochZonesOnly = input.bool(false, "Only Draw Zones for CHOCHs", group="CHOCH")
+chochLabelColor = input.color(color.new(color.purple, 0), "CHOCH Label Color", group="CHOCH")
+
+// ============================================================================
+// DISPLAY SETTINGS
+// ============================================================================
+lineWidth = input.int(2, "Line Width", minval=1, maxval=5, group="Display")
+
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
+
+// Type for tracking high levels
+type HighLevel
+    float price
+    int barIndex
+    line levelLine
+    string levelType  // "strong", "weak", "broken", "swept"
+
+// Type for tracking low levels
+type LowLevel
+    float price
+    int barIndex
+    line levelLine
+    string levelType  // "strong", "weak", "broken", "swept"
+
+// Type for tracking supply/demand zones
+type Zone
+    float top
+    float bottom
+    int leftTime
+    int rightTime
+    bool broken
+    bool touched        // Has the zone been touched since creation?
+    int creationBar     // Bar index when zone was created (for "after creation" logic)
+
+// ============================================================================
+// ARRAYS TO STORE LEVELS AND ZONES
+// ============================================================================
+
+var array<HighLevel> highs = array.new<HighLevel>()
+var array<LowLevel> lows = array.new<LowLevel>()
+
+var array<Zone> demandZones = array.new<Zone>()
+var array<Zone> supplyZones = array.new<Zone>()
+
+// ============================================================================
+// MARKET STRUCTURE STATE VARIABLES
+// ============================================================================
+
+var float currentValidHigh = na
+var float currentValidLow = na
+var int currentValidHighBar = na
+var int currentValidLowBar = na
+var bool initialized = false
+var bool lookingForLow = false
+var bool lookingForHigh = false
+var string lastBosDirection = "none"  // "bullish", "bearish", or "none"
+
+// CHOCH tracking — count intermediate (non-BOS) structure points added since the
+// last directional event. CHOCH = next BOS in the opposite direction with this counter at 0.
+var int structurePointsSinceBos = 0
+
+// Tracks the most recent directional event (BOS OR sweep on the most-recent level).
+// Sweeps count as valid "initial events" in a CHOCH sequence.
+// Kept separate from lastBosDirection because level classification
+// (getHigh/getLowLevelType) still keys off the BOS direction only.
+var string lastDirectionalEvent = "none"
+
+// Track indices of most recent high/low
+var int mostRecentHighIndex = -1
+var int mostRecentLowIndex = -1
+
+// ============================================================================
+// NOTIFICATION FLAGS (for alerts)
+// ============================================================================
+
+var bool bullishBosFlag = false
+var bool bearishBosFlag = false
+var bool bullishChochFlag = false
+var bool bearishChochFlag = false
+var bool sweptFlag = false
+var bool pullback50Flag = false
+var bool pullback25Flag = false
+
+var bool demandEntryFlag = false
+var bool supplyEntryFlag = false
+
+// State tracking for "BOS after entering zone" alerts
+var bool inDemandZone = false
+var bool inSupplyZone = false
+var int activeDemandZoneIdx = -1
+var int activeSupplyZoneIdx = -1
+var int bullishBosCountSinceDemand = 0
+var int bearishBosCountSinceSupply = 0
+
+var bool firstBullishBosAfterDemandFlag = false
+var bool secondBullishBosAfterDemandFlag = false
+var bool firstBearishBosAfterSupplyFlag = false
+var bool secondBearishBosAfterSupplyFlag = false
+
+// Retracement levels of the current structure leg
+var float pullback50Level = na
+var float pullback25Level = na
+
+// Track level state changes to detect when they become swept
+var string mostRecentHighPrevType = "strong"
+var string mostRecentLowPrevType = "strong"
+
+// ============================================================================
+// STRUCTURE TIMEFRAME DATA
+// ============================================================================
+
+[tfHigh, tfLow, tfOpen, tfClose] = request.security(syminfo.tickerid, structureTimeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
+tfTime = request.security(syminfo.tickerid, structureTimeframe, time, lookahead=barmerge.lookahead_off)
+bool tfNewCandle = ta.change(tfTime) != 0
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+// Check if current structure candle is bearish and closes below previous candle's low
+isBearishBreakdown() =>
+    tfClose < tfOpen and tfClose < tfLow[1]
+
+// Check if current structure candle is bullish and closes above previous candle's high
+isBullishBreakout() =>
+    tfClose > tfOpen and tfClose > tfHigh[1]
+
+// Find lowest low between two bar indices
+findLowestBetween(startBar, endBar) =>
+    float lowestPrice = na
+    int lowestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    // Pine Script supports up to 5000 bars of history
+    int maxLookback = 5000
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(low[i])
+                if na(lowestPrice) or low[i] < lowestPrice
+                    lowestPrice := low[i]
+                    lowestBarIndex := currentBar - i
+
+    [lowestPrice, lowestBarIndex]
+
+// Find highest high between two bar indices
+findHighestBetween(startBar, endBar) =>
+    float highestPrice = na
+    int highestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    // Pine Script supports up to 5000 bars of history
+    int maxLookback = 5000
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(high[i])
+                if na(highestPrice) or high[i] > highestPrice
+                    highestPrice := high[i]
+                    highestBarIndex := currentBar - i
+
+    [highestPrice, highestBarIndex]
+
+// ============================================================================
+// LEVEL MANAGEMENT FUNCTIONS
+// ============================================================================
+
+// Add a new high level. Lines of superseded levels are kept (not deleted) —
+// how many stay visible is decided later by updateExtendedLineVisibility().
+addHigh(float price, int barIdx, string levelType) =>
+    line newLine = na
+    if showStructureLines
+        newLine := line.new(barIdx, price, barIdx + 1, price,
+                           color=highColor,
+                           width=lineWidth,
+                           extend=extend.right,
+                           style=line.style_solid)
+
+    array.push(highs, HighLevel.new(price, barIdx, newLine, levelType))
+    true
+
+// Add a new low level
+addLow(float price, int barIdx, string levelType) =>
+    line newLine = na
+    if showStructureLines
+        newLine := line.new(barIdx, price, barIdx + 1, price,
+                           color=lowColor,
+                           width=lineWidth,
+                           extend=extend.right,
+                           style=line.style_solid)
+
+    array.push(lows, LowLevel.new(price, barIdx, newLine, levelType))
+    true
+
+// ============================================================================
+// ZONE MANAGEMENT FUNCTIONS
+// ============================================================================
+
+// Helper to check if a demand zone should be broken
+checkDemandZone(Zone zone) =>
+    if not zone.broken
+        bool isTouching = low <= zone.top and high >= zone.bottom
+        if isTouching and not zone.touched
+            zone.touched := true
+        bool shouldBreak = close < zone.bottom or (zoneBreakOnWick and low < zone.bottom) or ((zoneBreakOnFirstTouch or zoneBreakOnTouchAfterCreation) and isTouching and bar_index > zone.creationBar)
+        if shouldBreak
+            zone.broken := true
+            zone.rightTime := time
+    true
+
+// Helper to check if a supply zone should be broken
+checkSupplyZone(Zone zone) =>
+    if not zone.broken
+        bool isTouching = low <= zone.top and high >= zone.bottom
+        if isTouching and not zone.touched
+            zone.touched := true
+        bool shouldBreak = close > zone.top or (zoneBreakOnWick and high > zone.top) or ((zoneBreakOnFirstTouch or zoneBreakOnTouchAfterCreation) and isTouching and bar_index > zone.creationBar)
+        if shouldBreak
+            zone.broken := true
+            zone.rightTime := time
+    true
+
+// Check and update all broken zones
+checkAllBrokenZones() =>
+    for i = 0 to math.max(0, array.size(demandZones) - 1)
+        if i < array.size(demandZones)
+            checkDemandZone(array.get(demandZones, i))
+    for i = 0 to math.max(0, array.size(supplyZones) - 1)
+        if i < array.size(supplyZones)
+            checkSupplyZone(array.get(supplyZones, i))
+    true
+
+// ============================================================================
+// CHECK FOR BROKEN AND SWEPT LEVELS
+// ============================================================================
+
+// Returns [bullishBos, bearishBos, bullishChoch, bearishChoch]
+// CHOCH = this BOS is in the direction opposite the previous directional event AND no
+// intermediate structure point (non-BOS valid high/low) formed in between
+// (structurePointsSinceBos == 0). `lastDirectionalEvent` and `structurePointsSinceBos`
+// are read here BEFORE the main handler runs (this function executes first each
+// structure candle), so they still hold the pre-BOS values.
+checkBrokenLevels() =>
+    bool bullishBos = false
+    bool bearishBos = false
+    bool bullishChoch = false
+    bool bearishChoch = false
+
+    // Check highs for sweeps and breaks
+    if array.size(highs) > 0
+        // Iterate from most recent to oldest
+        for i = array.size(highs) - 1 to 0
+            highLevel = array.get(highs, i)
+
+            // Check for sweep (wick crosses but close doesn't)
+            if highLevel.levelType != "swept" and highLevel.levelType != "broken" and tfHigh > highLevel.price and tfClose <= highLevel.price
+                highLevel.levelType := "swept"
+                if not na(highLevel.levelLine)
+                    line.set_style(highLevel.levelLine, line.style_dashed)
+                array.set(highs, i, highLevel)
+
+            // Check for break (close crosses above)
+            else if highLevel.levelType != "broken" and tfClose > highLevel.price
+                highLevel.levelType := "broken"
+
+                // CHOCH = prior directional event (BOS or sweep) was bearish AND no
+                // intermediate structure since. Only meaningful when i == mostRecentHighIndex.
+                bool isChoch = lastDirectionalEvent == "bearish" and structurePointsSinceBos == 0
+
+                // Only the most recent high breaking constitutes a valid BOS.
+                // Other highs breaking are just old levels being cleared, not structure breaks.
+                if i == mostRecentHighIndex
+                    // Create demand zone for valid BOS (gated on CHOCH if chochZonesOnly)
+                    if showZones and (not chochZonesOnly or isChoch)
+                        int barsBack = bar_index - highLevel.barIndex
+                        if barsBack >= 0 and barsBack < 5000
+                            // Find the low between this high and current bar (zone bottom)
+                            float zoneBottom = low
+                            int zoneBottomIdx = 0
+                            for j = 0 to math.min(barsBack, 5000)
+                                if low[j] < zoneBottom
+                                    zoneBottom := low[j]
+                                    zoneBottomIdx := j
+
+                            float zoneTop = na
+                            int zoneLeftIdx = zoneBottomIdx
+
+                            if zonesUseFullSwings
+                                // Use full swing: zone top = the broken high's price
+                                zoneTop := highLevel.price
+                                zoneLeftIdx := barsBack
+                            else
+                                // Walk-back algorithm: find bearish candles before the low
+                                // Step 1: Walk back from low until we find at least one bearish candle
+                                // Step 2: Continue walking back through bearish candles until we hit a bullish one
+                                // Step 3: Zone top = highest high of those bearish candles
+                                bool foundBearish = false
+                                float highestBearishHigh = na
+                                int maxWalk = math.min(zoneBottomIdx + 50, 5000)
+
+                                for j = zoneBottomIdx to maxWalk
+                                    bool isBearish = close[j] < open[j]
+                                    bool isBullish = close[j] > open[j]
+
+                                    if not foundBearish
+                                        // Still looking for first bearish candle
+                                        if isBearish
+                                            foundBearish := true
+                                            highestBearishHigh := high[j]
+                                            zoneLeftIdx := j
+                                    else
+                                        // We've found bearish, keep going until bullish
+                                        if isBullish
+                                            break
+                                        else if isBearish
+                                            if high[j] > highestBearishHigh
+                                                highestBearishHigh := high[j]
+                                            zoneLeftIdx := j
+
+                                zoneTop := foundBearish ? highestBearishHigh : highLevel.price
+
+                            int zoneLeftTime = time[zoneLeftIdx]
+                            if not na(zoneTop) and zoneTop > zoneBottom
+                                array.push(demandZones, Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index))
+
+                // Update the object back in the array
+                array.set(highs, i, highLevel)
+
+                // Only keep line visible if this is most recent high (valid BOS)
+                if i == mostRecentHighIndex
+                    if not na(highLevel.levelLine)
+                        line.set_x2(highLevel.levelLine, bar_index)
+                        line.set_extend(highLevel.levelLine, extend.none)
+                        line.set_style(highLevel.levelLine, line.style_dotted)
+                        line.set_color(highLevel.levelLine, color.new(bosColor, 30))
+
+                    bullishBos := true
+                    bullishChoch := bullishChoch or (detectChoch and isChoch)
+
+                    if showBosLabels
+                        centerBar = math.round((highLevel.barIndex + bar_index) / 2)
+                        string labelText = (detectChoch and isChoch) ? "CHOCH↑" : "BOS↑"
+                        color labelTextColor = (detectChoch and isChoch) ? chochLabelColor : bosColor
+                        label.new(centerBar, highLevel.price, labelText,
+                                 style=label.style_label_center,
+                                 color=color.white,
+                                 textcolor=labelTextColor,
+                                 size=size.tiny)
+                else
+                    if not na(highLevel.levelLine)
+                        line.delete(highLevel.levelLine)
+
+    // Check lows for sweeps and breaks
+    if array.size(lows) > 0
+        // Iterate from most recent to oldest
+        for i = array.size(lows) - 1 to 0
+            lowLevel = array.get(lows, i)
+
+            // Check for sweep
+            if lowLevel.levelType != "swept" and lowLevel.levelType != "broken" and tfLow < lowLevel.price and tfClose >= lowLevel.price
+                lowLevel.levelType := "swept"
+                if not na(lowLevel.levelLine)
+                    line.set_style(lowLevel.levelLine, line.style_dashed)
+                array.set(lows, i, lowLevel)
+
+            // Check for break
+            else if lowLevel.levelType != "broken" and tfClose < lowLevel.price
+                lowLevel.levelType := "broken"
+
+                // CHOCH = prior directional event (BOS or sweep) was bullish AND no
+                // intermediate structure since.
+                bool isChoch = lastDirectionalEvent == "bullish" and structurePointsSinceBos == 0
+
+                // Only the most recent low breaking constitutes a valid BOS.
+                if i == mostRecentLowIndex
+                    // Create supply zone for valid BOS (gated on CHOCH if chochZonesOnly)
+                    if showZones and (not chochZonesOnly or isChoch)
+                        int barsBack = bar_index - lowLevel.barIndex
+                        if barsBack >= 0 and barsBack < 5000
+                            // Find the high between this low and current bar (zone top)
+                            float zoneTop = high
+                            int zoneTopIdx = 0
+                            for j = 0 to math.min(barsBack, 5000)
+                                if high[j] > zoneTop
+                                    zoneTop := high[j]
+                                    zoneTopIdx := j
+
+                            float zoneBottom = na
+                            int zoneLeftIdx = zoneTopIdx
+
+                            if zonesUseFullSwings
+                                // Use full swing: zone bottom = the broken low's price
+                                zoneBottom := lowLevel.price
+                                zoneLeftIdx := barsBack
+                            else
+                                // Walk-back algorithm: find bullish candles before the high
+                                // Step 1: Walk back from high until we find at least one bullish candle
+                                // Step 2: Continue walking back through bullish candles until we hit a bearish one
+                                // Step 3: Zone bottom = lowest low of those bullish candles
+                                bool foundBullish = false
+                                float lowestBullishLow = na
+                                int maxWalk = math.min(zoneTopIdx + 50, 5000)
+
+                                for j = zoneTopIdx to maxWalk
+                                    bool isBearish = close[j] < open[j]
+                                    bool isBullish = close[j] > open[j]
+
+                                    if not foundBullish
+                                        // Still looking for first bullish candle
+                                        if isBullish
+                                            foundBullish := true
+                                            lowestBullishLow := low[j]
+                                            zoneLeftIdx := j
+                                    else
+                                        // We've found bullish, keep going until bearish
+                                        if isBearish
+                                            break
+                                        else if isBullish
+                                            if low[j] < lowestBullishLow
+                                                lowestBullishLow := low[j]
+                                            zoneLeftIdx := j
+
+                                zoneBottom := foundBullish ? lowestBullishLow : lowLevel.price
+
+                            int zoneLeftTime = time[zoneLeftIdx]
+                            if not na(zoneBottom) and zoneTop > zoneBottom
+                                array.push(supplyZones, Zone.new(zoneTop, zoneBottom, zoneLeftTime, time, false, false, bar_index))
+
+                // Update the object back in the array
+                array.set(lows, i, lowLevel)
+
+                if i == mostRecentLowIndex
+                    if not na(lowLevel.levelLine)
+                        line.set_x2(lowLevel.levelLine, bar_index)
+                        line.set_extend(lowLevel.levelLine, extend.none)
+                        line.set_style(lowLevel.levelLine, line.style_dotted)
+                        line.set_color(lowLevel.levelLine, color.new(bosColor, 30))
+
+                    bearishBos := true
+                    bearishChoch := bearishChoch or (detectChoch and isChoch)
+
+                    if showBosLabels
+                        centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
+                        string labelText = (detectChoch and isChoch) ? "CHOCH↓" : "BOS↓"
+                        color labelTextColor = (detectChoch and isChoch) ? chochLabelColor : bosColor
+                        label.new(centerBar, lowLevel.price, labelText,
+                                 style=label.style_label_center,
+                                 color=color.white,
+                                 textcolor=labelTextColor,
+                                 size=size.tiny)
+                else
+                    if not na(lowLevel.levelLine)
+                        line.delete(lowLevel.levelLine)
+
+    [bullishBos, bearishBos, bullishChoch, bearishChoch]
+
+// Determine level type based on BOS direction
+getHighLevelType(string bosDirection) =>
+    bosDirection == "bullish" ? "weak" : "strong"
+
+getLowLevelType(string bosDirection) =>
+    bosDirection == "bearish" ? "weak" : "strong"
+
+// ============================================================================
+// EXTENDED LINE VISIBILITY
+// ============================================================================
+
+// Levels that are neither broken nor cleared keep extending to the right. Show
+// only the N nearest of them on each side of the current price, counted
+// separately for unbroken and swept levels. Anything past the cap is made fully
+// transparent (kept, not deleted, so it can reappear as price moves).
+//
+// Ranking is by absolute distance from the current close; ties break toward the
+// more recent level.
+updateExtendedLineVisibility() =>
+    int nHighs = array.size(highs)
+    if nHighs > 0
+        for i = 0 to nHighs - 1
+            HighLevel lv = array.get(highs, i)
+            if lv.levelType != "broken" and not na(lv.levelLine)
+                bool isSwept = lv.levelType == "swept"
+                bool isAbove = lv.price >= close
+                float dist = math.abs(lv.price - close)
+                int closerCount = 0
+                for j = 0 to nHighs - 1
+                    if j != i
+                        HighLevel other = array.get(highs, j)
+                        if other.levelType != "broken" and not na(other.levelLine)
+                            if (other.levelType == "swept") == isSwept and (other.price >= close) == isAbove
+                                float otherDist = math.abs(other.price - close)
+                                if otherDist < dist or (otherDist == dist and j > i)
+                                    closerCount += 1
+                bool visible = closerCount < (isSwept ? maxSweptLinesPerSide : maxUnbrokenLinesPerSide)
+                line.set_color(lv.levelLine, visible ? highColor : color.new(highColor, 100))
+
+    int nLows = array.size(lows)
+    if nLows > 0
+        for i = 0 to nLows - 1
+            LowLevel lv = array.get(lows, i)
+            if lv.levelType != "broken" and not na(lv.levelLine)
+                bool isSwept = lv.levelType == "swept"
+                bool isAbove = lv.price >= close
+                float dist = math.abs(lv.price - close)
+                int closerCount = 0
+                for j = 0 to nLows - 1
+                    if j != i
+                        LowLevel other = array.get(lows, j)
+                        if other.levelType != "broken" and not na(other.levelLine)
+                            if (other.levelType == "swept") == isSwept and (other.price >= close) == isAbove
+                                float otherDist = math.abs(other.price - close)
+                                if otherDist < dist or (otherDist == dist and j > i)
+                                    closerCount += 1
+                bool visible = closerCount < (isSwept ? maxSweptLinesPerSide : maxUnbrokenLinesPerSide)
+                line.set_color(lv.levelLine, visible ? lowColor : color.new(lowColor, 100))
+    true
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+if not initialized and bar_index > 0 and tfNewCandle
+    if isBearishBreakdown()
+        float localHigh = high
+        int localHighBar = bar_index
+
+        for i = 1 to math.min(bar_index, 5000)
+            if high[i] > localHigh
+                localHigh := high[i]
+                localHighBar := bar_index - i
+
+        currentValidHigh := localHigh
+        currentValidHighBar := localHighBar
+        initialized := true
+        lookingForLow := true
+
+        addHigh(localHigh, localHighBar, "strong")
+        mostRecentHighIndex := array.size(highs) - 1
+
+// ============================================================================
+// MAIN LOGIC
+// ============================================================================
+
+// Structure detection (gated on a new structure-timeframe candle)
+if initialized and tfNewCandle
+    // PRE-PASS: detect same-candle sweeps on the most recent high/low so the CHOCH check
+    // inside checkBrokenLevels sees the sweep as an "initial event". checkBrokenLevels
+    // will re-detect and mark these sweeps (no harm — same conditions, idempotent).
+    if mostRecentHighIndex >= 0 and mostRecentHighIndex < array.size(highs)
+        recentHigh = array.get(highs, mostRecentHighIndex)
+        if recentHigh.levelType != "swept" and recentHigh.levelType != "broken" and tfHigh > recentHigh.price and tfClose <= recentHigh.price
+            lastDirectionalEvent := "bullish"
+            structurePointsSinceBos := 0
+    if mostRecentLowIndex >= 0 and mostRecentLowIndex < array.size(lows)
+        recentLow = array.get(lows, mostRecentLowIndex)
+        if recentLow.levelType != "swept" and recentLow.levelType != "broken" and tfLow < recentLow.price and tfClose >= recentLow.price
+            lastDirectionalEvent := "bearish"
+            structurePointsSinceBos := 0
+
+    // Check broken/swept levels and create zones
+    [bullBos, bearBos, bullChoch, bearChoch] = checkBrokenLevels()
+    bullishBosFlag := bullishBosFlag or bullBos
+    bearishBosFlag := bearishBosFlag or bearBos
+    bullishChochFlag := bullishChochFlag or bullChoch
+    bearishChochFlag := bearishChochFlag or bearChoch
+
+    bool bosBullish = false
+    bool bosBearish = false
+
+    // Check for Break of Structure
+    if not na(currentValidHigh) and not na(currentValidLow) and tfClose > currentValidHigh and lookingForLow
+        bosBullish := true
+        lastBosDirection := "bullish"
+        lastDirectionalEvent := "bullish"
+        structurePointsSinceBos := 0
+
+        // Find the new low that led to this BOS
+        [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
+
+        if not na(newLow) and not na(newLowBar)
+            // NOTE: zone creation is handled in checkBrokenLevels() so zones are
+            // created for ALL broken levels, not just the state machine's current level
+            currentValidLow := newLow
+            currentValidLowBar := newLowBar
+            lookingForHigh := true
+            lookingForLow := false
+
+            addLow(newLow, newLowBar, "strong")
+            mostRecentLowIndex := array.size(lows) - 1
+
+    if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and tfClose < currentValidLow and lookingForHigh
+        bosBearish := true
+        lastBosDirection := "bearish"
+        lastDirectionalEvent := "bearish"
+        structurePointsSinceBos := 0
+
+        // Find the new high that led to this BOS
+        [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
+
+        if not na(newHigh) and not na(newHighBar)
+            currentValidHigh := newHigh
+            currentValidHighBar := newHighBar
+            lookingForLow := true
+            lookingForHigh := false
+
+            addHigh(newHigh, newHighBar, "strong")
+            mostRecentHighIndex := array.size(highs) - 1
+
+    // Look for new valid low via breakout
+    if not bosBullish and not bosBearish and lookingForLow
+        if isBullishBreakout()
+            [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
+
+            if not na(newLow) and not na(newLowBar)
+                currentValidLow := newLow
+                currentValidLowBar := newLowBar
+                lookingForHigh := true
+                lookingForLow := false
+
+                addLow(newLow, newLowBar, getLowLevelType(lastBosDirection))
+                mostRecentLowIndex := array.size(lows) - 1
+                structurePointsSinceBos += 1
+
+    // Look for new valid high via breakdown
+    if not bosBullish and not bosBearish and lookingForHigh
+        if isBearishBreakdown()
+            [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
+
+            if not na(newHigh) and not na(newHighBar)
+                currentValidHigh := newHigh
+                currentValidHighBar := newHighBar
+                lookingForLow := true
+                lookingForHigh := false
+
+                addHigh(newHigh, newHighBar, getHighLevelType(lastBosDirection))
+                mostRecentHighIndex := array.size(highs) - 1
+                structurePointsSinceBos += 1
+
+// Ungated logic (runs every bar)
+if initialized
+    checkAllBrokenZones()
+
+    // Detect level sweeps for alerts
+    if mostRecentHighIndex >= 0
+        highLevel = array.get(highs, mostRecentHighIndex)
+        if highLevel.levelType == "swept" and mostRecentHighPrevType != "swept"
+            sweptFlag := true
+        mostRecentHighPrevType := highLevel.levelType
+
+    if mostRecentLowIndex >= 0
+        lowLevel = array.get(lows, mostRecentLowIndex)
+        if lowLevel.levelType == "swept" and mostRecentLowPrevType != "swept"
+            sweptFlag := true
+        mostRecentLowPrevType := lowLevel.levelType
+
+    // Retracement levels of the current structure leg
+    if not na(currentValidHigh) and not na(currentValidLow)
+        pullback50Level := (currentValidHigh + currentValidLow) / 2
+        pullback25Level := currentValidLow + (currentValidHigh - currentValidLow) * 0.25
+
+// Check for 50% pullback
+if not na(pullback50Level)
+    float tolerance = pullback50Level * 0.001
+    if (high >= pullback50Level and low <= pullback50Level) or
+       (close >= pullback50Level - tolerance and close <= pullback50Level + tolerance)
+        pullback50Flag := true
+
+// Check for 25% pullback
+if not na(pullback25Level)
+    float tolerance = pullback25Level * 0.001
+    if (high >= pullback25Level and low <= pullback25Level) or
+       (close >= pullback25Level - tolerance and close <= pullback25Level + tolerance)
+        pullback25Flag := true
+
+// ============================================================================
+// UPDATE LEVEL STATES (Ensure consistency on every bar)
+// ============================================================================
+
+if initialized
+    // Find most recent BOS in highs array
+    int brokenHighIdx = -1
+    if array.size(highs) > 0
+        for i = array.size(highs) - 1 to 0
+            highLevel = array.get(highs, i)
+            if highLevel.levelType == "broken"
+                brokenHighIdx := i
+                break
+
+    // Find most recent BOS in lows array
+    int brokenLowIdx = -1
+    if array.size(lows) > 0
+        for i = array.size(lows) - 1 to 0
+            lowLevel = array.get(lows, i)
+            if lowLevel.levelType == "broken"
+                brokenLowIdx := i
+                break
+
+    // Determine which BOS is most recent and update states accordingly
+    if brokenHighIdx >= 0 or brokenLowIdx >= 0
+        if brokenHighIdx >= 0 and (brokenLowIdx < 0 or brokenHighIdx > brokenLowIdx)
+            lastBosDirection := "bullish"
+
+            if mostRecentHighIndex >= 0
+                currentHigh = array.get(highs, mostRecentHighIndex)
+                if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
+                    currentHigh.levelType := "weak"
+
+            if mostRecentLowIndex >= 0
+                currentLow = array.get(lows, mostRecentLowIndex)
+                if currentLow.levelType != "broken" and currentLow.levelType != "swept"
+                    currentLow.levelType := "strong"
+
+        else if brokenLowIdx >= 0
+            lastBosDirection := "bearish"
+
+            if mostRecentLowIndex >= 0
+                currentLow = array.get(lows, mostRecentLowIndex)
+                if currentLow.levelType != "broken" and currentLow.levelType != "swept"
+                    currentLow.levelType := "weak"
+
+            if mostRecentHighIndex >= 0
+                currentHigh = array.get(highs, mostRecentHighIndex)
+                if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
+                    currentHigh.levelType := "strong"
+
+// ============================================================================
+// ARRAY TRUNCATION (Performance)
+// ============================================================================
+
+if array.size(highs) > 30
+    oldHigh = array.get(highs, 0)
+    if not na(oldHigh.levelLine)
+        line.delete(oldHigh.levelLine)
+    array.shift(highs)
+    mostRecentHighIndex := math.max(-1, mostRecentHighIndex - 1)
+
+if array.size(lows) > 30
+    oldLow = array.get(lows, 0)
+    if not na(oldLow.levelLine)
+        line.delete(oldLow.levelLine)
+    array.shift(lows)
+    mostRecentLowIndex := math.max(-1, mostRecentLowIndex - 1)
+
+// ============================================================================
+// ZONE ENTRY DETECTION AND BOS COUNTING FOR ALERTS
+// ============================================================================
+
+// Helper: find index of unbroken zone containing price, or -1 if none
+findZoneContainingPrice(array<Zone> zones) =>
+    int result = -1
+    if array.size(zones) > 0
+        for i = array.size(zones) - 1 to 0
+            zone = array.get(zones, i)
+            if not zone.broken and close >= zone.bottom and close <= zone.top
+                result := i
+                break
+    result
+
+int demandIdx = findZoneContainingPrice(demandZones)
+int supplyIdx = findZoneContainingPrice(supplyZones)
+
+if demandIdx >= 0 and not inDemandZone
+    inDemandZone := true
+    activeDemandZoneIdx := demandIdx
+    bullishBosCountSinceDemand := 0
+    demandEntryFlag := true
+
+if supplyIdx >= 0 and not inSupplyZone
+    inSupplyZone := true
+    activeSupplyZoneIdx := supplyIdx
+    bearishBosCountSinceSupply := 0
+    supplyEntryFlag := true
+
+// Check if active zones got broken - reset tracking
+if inDemandZone and activeDemandZoneIdx >= 0 and activeDemandZoneIdx < array.size(demandZones)
+    if array.get(demandZones, activeDemandZoneIdx).broken
+        inDemandZone := false
+        activeDemandZoneIdx := -1
+        bullishBosCountSinceDemand := 0
+if inSupplyZone and activeSupplyZoneIdx >= 0 and activeSupplyZoneIdx < array.size(supplyZones)
+    if array.get(supplyZones, activeSupplyZoneIdx).broken
+        inSupplyZone := false
+        activeSupplyZoneIdx := -1
+        bearishBosCountSinceSupply := 0
+
+// Count BOS events after zone entry
+if inDemandZone and bullishBosFlag
+    bullishBosCountSinceDemand += 1
+    firstBullishBosAfterDemandFlag := bullishBosCountSinceDemand == 1
+    secondBullishBosAfterDemandFlag := bullishBosCountSinceDemand == 2
+if inSupplyZone and bearishBosFlag
+    bearishBosCountSinceSupply += 1
+    firstBearishBosAfterSupplyFlag := bearishBosCountSinceSupply == 1
+    secondBearishBosAfterSupplyFlag := bearishBosCountSinceSupply == 2
+
+// ============================================================================
+// ALERT CONDITIONS
+// ============================================================================
+
+alertcondition(bullishBosFlag, title="Bullish BOS", message="Bullish Break of Structure occurred on {{ticker}}")
+alertcondition(bearishBosFlag, title="Bearish BOS", message="Bearish Break of Structure occurred on {{ticker}}")
+alertcondition(bullishChochFlag, title="Bullish CHOCH", message="Bullish Change of Character occurred on {{ticker}}")
+alertcondition(bearishChochFlag, title="Bearish CHOCH", message="Bearish Change of Character occurred on {{ticker}}")
+alertcondition(sweptFlag, title="Level Swept", message="Structure level swept on {{ticker}}")
+
+alertcondition(pullback50Flag, title="50% Pullback", message="Price touched the 50% level of the current structure leg on {{ticker}}")
+alertcondition(pullback25Flag, title="25% Pullback", message="Price touched the 25% level of the current structure leg on {{ticker}}")
+
+alertcondition(demandEntryFlag, title="Demand Zone Entry", message="Price entered a Demand Zone on {{ticker}}")
+alertcondition(supplyEntryFlag, title="Supply Zone Entry", message="Price entered a Supply Zone on {{ticker}}")
+
+alertcondition(firstBullishBosAfterDemandFlag, title="1st Bull BOS in Demand", message="First Bullish BOS after entering a Demand Zone on {{ticker}}")
+alertcondition(secondBullishBosAfterDemandFlag, title="2nd Bull BOS in Demand", message="Second Bullish BOS after entering a Demand Zone on {{ticker}}")
+alertcondition(firstBearishBosAfterSupplyFlag, title="1st Bear BOS in Supply", message="First Bearish BOS after entering a Supply Zone on {{ticker}}")
+alertcondition(secondBearishBosAfterSupplyFlag, title="2nd Bear BOS in Supply", message="Second Bearish BOS after entering a Supply Zone on {{ticker}}")
+
+// Reset all alert flags at end of bar
+bullishBosFlag := false
+bearishBosFlag := false
+bullishChochFlag := false
+bearishChochFlag := false
+sweptFlag := false
+pullback50Flag := false
+pullback25Flag := false
+demandEntryFlag := false
+supplyEntryFlag := false
+firstBullishBosAfterDemandFlag := false
+secondBullishBosAfterDemandFlag := false
+firstBearishBosAfterSupplyFlag := false
+secondBearishBosAfterSupplyFlag := false
+
+// ============================================================================
+// ZONE RENDERING - Only on last bar for performance
+// ============================================================================
+
+// Helper function to render zones from an array
+renderZones(array<Zone> zones, color bgColor, color borderColor, int borderWidth, int maxZones, bool showBroken) =>
+    int rendered = 0
+    if array.size(zones) > 0
+        for i = array.size(zones) - 1 to 0
+            if rendered >= maxZones
+                break
+            zone = array.get(zones, i)
+            if zone.broken and not showBroken
+                continue
+            if not na(zone.leftTime) and not na(zone.top) and not na(zone.bottom)
+                // If extendBrokenZones is true, always extend to current time
+                // Otherwise, broken zones stop at their rightTime
+                zoneEndTime = (zone.broken and not extendBrokenZones) ? zone.rightTime : time
+                box.new(zone.leftTime, zone.top, zoneEndTime, zone.bottom, bgcolor=bgColor, border_color=borderColor, border_width=borderWidth, xloc=xloc.bar_time)
+                rendered += 1
+    true
+
+if barstate.islast
+    // Delete all existing boxes
+    for bx in box.all
+        bx.delete()
+
+    if showZones
+        renderZones(demandZones, demandZoneColor, demandZoneBorderColor, 1, maxZonesPerSide, showBrokenZones)
+        renderZones(supplyZones, supplyZoneColor, supplyZoneBorderColor, 1, maxZonesPerSide, showBrokenZones)
+
+    // Line objects render in their final state, so capping visibility once on the
+    // last bar is enough (and keeps the per-bar cost at zero).
+    updateExtendedLineVisibility()

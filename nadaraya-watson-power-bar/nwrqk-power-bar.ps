@@ -1,0 +1,719 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("NWRQK Power Bar [SB]", "NWRQK PB [SB]", overlay=true, max_lines_count=500, max_labels_count=500)
+
+max_bars_back(high, 5000)
+max_bars_back(low, 5000)
+max_bars_back(open, 5000)
+max_bars_back(close, 5000)
+max_bars_back(time, 5000)
+
+// ============================================================================
+// NWRQK SETTINGS
+// ============================================================================
+htfTimeframe = input.timeframe("", "Timeframe", group="NWRQK", tooltip="Timeframe for the kernel regression. Leave blank for current chart timeframe.")
+srcA = input.source(open, 'Source A', group="NWRQK")
+srcB = input.source(close, 'Source B', group="NWRQK")
+h = input.float(8., 'Lookback Window', minval=3., group="NWRQK", tooltip='The number of bars used for the estimation. Recommended range: 3-50')
+r = input.float(8., 'Relative Weighting', step=0.25, group="NWRQK", tooltip='Relative weighting of time frames. As this value approaches zero, longer time frames exert more influence. Recommended range: 0.25-25')
+x_0 = input.int(25, "Start Regression at Bar", group="NWRQK", tooltip='Bar index on which to start regression. Recommended range: 5-25')
+smoothColors = input.bool(false, "Smooth Colors", group="NWRQK Colors", tooltip="Uses a crossover based mechanism to determine colors.", inline='1')
+lag = input.int(2, "Lag", group="NWRQK Colors", tooltip="Lag for crossover detection. Recommended range: 1-2", inline='1')
+useEmaSmoothing = input.bool(true, "Use EMA Smoothing", group="NWRQK")
+smoothingFactor = input.int(4, "EMA Smoothing Factor", group="NWRQK")
+c_bullishNW = input.color(#1759ff, 'Bullish Color', group='NWRQK Colors')
+c_bearishNW = input.color(#fd6e07, 'Bearish Color', group='NWRQK Colors')
+
+// ============================================================================
+// ENVELOPE SETTINGS
+// ============================================================================
+atrEnvelopeLength = input.int(100, "ATR Length (Envelope)", minval=1, group="Envelope")
+atrEnvelopeMultiplier = input.float(1.0, "ATR Multiplier (Envelope)", minval=0.1, step=0.1, group="Envelope")
+showEnvelope = input.bool(false, "Show Envelope", group="Envelope")
+envelopeColor = input.color(color.new(color.blue, 85), "Envelope Fill Color", group="Envelope")
+
+// ============================================================================
+// POWER BAR SETTINGS
+// ============================================================================
+pbAtrLength = input.int(14, "Length (Candle Size)", minval=1, group="Power Bar")
+pbSizeMethod = input.string("ATR", "Candle Size Method", options=["ATR", "Average Body Size"], group="Power Bar", tooltip="ATR = RMA of true range; compared against the candle's full high-low range. Average Body Size = RMA of |close-open|; compared against the candle's body.")
+pbMinAtrMultiple = input.float(1.0, "Min Candle Size Multiple", minval=0.1, step=0.1, group="Power Bar")
+pbMinBodyRatio = input.float(0.75, "Min Body Ratio (Body/Range)", minval=0.1, maxval=1.0, step=0.05, group="Power Bar")
+pbBreakoutLookback = input.int(5, "Breakout Lookback (bars)", minval=1, group="Power Bar", tooltip="Bullish PB must close above the highest high of the last N bars; bearish must close below the lowest low. Ignored when 'Require Formal BOS' is on.")
+pbRequireBos = input.bool(false, "Require Formal BOS (stricter)", group="Power Bar", tooltip="When enabled, only bars that trigger a Break of Structure qualify. Much stricter — filters out continuation power bars in a trend.")
+pbBullishColor = input.color(color.new(color.green, 0), "Bullish Power Bar Color", group="Power Bar")
+pbBearishColor = input.color(color.new(color.red, 0), "Bearish Power Bar Color", group="Power Bar")
+pbColorBars = input.bool(true, "Color Power Bar Candles", group="Power Bar")
+
+// ============================================================================
+// POWER BAR COMBINING SETTINGS
+// ============================================================================
+pbCombineEnabled = input.bool(false, "Allow Combining Consecutive Bars", group="Power Bar Combining", tooltip="When enabled, N consecutive same-direction bars that each meet the relaxed combined thresholds can form a single 'combined' power bar.")
+pbMaxCombined = input.int(2, "Max Bars to Combine", minval=2, maxval=10, group="Power Bar Combining")
+pbCombinedMinSize = input.float(0.6, "Min Size Multiple (Per Bar, Combined)", minval=0.1, step=0.1, group="Power Bar Combining")
+pbCombinedMinBodyRatio = input.float(0.8, "Min Body Ratio (Per Bar, Combined)", minval=0.1, maxval=1.0, step=0.05, group="Power Bar Combining")
+pbExcludeStandaloneFromCombined = input.bool(false, "Exclude Standalone Bars from Combined Sequences", group="Power Bar Combining")
+
+// ============================================================================
+// MA SLOPE FILTER SETTINGS
+// ============================================================================
+pbRequireMaSlope = input.bool(false, "Require NWRQK Slope Alignment", group="NWRQK Slope Filter", tooltip="When enabled, bullish PBs only qualify if the NWRQK average is rising and bearish PBs only if falling.")
+pbMaSlopeLookback = input.int(1, "Slope Lookback (bars)", minval=1, group="NWRQK Slope Filter")
+
+// ============================================================================
+// ADX FILTER SETTINGS
+// ============================================================================
+pbUseAdxFilter = input.bool(false, "Enable ADX Filter", group="ADX Filter")
+pbAdxLength = input.int(14, "ADX Length", minval=1, group="ADX Filter")
+pbMinAdx = input.float(20.0, "Min ADX", minval=0.0, maxval=100.0, step=1.0, group="ADX Filter")
+pbMaxAdx = input.float(100.0, "Max ADX", minval=0.0, maxval=100.0, step=1.0, group="ADX Filter")
+
+// ============================================================================
+// VOLUME FILTER SETTINGS
+// ============================================================================
+pbUseVolumeFilter = input.bool(false, "Enable Volume Filter", group="Volume Filter")
+pbVolMode = input.string("Previous Bars", "Volume Threshold Mode", options=["Previous Bars", "Moving Average"], group="Volume Filter")
+pbMinVolRatio = input.float(2.0, "Min Volume Ratio", minval=0.0, step=0.1, group="Volume Filter")
+pbVolPrevBars = input.int(1, "Previous Bars Count", minval=1, maxval=20, group="Volume Filter — Previous Bars")
+pbVolMaType = input.string("SMA", "Volume MA Type", options=["SMA", "EMA", "WMA", "SWMA", "DEMA", "TEMA", "HMA"], group="Volume Filter — Moving Average")
+pbVolMaLength = input.int(20, "Volume MA Lookback", minval=1, group="Volume Filter — Moving Average")
+
+// ============================================================================
+// STRUCTURE DISPLAY SETTINGS
+// ============================================================================
+showStructureLines = input.bool(false, "Show Structure Lines", group="Structure Display")
+showBosLabels = input.bool(false, "Show BOS Labels", group="Structure Display")
+highColor = input.color(color.new(color.red, 0), "High Color", group="Structure Display")
+lowColor = input.color(color.new(color.green, 0), "Low Color", group="Structure Display")
+bosColor = input.color(color.new(color.gray, 0), "BOS Color", group="Structure Display")
+lineWidth = input.int(1, "Line Width", minval=1, maxval=5, group="Structure Display")
+
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
+
+type HighLevel
+    float price
+    int barIndex
+    line levelLine
+    string levelType
+
+type LowLevel
+    float price
+    int barIndex
+    line levelLine
+    string levelType
+
+// ============================================================================
+// NWRQK KERNEL REGRESSION
+// ============================================================================
+
+sizeA = array.size(array.from(srcA))
+sizeB = array.size(array.from(srcB))
+
+kernel_regression(_src, _size, _h) =>
+    float _currentWeight = 0.
+    float _cumulativeWeight = 0.
+    for i = 0 to _size + x_0
+        y = _src[i]
+        w = math.pow(1 + (math.pow(i, 2) / ((math.pow(_h, 2) * 2 * r))), -r)
+        _currentWeight += y*w
+        _cumulativeWeight += w
+    _currentWeight / _cumulativeWeight
+
+yhat1A_ctf_raw = kernel_regression(srcA, sizeA, h)
+yhat2A_ctf_raw = kernel_regression(srcA, sizeA, h-lag)
+yhat1A_ctf = useEmaSmoothing ? ta.ema(yhat1A_ctf_raw, smoothingFactor) : yhat1A_ctf_raw
+yhat2A_ctf = useEmaSmoothing ? ta.ema(yhat2A_ctf_raw, smoothingFactor) : yhat2A_ctf_raw
+
+yhat1B_ctf_raw = kernel_regression(srcB, sizeB, h)
+yhat2B_ctf_raw = kernel_regression(srcB, sizeB, h-lag)
+yhat1B_ctf = useEmaSmoothing ? ta.ema(yhat1B_ctf_raw, smoothingFactor) : yhat1B_ctf_raw
+yhat2B_ctf = useEmaSmoothing ? ta.ema(yhat2B_ctf_raw, smoothingFactor) : yhat2B_ctf_raw
+
+[yhat1A, yhat2A, yhat1B, yhat2B] = request.security(syminfo.tickerid, htfTimeframe, [yhat1A_ctf, yhat2A_ctf, yhat1B_ctf, yhat2B_ctf])
+
+// NWRQK average — replaces SMA for envelope and slope filter
+float nwrqkAvg = (yhat1A + yhat1B) / 2
+
+// Rates of Change - A
+bool wasBearishA = yhat1A[2] > yhat1A[1]
+bool wasBullishA = yhat1A[2] < yhat1A[1]
+bool isBearishA = yhat1A[1] > yhat1A
+bool isBullishA = yhat1A[1] < yhat1A
+bool isBearishChangeA = isBearishA and wasBullishA
+bool isBullishChangeA = isBullishA and wasBearishA
+
+// Rates of Change - B
+bool wasBearishB = yhat1B[2] > yhat1B[1]
+bool wasBullishB = yhat1B[2] < yhat1B[1]
+bool isBearishB = yhat1B[1] > yhat1B
+bool isBullishB = yhat1B[1] < yhat1B
+bool isBearishChangeB = isBearishB and wasBullishB
+bool isBullishChangeB = isBullishB and wasBearishB
+
+// Crossovers - A
+bool isBullishCrossA = ta.crossover(yhat2A, yhat1A)
+bool isBearishCrossA = ta.crossunder(yhat2A, yhat1A)
+bool isBullishSmoothA = yhat2A > yhat1A
+bool isBearishSmoothA = yhat2A < yhat1A
+
+// Crossovers - B
+bool isBullishCrossB = ta.crossover(yhat2B, yhat1B)
+bool isBearishCrossB = ta.crossunder(yhat2B, yhat1B)
+bool isBullishSmoothB = yhat2B > yhat1B
+bool isBearishSmoothB = yhat2B < yhat1B
+
+// Crossovers Between A and B
+distMA = math.abs(ta.ema(yhat1B - yhat1A, smoothingFactor))
+isNeutral = math.abs(yhat1B - yhat1A) < (0.4 * distMA)
+wasBullish = yhat1B[1] > yhat1A[1] and not isNeutral[1]
+wasBearish = yhat1B[1] < yhat1A[1] and not isNeutral[1]
+isBullish = yhat1B > yhat1A and not isNeutral
+isBearish = yhat1B < yhat1A and not isNeutral
+bullishCross = isBullish and not wasBullish
+bearishCross = isBearish and not wasBearish
+
+// NWRQK Colors - A
+color colorByCrossA = isBullishSmoothA ? c_bullishNW : c_bearishNW
+color colorByRateA = isBullishA ? c_bullishNW : c_bearishNW
+color plotColorA = smoothColors ? colorByCrossA : colorByRateA
+
+// NWRQK Colors - B
+color colorByCrossB = isBullishSmoothB ? c_bullishNW : c_bearishNW
+color colorByRateB = isBullishB ? c_bullishNW : c_bearishNW
+color plotColorB = smoothColors ? colorByCrossB : colorByRateB
+
+// ============================================================================
+// ENVELOPE CALCULATIONS (ATR envelope around NWRQK average)
+// ============================================================================
+
+atrEnvelopeValue = ta.atr(atrEnvelopeLength)
+nwrqkUpper = nwrqkAvg + atrEnvelopeValue * atrEnvelopeMultiplier
+nwrqkLower = nwrqkAvg - atrEnvelopeValue * atrEnvelopeMultiplier
+
+// ============================================================================
+// POWER BAR SUPPORT CALCULATIONS
+// ============================================================================
+
+atrPbValue = ta.atr(pbAtrLength)
+absPbValue = ta.rma(math.abs(close - open), pbAtrLength)
+
+calcMA(src, len, typ) =>
+    switch typ
+        "SMA"  => ta.sma(src, len)
+        "EMA"  => ta.ema(src, len)
+        "WMA"  => ta.wma(src, len)
+        "SWMA" => ta.swma(src)
+        "DEMA" =>
+            e1 = ta.ema(src, len)
+            2 * e1 - ta.ema(e1, len)
+        "TEMA" =>
+            e1 = ta.ema(src, len)
+            e2 = ta.ema(e1, len)
+            3 * e1 - 3 * e2 + ta.ema(e2, len)
+        "HMA" =>
+            halfLen = math.max(math.round(len / 2), 1)
+            sqrtLen = math.max(math.round(math.sqrt(len)), 1)
+            ta.wma(2 * ta.wma(src, halfLen) - ta.wma(src, len), sqrtLen)
+
+float volMA = calcMA(volume, pbVolMaLength, pbVolMaType)
+
+[_pbDiPlus, _pbDiMinus, pbAdxValue] = ta.dmi(pbAdxLength, pbAdxLength)
+
+// ============================================================================
+// STATE VARIABLES
+// ============================================================================
+
+var array<HighLevel> highs = array.new<HighLevel>()
+var array<LowLevel> lows = array.new<LowLevel>()
+
+var float currentValidHigh = na
+var float currentValidLow = na
+var int currentValidHighBar = na
+var int currentValidLowBar = na
+var bool initialized = false
+var bool lookingForLow = false
+var bool lookingForHigh = false
+var bool currentHighIsBroken = false
+var bool currentLowIsBroken = false
+var string lastBosDirection = "none"
+
+var int mostRecentHighIndex = -1
+var int mostRecentLowIndex = -1
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+isBearishBreakdown() =>
+    close < open and close < low[1]
+
+isBullishBreakout() =>
+    close > open and close > high[1]
+
+findLowestBetween(startBar, endBar) =>
+    float lowestPrice = na
+    int lowestBarIndex = na
+    int start = startBar
+    int end = endBar
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+    int maxLookback = 5000
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(low[i])
+                if na(lowestPrice) or low[i] < lowestPrice
+                    lowestPrice := low[i]
+                    lowestBarIndex := currentBar - i
+    [lowestPrice, lowestBarIndex]
+
+findHighestBetween(startBar, endBar) =>
+    float highestPrice = na
+    int highestBarIndex = na
+    int start = startBar
+    int end = endBar
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+    int maxLookback = 5000
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(high[i])
+                if na(highestPrice) or high[i] > highestPrice
+                    highestPrice := high[i]
+                    highestBarIndex := currentBar - i
+    [highestPrice, highestBarIndex]
+
+// ============================================================================
+// LEVEL MANAGEMENT FUNCTIONS
+// ============================================================================
+
+addHigh(float price, int barIdx, string levelType, color lineColor) =>
+    if mostRecentHighIndex >= 0
+        prevHigh = array.get(highs, mostRecentHighIndex)
+        if prevHigh.levelType != "broken" and prevHigh.levelType != "swept" and not na(prevHigh.levelLine)
+            line.delete(prevHigh.levelLine)
+    line newLine = na
+    if showStructureLines
+        newLine := line.new(barIdx, price, barIdx + 1, price,
+                           color=lineColor, width=lineWidth,
+                           extend=extend.right, style=line.style_solid)
+    newHigh = HighLevel.new(price, barIdx, newLine, levelType)
+    array.push(highs, newHigh)
+    true
+
+addLow(float price, int barIdx, string levelType, color lineColor) =>
+    if mostRecentLowIndex >= 0
+        prevLow = array.get(lows, mostRecentLowIndex)
+        if prevLow.levelType != "broken" and prevLow.levelType != "swept" and not na(prevLow.levelLine)
+            line.delete(prevLow.levelLine)
+    line newLine = na
+    if showStructureLines
+        newLine := line.new(barIdx, price, barIdx + 1, price,
+                           color=lineColor, width=lineWidth,
+                           extend=extend.right, style=line.style_solid)
+    newLow = LowLevel.new(price, barIdx, newLine, levelType)
+    array.push(lows, newLow)
+    true
+
+getHighLevelType(string bosDirection) =>
+    bosDirection == "bullish" ? "weak" : "strong"
+
+getLowLevelType(string bosDirection) =>
+    bosDirection == "bearish" ? "weak" : "strong"
+
+// ============================================================================
+// CHECK FOR BROKEN AND SWEPT LEVELS
+// ============================================================================
+
+checkBrokenLevels() =>
+    bool bullishBos = false
+    bool bearishBos = false
+
+    if array.size(highs) > 0
+        for i = array.size(highs) - 1 to 0
+            highLevel = array.get(highs, i)
+            if highLevel.levelType != "swept" and highLevel.levelType != "broken" and high > highLevel.price and close <= highLevel.price
+                highLevel.levelType := "swept"
+                if not na(highLevel.levelLine)
+                    line.set_style(highLevel.levelLine, line.style_dashed)
+                array.set(highs, i, highLevel)
+            else if highLevel.levelType != "broken" and close > highLevel.price
+                highLevel.levelType := "broken"
+                array.set(highs, i, highLevel)
+                if i == mostRecentHighIndex
+                    if not na(highLevel.levelLine)
+                        line.set_x2(highLevel.levelLine, bar_index)
+                        line.set_extend(highLevel.levelLine, extend.none)
+                        line.set_style(highLevel.levelLine, line.style_dotted)
+                        line.set_color(highLevel.levelLine, color.new(bosColor, 30))
+                    bullishBos := true
+                    if showBosLabels
+                        centerBar = math.round((highLevel.barIndex + bar_index) / 2)
+                        label.new(centerBar, highLevel.price, "BOS",
+                                 style=label.style_label_center, color=color.white,
+                                 textcolor=bosColor, size=size.tiny)
+                else
+                    if not na(highLevel.levelLine)
+                        line.delete(highLevel.levelLine)
+
+    if array.size(lows) > 0
+        for i = array.size(lows) - 1 to 0
+            lowLevel = array.get(lows, i)
+            if lowLevel.levelType != "swept" and lowLevel.levelType != "broken" and low < lowLevel.price and close >= lowLevel.price
+                lowLevel.levelType := "swept"
+                if not na(lowLevel.levelLine)
+                    line.set_style(lowLevel.levelLine, line.style_dashed)
+                array.set(lows, i, lowLevel)
+            else if lowLevel.levelType != "broken" and close < lowLevel.price
+                lowLevel.levelType := "broken"
+                array.set(lows, i, lowLevel)
+                if i == mostRecentLowIndex
+                    if not na(lowLevel.levelLine)
+                        line.set_x2(lowLevel.levelLine, bar_index)
+                        line.set_extend(lowLevel.levelLine, extend.none)
+                        line.set_style(lowLevel.levelLine, line.style_dotted)
+                        line.set_color(lowLevel.levelLine, color.new(bosColor, 30))
+                    bearishBos := true
+                    if showBosLabels
+                        centerBar = math.round((lowLevel.barIndex + bar_index) / 2)
+                        label.new(centerBar, lowLevel.price, "BOS",
+                                 style=label.style_label_center, color=color.white,
+                                 textcolor=bosColor, size=size.tiny)
+                else
+                    if not na(lowLevel.levelLine)
+                        line.delete(lowLevel.levelLine)
+
+    [bullishBos, bearishBos]
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+if not initialized and bar_index > 0
+    if isBearishBreakdown()
+        float localHigh = high
+        int localHighBar = bar_index
+        for i = 1 to math.min(bar_index, 5000)
+            if high[i] > localHigh
+                localHigh := high[i]
+                localHighBar := bar_index - i
+        currentValidHigh := localHigh
+        currentValidHighBar := localHighBar
+        initialized := true
+        lookingForLow := true
+        addHigh(localHigh, localHighBar, "strong", highColor)
+        mostRecentHighIndex := array.size(highs) - 1
+
+// ============================================================================
+// MAIN STRUCTURE LOGIC
+// ============================================================================
+
+bool bosBullish = false
+bool bosBearish = false
+
+if initialized
+    [bullBos, bearBos] = checkBrokenLevels()
+
+    if not na(currentValidHigh) and not na(currentValidLow) and close > currentValidHigh and lookingForLow
+        bosBullish := true
+        currentHighIsBroken := true
+        lastBosDirection := "bullish"
+        [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
+        if not na(newLow) and not na(newLowBar)
+            currentValidLow := newLow
+            currentValidLowBar := newLowBar
+            lookingForHigh := true
+            lookingForLow := false
+            currentLowIsBroken := false
+            addLow(newLow, newLowBar, "strong", lowColor)
+            mostRecentLowIndex := array.size(lows) - 1
+
+    if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and close < currentValidLow and lookingForHigh
+        bosBearish := true
+        currentLowIsBroken := true
+        lastBosDirection := "bearish"
+        [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
+        if not na(newHigh) and not na(newHighBar)
+            currentValidHigh := newHigh
+            currentValidHighBar := newHighBar
+            lookingForLow := true
+            lookingForHigh := false
+            currentHighIsBroken := false
+            addHigh(newHigh, newHighBar, "strong", highColor)
+            mostRecentHighIndex := array.size(highs) - 1
+
+    if not bosBullish and not bosBearish and lookingForLow
+        if isBullishBreakout()
+            [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
+            if not na(newLow) and not na(newLowBar)
+                currentValidLow := newLow
+                currentValidLowBar := newLowBar
+                lookingForHigh := true
+                lookingForLow := false
+                currentLowIsBroken := false
+                levelType = getLowLevelType(lastBosDirection)
+                addLow(newLow, newLowBar, levelType, lowColor)
+                mostRecentLowIndex := array.size(lows) - 1
+
+    if not bosBullish and not bosBearish and lookingForHigh
+        if isBearishBreakdown()
+            [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
+            if not na(newHigh) and not na(newHighBar)
+                currentValidHigh := newHigh
+                currentValidHighBar := newHighBar
+                lookingForLow := true
+                lookingForHigh := false
+                currentHighIsBroken := false
+                levelType = getHighLevelType(lastBosDirection)
+                addHigh(newHigh, newHighBar, levelType, highColor)
+                mostRecentHighIndex := array.size(highs) - 1
+
+// ============================================================================
+// UPDATE LEVEL STATES
+// ============================================================================
+
+if initialized
+    int brokenHighIdx = -1
+    if array.size(highs) > 0
+        for i = array.size(highs) - 1 to 0
+            highLevel = array.get(highs, i)
+            if highLevel.levelType == "broken"
+                brokenHighIdx := i
+                break
+    int brokenLowIdx = -1
+    if array.size(lows) > 0
+        for i = array.size(lows) - 1 to 0
+            lowLevel = array.get(lows, i)
+            if lowLevel.levelType == "broken"
+                brokenLowIdx := i
+                break
+    if brokenHighIdx >= 0 or brokenLowIdx >= 0
+        if brokenHighIdx >= 0 and (brokenLowIdx < 0 or brokenHighIdx > brokenLowIdx)
+            lastBosDirection := "bullish"
+            if mostRecentHighIndex >= 0
+                currentHigh = array.get(highs, mostRecentHighIndex)
+                if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
+                    currentHigh.levelType := "weak"
+            if mostRecentLowIndex >= 0
+                currentLow = array.get(lows, mostRecentLowIndex)
+                if currentLow.levelType != "broken" and currentLow.levelType != "swept"
+                    currentLow.levelType := "strong"
+        else if brokenLowIdx >= 0
+            lastBosDirection := "bearish"
+            if mostRecentLowIndex >= 0
+                currentLow = array.get(lows, mostRecentLowIndex)
+                if currentLow.levelType != "broken" and currentLow.levelType != "swept"
+                    currentLow.levelType := "weak"
+            if mostRecentHighIndex >= 0
+                currentHigh = array.get(highs, mostRecentHighIndex)
+                if currentHigh.levelType != "broken" and currentHigh.levelType != "swept"
+                    currentHigh.levelType := "strong"
+
+// ============================================================================
+// ARRAY TRUNCATION
+// ============================================================================
+
+if array.size(highs) > 30
+    oldHigh = array.get(highs, 0)
+    if not na(oldHigh.levelLine)
+        line.delete(oldHigh.levelLine)
+    array.shift(highs)
+    mostRecentHighIndex := math.max(-1, mostRecentHighIndex - 1)
+
+if array.size(lows) > 30
+    oldLow = array.get(lows, 0)
+    if not na(oldLow.levelLine)
+        line.delete(oldLow.levelLine)
+    array.shift(lows)
+    mostRecentLowIndex := math.max(-1, mostRecentLowIndex - 1)
+
+// ============================================================================
+// POWER BAR DETECTION
+// ============================================================================
+
+float candleRange = high - low
+float candleBody = math.abs(close - open)
+float bodyRatio = candleRange > 0 ? candleBody / candleRange : 0
+
+float priorHigh = ta.highest(high, pbBreakoutLookback)[1]
+float priorLow = ta.lowest(low, pbBreakoutLookback)[1]
+
+float sizeReference = pbSizeMethod == "ATR" ? atrPbValue : absPbValue
+float sizeMetric = pbSizeMethod == "ATR" ? candleRange : candleBody
+
+bool opensInEnvelope = not na(nwrqkUpper) and not na(nwrqkLower) and open <= nwrqkUpper and open >= nwrqkLower
+bool meetsAtrSize = not na(sizeReference) and sizeReference > 0 and sizeMetric >= pbMinAtrMultiple * sizeReference
+bool meetsBodyRatio = bodyRatio >= pbMinBodyRatio
+
+bool breaksPriorHigh = not na(priorHigh) and close > priorHigh and close > open
+bool breaksPriorLow = not na(priorLow) and close < priorLow and close < open
+
+bool bullQualifies = pbRequireBos ? bosBullish : breaksPriorHigh
+bool bearQualifies = pbRequireBos ? bosBearish : breaksPriorLow
+
+// NWRQK slope filter — uses the average of the two kernel lines
+float nwrqkSlopeRef = nwrqkAvg[pbMaSlopeLookback]
+bool maRising = not na(nwrqkSlopeRef) and nwrqkAvg > nwrqkSlopeRef
+bool maFalling = not na(nwrqkSlopeRef) and nwrqkAvg < nwrqkSlopeRef
+bool bullSlopeOk = not pbRequireMaSlope or maRising
+bool bearSlopeOk = not pbRequireMaSlope or maFalling
+
+// Volume filter
+float pbVolRatio = 0.0
+if pbVolMode == "Previous Bars"
+    float prevVolSum = 0.0
+    for i = 1 to pbVolPrevBars
+        prevVolSum += volume[i]
+    pbVolRatio := prevVolSum > 0 ? volume / (prevVolSum / pbVolPrevBars) : 0.0
+else
+    pbVolRatio := not na(volMA) and volMA > 0 ? volume / volMA : 0.0
+bool volumeOk = not pbUseVolumeFilter or pbVolRatio >= pbMinVolRatio
+
+// ADX filter
+bool adxOk = not pbUseAdxFilter or (not na(pbAdxValue) and pbAdxValue >= pbMinAdx and pbAdxValue <= pbMaxAdx)
+
+// Standalone PB detection
+bool standaloneBull = opensInEnvelope and meetsAtrSize and meetsBodyRatio and bullQualifies and bullSlopeOk and volumeOk and adxOk
+bool standaloneBear = opensInEnvelope and meetsAtrSize and meetsBodyRatio and bearQualifies and bearSlopeOk and volumeOk and adxOk
+
+// Combined PB components
+bool meetsCombinedSize = not na(sizeReference) and sizeReference > 0 and sizeMetric >= pbCombinedMinSize * sizeReference
+bool meetsCombinedBodyRatio = bodyRatio >= pbCombinedMinBodyRatio
+bool barIsCombinedBull = close > open and meetsCombinedSize and meetsCombinedBodyRatio and (not pbExcludeStandaloneFromCombined or not standaloneBull)
+bool barIsCombinedBear = close < open and meetsCombinedSize and meetsCombinedBodyRatio and (not pbExcludeStandaloneFromCombined or not standaloneBear)
+
+int detectedDir = 0
+int detectedCount = 0
+
+if standaloneBull
+    detectedDir := 1
+    detectedCount := 1
+else if standaloneBear
+    detectedDir := 2
+    detectedCount := 1
+else if pbCombineEnabled
+    for n = 2 to pbMaxCombined
+        bool allBull = true
+        bool allBear = true
+        for i = 0 to n - 1
+            if not barIsCombinedBull[i]
+                allBull := false
+            if not barIsCombinedBear[i]
+                allBear := false
+        if allBull or allBear
+            int firstBarOffset = n - 1
+            bool firstOpenInEnv = not na(nwrqkUpper[firstBarOffset]) and not na(nwrqkLower[firstBarOffset]) and open[firstBarOffset] <= nwrqkUpper[firstBarOffset] and open[firstBarOffset] >= nwrqkLower[firstBarOffset]
+            if firstOpenInEnv and volumeOk and adxOk
+                if allBull and bullSlopeOk
+                    float priorSeqHigh = ta.highest(high, pbBreakoutLookback)[n]
+                    bool seqBreaksHigh = pbRequireBos ? bosBullish : (not na(priorSeqHigh) and close > priorSeqHigh)
+                    if seqBreaksHigh
+                        detectedDir := 1
+                        detectedCount := n
+                        break
+                if detectedDir == 0 and allBear and bearSlopeOk
+                    float priorSeqLow = ta.lowest(low, pbBreakoutLookback)[n]
+                    bool seqBreaksLow = pbRequireBos ? bosBearish : (not na(priorSeqLow) and close < priorSeqLow)
+                    if seqBreaksLow
+                        detectedDir := 2
+                        detectedCount := n
+                        break
+
+bool isBullishPowerBar = detectedDir == 1
+bool isBearishPowerBar = detectedDir == 2
+bool isPowerBar = isBullishPowerBar or isBearishPowerBar
+
+// Power bar labels
+if isBullishPowerBar
+    float seqLow = low
+    if detectedCount > 1
+        for i = 1 to detectedCount - 1
+            seqLow := math.min(seqLow, low[i])
+    string labelText = detectedCount > 1 ? "PB×" + str.tostring(detectedCount) : "PB"
+    label.new(bar_index, seqLow, labelText,
+             style=label.style_label_up, color=pbBullishColor,
+             textcolor=color.white, size=size.small)
+
+if isBearishPowerBar
+    float seqHigh = high
+    if detectedCount > 1
+        for i = 1 to detectedCount - 1
+            seqHigh := math.max(seqHigh, high[i])
+    string labelText = detectedCount > 1 ? "PB×" + str.tostring(detectedCount) : "PB"
+    label.new(bar_index, seqHigh, labelText,
+             style=label.style_label_down, color=pbBearishColor,
+             textcolor=color.white, size=size.small)
+
+// ============================================================================
+// PLOTS
+// ============================================================================
+
+// NWRQK lines and fill
+plotA = plot(yhat1A, "NWRQK Estimate - A", color=plotColorA, linewidth=2, display=display.none)
+plotB = plot(yhat1B, "NWRQK Estimate - B", color=plotColorB, linewidth=2, display=display.none)
+fill(plotA, plotB, color=isBullish and isBullishA and isBullishB ? color.lime : isBearish and isBearishA and isBearishB ? color.purple : color.gray)
+
+// NWRQK crossover shapes
+plotshape(bullishCross, "Bullish Cross", shape.diamond, location=location.belowbar, color=color.lime)
+plotshape(bearishCross, "Bearish Cross", shape.diamond, location=location.abovebar, color=color.purple)
+
+// Optional ATR envelope around NWRQK average
+upperPlot = plot(showEnvelope ? nwrqkUpper : na, "Upper Envelope", color=color.new(color.blue, 50), linewidth=1)
+lowerPlot = plot(showEnvelope ? nwrqkLower : na, "Lower Envelope", color=color.new(color.blue, 50), linewidth=1)
+fill(upperPlot, lowerPlot, color=showEnvelope ? envelopeColor : na)
+
+// Power bar candle coloring
+barcolor(pbColorBars and isBullishPowerBar ? pbBullishColor : na)
+barcolor(pbColorBars and isBearishPowerBar ? pbBearishColor : na)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+alertcondition(isBullishPowerBar, "Bullish Power Bar", "Bullish Power Bar on {{ticker}} ({{interval}}) @ {{close}}")
+alertcondition(isBearishPowerBar, "Bearish Power Bar", "Bearish Power Bar on {{ticker}} ({{interval}}) @ {{close}}")
+alertcondition(isPowerBar, "Any Power Bar", "Power Bar on {{ticker}} ({{interval}}) @ {{close}}")
+
+// NWRQK color change alerts
+bool alertBullishA = smoothColors ? isBearishCrossA : isBearishChangeA
+bool alertBearishA = smoothColors ? isBullishCrossA : isBullishChangeA
+bool alertBullishB = smoothColors ? isBearishCrossB : isBearishChangeB
+bool alertBearishB = smoothColors ? isBullishCrossB : isBullishChangeB
+
+alertcondition(condition=alertBullishA, title='Bearish Color Change - A', message='NWRQK: {{ticker}} ({{interval}}) turned Bearish ▼ [A]')
+alertcondition(condition=alertBearishA, title='Bullish Color Change - A', message='NWRQK: {{ticker}} ({{interval}}) turned Bullish ▲ [A]')
+alertcondition(condition=alertBullishB, title='Bearish Color Change - B', message='NWRQK: {{ticker}} ({{interval}}) turned Bearish ▼ [B]')
+alertcondition(condition=alertBearishB, title='Bullish Color Change - B', message='NWRQK: {{ticker}} ({{interval}}) turned Bullish ▲ [B]')
+
+// Dynamic power bar alerts
+string sizeLabel = pbSizeMethod == "ATR" ? "ATR" : "ABS"
+string sizeSuffix = sizeReference > 0 ? " | size=" + str.tostring(sizeMetric / sizeReference, "#.00") + "x " + sizeLabel : ""
+string combineSuffix = detectedCount > 1 ? "×" + str.tostring(detectedCount) : ""
+string adxSuffix = pbUseAdxFilter and not na(pbAdxValue) ? " | ADX=" + str.tostring(pbAdxValue, "#.0") : ""
+
+if barstate.isconfirmed and isBullishPowerBar
+    alert("Bullish Power Bar" + combineSuffix + " on " + syminfo.ticker + " (" + timeframe.period + ") @ " + str.tostring(close, format.mintick) + " | body=" + str.tostring(bodyRatio * 100, "#.0") + "%" + sizeSuffix + (pbUseVolumeFilter ? " | vol=" + str.tostring(pbVolRatio, "#.00") + "x" : "") + adxSuffix, alert.freq_once_per_bar_close)
+
+if barstate.isconfirmed and isBearishPowerBar
+    alert("Bearish Power Bar" + combineSuffix + " on " + syminfo.ticker + " (" + timeframe.period + ") @ " + str.tostring(close, format.mintick) + " | body=" + str.tostring(bodyRatio * 100, "#.0") + "%" + sizeSuffix + (pbUseVolumeFilter ? " | vol=" + str.tostring(pbVolRatio, "#.00") + "x" : "") + adxSuffix, alert.freq_once_per_bar_close)
+
+// Non-displayed plot outputs for external use
+plot(alertBearishA ? -1 : alertBullishA ? 1 : 0, "Alert Stream A", display=display.none)
+plot(alertBearishB ? -1 : alertBullishB ? 1 : 0, "Alert Stream B", display=display.none)

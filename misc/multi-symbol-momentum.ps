@@ -1,0 +1,75 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Multi-Symbol Momentum Candles [SB]", "MSM Candles [SB]", overlay=true)
+
+// ============================================================================
+// SYMBOL SETTINGS
+// ============================================================================
+sym1Enabled = input.bool(true, "Enable Symbol 1", group="Symbol 1", inline="s1")
+sym1Ticker  = input.symbol("", "Ticker", group="Symbol 1", inline="s1")
+
+sym2Enabled = input.bool(false, "Enable Symbol 2", group="Symbol 2", inline="s2")
+sym2Ticker  = input.symbol("", "Ticker", group="Symbol 2", inline="s2")
+
+sym3Enabled = input.bool(false, "Enable Symbol 3", group="Symbol 3", inline="s3")
+sym3Ticker  = input.symbol("", "Ticker", group="Symbol 3", inline="s3")
+
+// ============================================================================
+// MOMENTUM SETTINGS
+// ============================================================================
+atrLength       = input.int(14, "ATR Length", minval=1, group="Momentum")
+minAtrMultiple  = input.float(1.0, "Min ATR Multiple", minval=0.1, step=0.1, group="Momentum", tooltip="Candle range must be >= this multiple of the symbol's ATR to qualify.")
+
+// ============================================================================
+// BODY RATIO FILTER
+// ============================================================================
+useBodyFilter   = input.bool(false, "Require Min Body Ratio", group="Body Filter")
+minBodyRatio    = input.float(0.75, "Min Body Ratio (Body/Range)", minval=0.1, maxval=1.0, step=0.05, group="Body Filter", tooltip="Each symbol's candle body must be at least this fraction of its total range.")
+
+// ============================================================================
+// DISPLAY SETTINGS
+// ============================================================================
+momentumColor   = input.color(color.orange, "Momentum Candle Color", group="Display")
+showLabels      = input.bool(false, "Show Labels", group="Display")
+
+// ============================================================================
+// MOMENTUM DETECTION FUNCTION
+// ============================================================================
+detectMomentum() =>
+    float cr = high - low
+    float cb = math.abs(close - open)
+    float br = cr > 0 ? cb / cr : 0.0
+    float atrVal = ta.atr(atrLength)
+    bool bigEnough = not na(atrVal) and atrVal > 0 and cr >= minAtrMultiple * atrVal
+    bool bodyOk = not useBodyFilter or br >= minBodyRatio
+    bool qualifies = bigEnough and bodyOk
+    qualifies
+
+// ============================================================================
+// REQUEST DATA FROM EACH SYMBOL
+// ============================================================================
+sym1Qualifies = sym1Enabled and sym1Ticker != "" ? request.security(sym1Ticker, timeframe.period, detectMomentum()) : true
+sym2Qualifies = sym2Enabled and sym2Ticker != "" ? request.security(sym2Ticker, timeframe.period, detectMomentum()) : true
+sym3Qualifies = sym3Enabled and sym3Ticker != "" ? request.security(sym3Ticker, timeframe.period, detectMomentum()) : true
+
+// At least one symbol must actually be enabled with a ticker
+bool anyEnabled = (sym1Enabled and sym1Ticker != "") or (sym2Enabled and sym2Ticker != "") or (sym3Enabled and sym3Ticker != "")
+bool allQualify = anyEnabled and sym1Qualifies and sym2Qualifies and sym3Qualifies
+
+// ============================================================================
+// DISPLAY
+// ============================================================================
+barcolor(allQualify ? momentumColor : na)
+
+if showLabels and allQualify
+    label.new(bar_index, high, "MOM", style=label.style_label_down, color=momentumColor, textcolor=color.white, size=size.tiny)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+alertcondition(allQualify, "Multi-Symbol Momentum", "All selected symbols show momentum candle on {{ticker}} ({{interval}}) @ {{close}}")
+
+if barstate.isconfirmed and allQualify
+    alert("Multi-Symbol Momentum on " + syminfo.ticker + " (" + timeframe.period + ") @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)

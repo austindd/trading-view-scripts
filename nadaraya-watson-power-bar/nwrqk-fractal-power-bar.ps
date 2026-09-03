@@ -1,0 +1,242 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("NWRQK Fractal Power Bar [SB]", "NWRQK FPB [SB]", overlay=true, max_labels_count=500, max_boxes_count=500)
+
+// ============================================================================
+// TIMEFRAME SETTINGS
+// ============================================================================
+ltfTimeframe = input.timeframe("", "Lower Timeframe (LTF)", group="Timeframes", tooltip="Chart should be at or below this timeframe. Leave blank for chart timeframe.")
+htfTimeframe = input.timeframe("60", "Higher Timeframe (HTF)", group="Timeframes")
+
+// ============================================================================
+// NWRQK SETTINGS (shared across both timeframes)
+// ============================================================================
+srcA = input.source(open, 'Source A', group="NWRQK")
+srcB = input.source(close, 'Source B', group="NWRQK")
+h = input.float(8., 'Lookback Window', minval=3., group="NWRQK", tooltip='Recommended range: 3-50')
+r = input.float(8., 'Relative Weighting', step=0.25, group="NWRQK", tooltip='Recommended range: 0.25-25')
+x_0 = input.int(25, "Start Regression at Bar", group="NWRQK", tooltip='Recommended range: 5-25')
+useEmaSmoothing = input.bool(true, "Use EMA Smoothing", group="NWRQK")
+smoothingFactor = input.int(4, "EMA Smoothing Factor", group="NWRQK")
+
+// ============================================================================
+// ENVELOPE SETTINGS (ATR envelope around NWRQK average, for opens-in-envelope)
+// ============================================================================
+atrEnvelopeLength = input.int(100, "ATR Length (Envelope)", minval=1, group="Envelope")
+atrEnvelopeMultiplier = input.float(1.0, "ATR Multiplier (Envelope)", minval=0.1, step=0.1, group="Envelope")
+
+// ============================================================================
+// POWER BAR SETTINGS (shared across both timeframes)
+// ============================================================================
+pbAtrLength = input.int(14, "Length (Candle Size)", minval=1, group="Power Bar")
+pbSizeMethod = input.string("ATR", "Candle Size Method", options=["ATR", "Average Body Size"], group="Power Bar")
+pbMinAtrMultiple = input.float(1.0, "Min Candle Size Multiple", minval=0.1, step=0.1, group="Power Bar")
+pbMinBodyRatio = input.float(0.75, "Min Body Ratio (Body/Range)", minval=0.1, maxval=1.0, step=0.05, group="Power Bar")
+pbBreakoutLookback = input.int(5, "Breakout Lookback (bars)", minval=1, group="Power Bar", tooltip="Bullish PB must close above the highest high of the last N bars; bearish must close below the lowest low.")
+
+// ============================================================================
+// FRACTAL SETTINGS
+// ============================================================================
+requireSameDir = input.bool(true, "Require Same Direction", group="Fractal", tooltip="When enabled, the LTF power bar must match the HTF power bar direction for a fractal signal.")
+showFractalBoxes = input.bool(true, "Show HTF Candle Box", group="Fractal", tooltip="Highlights the entire HTF candle that qualified as a fractal power bar.")
+fractalBullColor = input.color(color.lime, "Bullish Fractal Color", group="Fractal")
+fractalBearColor = input.color(color.purple, "Bearish Fractal Color", group="Fractal")
+colorBars = input.bool(true, "Color Fractal Bars", group="Fractal")
+
+// ============================================================================
+// DISPLAY SETTINGS
+// ============================================================================
+showLtfNwrqk = input.bool(true, "Show LTF NWRQK Fill", group="Display")
+showHtfNwrqk = input.bool(true, "Show HTF NWRQK Fill", group="Display")
+showHtfPbLabels = input.bool(false, "Show All HTF PB Labels (debug)", group="Display", tooltip="Shows all HTF power bars, even those without LTF confirmation.")
+c_bullishNW = input.color(#1759ff, 'NWRQK Bullish Color', group='Display')
+c_bearishNW = input.color(#fd6e07, 'NWRQK Bearish Color', group='Display')
+
+// ============================================================================
+// KERNEL REGRESSION (array-free, safe for request.security)
+// ============================================================================
+kernel_reg(_src, _h) =>
+    float _cw = 0.
+    float _cumw = 0.
+    for i = 0 to 1 + x_0
+        y = _src[i]
+        w = math.pow(1 + (math.pow(i, 2) / ((math.pow(_h, 2) * 2 * r))), -r)
+        _cw += y * w
+        _cumw += w
+    _cw / _cumw
+
+// ============================================================================
+// POWER BAR DETECTION FUNCTION
+// Uses breakout-lookback mode only (no market structure state machine) so it
+// can run inside request.security without arrays.
+// ============================================================================
+detectPB() =>
+    rawA = kernel_reg(srcA, h)
+    rawB = kernel_reg(srcB, h)
+    y1A = useEmaSmoothing ? ta.ema(rawA, smoothingFactor) : rawA
+    y1B = useEmaSmoothing ? ta.ema(rawB, smoothingFactor) : rawB
+
+    nwAvg = (y1A + y1B) / 2.0
+    atrE = ta.atr(atrEnvelopeLength)
+    envUp = nwAvg + atrE * atrEnvelopeMultiplier
+    envLo = nwAvg - atrE * atrEnvelopeMultiplier
+
+    atrPb = ta.atr(pbAtrLength)
+    absPb = ta.rma(math.abs(close - open), pbAtrLength)
+    cr = high - low
+    cb = math.abs(close - open)
+    br = cr > 0 ? cb / cr : 0.0
+    sRef = pbSizeMethod == "ATR" ? atrPb : absPb
+    sMet = pbSizeMethod == "ATR" ? cr : cb
+
+    inE = not na(envUp) and not na(envLo) and open <= envUp and open >= envLo
+    big = not na(sRef) and sRef > 0 and sMet >= pbMinAtrMultiple * sRef
+    goodBody = br >= pbMinBodyRatio
+
+    pH = ta.highest(high, pbBreakoutLookback)[1]
+    pL = ta.lowest(low, pbBreakoutLookback)[1]
+    brkH = not na(pH) and close > pH and close > open
+    brkL = not na(pL) and close < pL and close < open
+
+    bull = inE and big and goodBody and brkH
+    bear = inE and big and goodBody and brkL
+
+    [y1A, y1B, bull, bear, time]
+
+// ============================================================================
+// MULTI-TIMEFRAME DATA
+// ============================================================================
+[ltfY1A, ltfY1B, ltfBullPB, ltfBearPB, _t] = request.security(syminfo.tickerid, ltfTimeframe, detectPB())
+[htfY1A, htfY1B, htfBullPB, htfBearPB, htfTime] = request.security(syminfo.tickerid, htfTimeframe, detectPB())
+
+htfNewCandle = ta.change(htfTime) != 0
+
+// Track the bar_index where the current HTF candle started (for box drawing)
+var int htfCandleStartBar = 0
+var float htfCandleHigh = na
+var float htfCandleLow = na
+
+if htfNewCandle
+    htfCandleStartBar := bar_index
+    htfCandleHigh := high
+    htfCandleLow := low
+else
+    htfCandleHigh := math.max(nz(htfCandleHigh, high), high)
+    htfCandleLow := math.min(nz(htfCandleLow, low), low)
+
+// ============================================================================
+// FRACTAL DETECTION
+// Track whether any LTF power bar fired during the current HTF candle.
+// At each HTF candle close, check if both HTF PB and LTF PB occurred.
+// ============================================================================
+var bool ltfBullWithin = false
+var bool ltfBearWithin = false
+
+// Save the previous HTF candle's range for box drawing on fractal detection
+var int prevHtfStartBar = 0
+var float prevHtfHigh = na
+var float prevHtfLow = na
+
+bool fractalBull = false
+bool fractalBear = false
+
+if htfNewCandle
+    if requireSameDir
+        fractalBull := htfBullPB and ltfBullWithin
+        fractalBear := htfBearPB and ltfBearWithin
+    else
+        fractalBull := htfBullPB and (ltfBullWithin or ltfBearWithin)
+        fractalBear := htfBearPB and (ltfBullWithin or ltfBearWithin)
+
+    prevHtfStartBar := htfCandleStartBar
+    prevHtfHigh := htfCandleHigh
+    prevHtfLow := htfCandleLow
+
+    ltfBullWithin := false
+    ltfBearWithin := false
+
+if ltfBullPB
+    ltfBullWithin := true
+if ltfBearPB
+    ltfBearWithin := true
+
+// Draw box over the completed HTF candle that qualified as a fractal PB
+if showFractalBoxes and fractalBull
+    box.new(prevHtfStartBar, prevHtfHigh, bar_index - 1, prevHtfLow, border_color=fractalBullColor, bgcolor=color.new(fractalBullColor, 85), border_width=2)
+if showFractalBoxes and fractalBear
+    box.new(prevHtfStartBar, prevHtfHigh, bar_index - 1, prevHtfLow, border_color=fractalBearColor, bgcolor=color.new(fractalBearColor, 85), border_width=2)
+
+// Fractal label at HTF candle boundary
+if fractalBull
+    label.new(bar_index, low, "FRACTAL PB", style=label.style_label_up, color=fractalBullColor, textcolor=color.black, size=size.normal)
+if fractalBear
+    label.new(bar_index, high, "FRACTAL PB", style=label.style_label_down, color=fractalBearColor, textcolor=color.white, size=size.normal)
+
+// Debug: show ALL HTF PBs (even without LTF confirmation)
+if showHtfPbLabels and htfNewCandle and not fractalBull and not fractalBear
+    if htfBullPB
+        label.new(bar_index, low, "HTF PB", style=label.style_label_up, color=color.new(color.gray, 40), textcolor=color.white, size=size.tiny)
+    if htfBearPB
+        label.new(bar_index, high, "HTF PB", style=label.style_label_down, color=color.new(color.gray, 40), textcolor=color.white, size=size.tiny)
+
+// ============================================================================
+// NWRQK COLORS (computed at chart level from fetched values)
+// ============================================================================
+
+// --- LTF ---
+bool ltfBullA = ltfY1A[1] < ltfY1A
+bool ltfBearA = ltfY1A[1] > ltfY1A
+bool ltfBullB = ltfY1B[1] < ltfY1B
+bool ltfBearB = ltfY1B[1] > ltfY1B
+
+float ltfDist = math.abs(ta.ema(ltfY1B - ltfY1A, smoothingFactor))
+bool ltfNeutral = math.abs(ltfY1B - ltfY1A) < (0.4 * ltfDist)
+bool ltfIsBull = ltfY1B > ltfY1A and not ltfNeutral
+bool ltfIsBear = ltfY1B < ltfY1A and not ltfNeutral
+
+color ltfFill = ltfIsBull and ltfBullA and ltfBullB ? color.new(color.lime, 70) : ltfIsBear and ltfBearA and ltfBearB ? color.new(color.purple, 70) : color.new(color.gray, 85)
+
+// --- HTF ---
+bool htfBullA = htfY1A[1] < htfY1A
+bool htfBearA = htfY1A[1] > htfY1A
+bool htfBullB = htfY1B[1] < htfY1B
+bool htfBearB = htfY1B[1] > htfY1B
+
+float htfDist = math.abs(ta.ema(htfY1B - htfY1A, smoothingFactor))
+bool htfNeutral = math.abs(htfY1B - htfY1A) < (0.4 * htfDist)
+bool htfIsBull = htfY1B > htfY1A and not htfNeutral
+bool htfIsBear = htfY1B < htfY1A and not htfNeutral
+
+color htfFill = htfIsBull and htfBullA and htfBullB ? color.new(color.lime, 85) : htfIsBear and htfBearA and htfBearB ? color.new(color.purple, 85) : color.new(color.gray, 90)
+
+// ============================================================================
+// PLOTS
+// ============================================================================
+
+// LTF NWRQK (fill only — lines hidden, matching original NWRQK display style)
+ltfPlotA = plot(showLtfNwrqk ? ltfY1A : na, "LTF NWRQK A", color=c_bullishNW, linewidth=2, display=display.none)
+ltfPlotB = plot(showLtfNwrqk ? ltfY1B : na, "LTF NWRQK B", color=c_bearishNW, linewidth=2, display=display.none)
+fill(ltfPlotA, ltfPlotB, color=showLtfNwrqk ? ltfFill : na)
+
+// HTF NWRQK (fill only, step-plotted from request.security)
+htfPlotA = plot(showHtfNwrqk ? htfY1A : na, "HTF NWRQK A", color=c_bullishNW, linewidth=3, display=display.none)
+htfPlotB = plot(showHtfNwrqk ? htfY1B : na, "HTF NWRQK B", color=c_bearishNW, linewidth=3, display=display.none)
+fill(htfPlotA, htfPlotB, color=showHtfNwrqk ? htfFill : na)
+
+// Bar coloring on the fractal signal bar
+barcolor(colorBars and fractalBull ? fractalBullColor : na)
+barcolor(colorBars and fractalBear ? fractalBearColor : na)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+alertcondition(fractalBull, "Bullish Fractal PB", "Bullish Fractal Power Bar on {{ticker}} ({{interval}}) @ {{close}}")
+alertcondition(fractalBear, "Bearish Fractal PB", "Bearish Fractal Power Bar on {{ticker}} ({{interval}}) @ {{close}}")
+alertcondition(fractalBull or fractalBear, "Any Fractal PB", "Fractal Power Bar on {{ticker}} ({{interval}}) @ {{close}}")
+
+if barstate.isconfirmed and fractalBull
+    alert("Bullish Fractal PB on " + syminfo.ticker + " (" + timeframe.period + ") @ " + str.tostring(close, format.mintick) + " | LTF: " + (ltfTimeframe == "" ? timeframe.period : ltfTimeframe) + " HTF: " + htfTimeframe, alert.freq_once_per_bar_close)
+if barstate.isconfirmed and fractalBear
+    alert("Bearish Fractal PB on " + syminfo.ticker + " (" + timeframe.period + ") @ " + str.tostring(close, format.mintick) + " | LTF: " + (ltfTimeframe == "" ? timeframe.period : ltfTimeframe) + " HTF: " + htfTimeframe, alert.freq_once_per_bar_close)
