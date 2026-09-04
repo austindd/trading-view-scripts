@@ -1,0 +1,373 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Fair Value Gaps MTF Origin V1 [SB]", "FVG MTF Origin [SB]", overlay = true
+  , max_bars_back    = 5000
+  , max_lines_count  = 500
+  , max_labels_count = 500
+  , max_boxes_count  = 500)
+
+// ============================================================================
+// OVERVIEW
+// ============================================================================
+//
+// Plots fair value gaps (FVGs) from up to 6 arbitrary timeframes on one chart.
+//
+// Each FVG is drawn as two connected shapes:
+//
+//   1. An "origin wedge" (triangle) that starts as a single point at the close
+//      of the FVG's FIRST candle and fans out to the full gap height at the
+//      open of the FVG's THIRD candle. Its flat edge sits on the level created
+//      by the first candle; its slanted edge runs to the level created by the
+//      third candle.
+//   2. A rectangle (box) starting at the open of the third candle and extending
+//      right, spanning the gap.
+//
+// The two shapes share an edge, so the wedge reads as a seamless extension of
+// the rectangle back toward the candle pattern that produced the gap:
+//
+//        bullish FVG                      bearish FVG
+//                  ┌──────────────                    ┌───┐
+//              ┌───┤ box                       ╲      │box│
+//          ┌───┘   │                            ╲─────┴───┴──────
+//      ┌───┘ wedge │                         ───┘  wedge
+//      ├───────────┤                          ├─────────┤
+//     C1 close   C3 open                    C1 close  C3 open
+//
+// HTF candles are aggregated locally from chart bars using timeframe.change()
+// rather than request.security(). This avoids the request.security() [1]
+// history-offset trap documented in CLAUDE.md, is non-repainting, and gives the
+// exact chart-bar indices needed to anchor the wedge. The trade-off: a selected
+// timeframe must be >= the chart timeframe (lower ones are skipped), and gaps
+// are only found as far back as loaded chart bars go.
+//
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+grpGen = "General"
+maxPerTf        = input.int(20, "Max FVGs Per Timeframe", minval = 1, maxval = 100, group = grpGen, tooltip = "Oldest FVGs are removed once this limit is exceeded. Remember a single indicator can only render 500 boxes / 500 lines total, and each FVG uses 1 box, 2 lines and 1 label.")
+breakPref       = input.string("Close", "Break Condition", options = ["Close", "Wick"], group = grpGen, tooltip = "An FVG is considered broken (fully mitigated) when price passes completely through it. 'Close' requires a candle close beyond the far edge; 'Wick' only requires a wick.")
+minAtrMult      = input.float(0.0, "Min Gap Size (ATR multiple)", minval = 0, step = 0.05, group = grpGen, tooltip = "Ignore gaps smaller than ATR * this value. 0 disables the filter. ATR is measured on the chart timeframe.")
+atrLen          = input.int(200, "ATR Length", minval = 1, group = grpGen)
+extendBars      = input.int(10, "Extend Right (bars)", minval = 0, maxval = 200, group = grpGen, tooltip = "How far past the current bar to extend unbroken FVG boxes.")
+
+grpDisp = "Display"
+showWedge       = input.bool(true, "Show Origin Wedge", group = grpDisp, tooltip = "Draw the triangle connecting the FVG box back to the first candle of the pattern.")
+showLabel       = input.bool(true, "Show Timeframe Label", group = grpDisp)
+labelSize       = input.string("tiny", "Label Size", options = ["tiny", "small", "normal"], group = grpDisp)
+keepBroken      = input.bool(true, "Keep Broken FVGs", group = grpDisp, tooltip = "Keep broken FVGs on the chart, cut off at the bar where they were broken. If disabled, broken FVGs are deleted.")
+colorOnTouch    = input.bool(true, "Fade On Touch", group = grpDisp, tooltip = "Fade the FVG once price has traded into it for the first time.")
+fillTransp      = input.int(85, "Fill Transparency", minval = 0, maxval = 100, group = grpDisp)
+touchTransp     = input.int(92, "Touched Transparency", minval = 0, maxval = 100, group = grpDisp)
+brokenTransp    = input.int(96, "Broken Transparency", minval = 0, maxval = 100, group = grpDisp)
+borderTransp    = input.int(40, "Border Transparency", minval = 0, maxval = 100, group = grpDisp)
+
+grpTf1 = "Timeframe 1"
+tf1On   = input.bool(true,  "Enable",    inline = "a1", group = grpTf1)
+tf1Tf   = input.timeframe("", "",        inline = "a1", group = grpTf1, tooltip = "Blank = chart timeframe.")
+tf1Bull = input.color(#089981, "Bull",   inline = "b1", group = grpTf1)
+tf1Bear = input.color(#f23645, "Bear",   inline = "b1", group = grpTf1)
+
+grpTf2 = "Timeframe 2"
+tf2On   = input.bool(true,  "Enable",    inline = "a2", group = grpTf2)
+tf2Tf   = input.timeframe("15", "",      inline = "a2", group = grpTf2)
+tf2Bull = input.color(#26a69a, "Bull",   inline = "b2", group = grpTf2)
+tf2Bear = input.color(#ef5350, "Bear",   inline = "b2", group = grpTf2)
+
+grpTf3 = "Timeframe 3"
+tf3On   = input.bool(true,  "Enable",    inline = "a3", group = grpTf3)
+tf3Tf   = input.timeframe("60", "",      inline = "a3", group = grpTf3)
+tf3Bull = input.color(#2962ff, "Bull",   inline = "b3", group = grpTf3)
+tf3Bear = input.color(#ff9800, "Bear",   inline = "b3", group = grpTf3)
+
+grpTf4 = "Timeframe 4"
+tf4On   = input.bool(false, "Enable",    inline = "a4", group = grpTf4)
+tf4Tf   = input.timeframe("240", "",     inline = "a4", group = grpTf4)
+tf4Bull = input.color(#7e57c2, "Bull",   inline = "b4", group = grpTf4)
+tf4Bear = input.color(#d81b60, "Bear",   inline = "b4", group = grpTf4)
+
+grpTf5 = "Timeframe 5"
+tf5On   = input.bool(false, "Enable",    inline = "a5", group = grpTf5)
+tf5Tf   = input.timeframe("D", "",       inline = "a5", group = grpTf5)
+tf5Bull = input.color(#00bcd4, "Bull",   inline = "b5", group = grpTf5)
+tf5Bear = input.color(#e91e63, "Bear",   inline = "b5", group = grpTf5)
+
+grpTf6 = "Timeframe 6"
+tf6On   = input.bool(false, "Enable",    inline = "a6", group = grpTf6)
+tf6Tf   = input.timeframe("W", "",       inline = "a6", group = grpTf6)
+tf6Bull = input.color(#9ccc65, "Bull",   inline = "b6", group = grpTf6)
+tf6Bear = input.color(#8d6e63, "Bear",   inline = "b6", group = grpTf6)
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+// One fair value gap, with all of its drawing objects.
+type Fvg
+    bool     bull                 // true = bullish (gap below price), false = bearish
+    float    top                  // upper gap level
+    float    bottom               // lower gap level
+    int      apexBar              // last chart bar of candle 1 (wedge apex)
+    int      leftBar              // first chart bar of candle 3 (wedge base / box left)
+    int      createdBar = na      // chart bar the FVG was detected on
+    bool     touched    = false
+    bool     broken     = false
+    int      brokenBar  = na
+    box      bx         = na
+    line     flatLn     = na      // wedge edge sitting on candle 1's level
+    line     slantLn    = na      // wedge edge running to candle 3's level
+    linefill lf         = na
+    label    lbl        = na
+
+// Per-timeframe state: aggregated candle history + live FVGs.
+type TfState
+    string       name
+    bool         on
+    color        cBull
+    color        cBear
+    array<float> hHist            // index 0 = most recently completed HTF candle
+    array<float> lHist
+    array<int>   sHist            // first chart bar of that HTF candle
+    array<int>   eHist            // last chart bar of that HTF candle
+    float        curHigh  = na    // developing HTF candle
+    float        curLow   = na
+    int          curStart = na
+    array<Fvg>   fvgs
+
+// ============================================================================
+// CONSTANTS & CALCS
+// ============================================================================
+
+breakOnWick = breakPref == "Wick"
+minGap      = minAtrMult > 0 ? nz(ta.atr(atrLen)) * minAtrMult : 0.0
+lblSize     = labelSize == "normal" ? size.normal : labelSize == "small" ? size.small : size.tiny
+HIST_LEN    = 6                   // HTF candles kept per timeframe (only 3 are needed)
+
+// Resolved timeframe strings. A blank input means "chart timeframe". These are
+// kept as inline expressions (not helper calls) so they stay "simple string",
+// which timeframe.change() and timeframe.in_seconds() both require.
+tf1Res = tf1Tf == "" ? timeframe.period : tf1Tf
+tf2Res = tf2Tf == "" ? timeframe.period : tf2Tf
+tf3Res = tf3Tf == "" ? timeframe.period : tf3Tf
+tf4Res = tf4Tf == "" ? timeframe.period : tf4Tf
+tf5Res = tf5Tf == "" ? timeframe.period : tf5Tf
+tf6Res = tf6Tf == "" ? timeframe.period : tf6Tf
+
+// Timeframes below the chart timeframe cannot be aggregated from chart bars.
+chartSec = timeframe.in_seconds(timeframe.period)
+tf1Ok = tf1On and timeframe.in_seconds(tf1Res) >= chartSec
+tf2Ok = tf2On and timeframe.in_seconds(tf2Res) >= chartSec
+tf3Ok = tf3On and timeframe.in_seconds(tf3Res) >= chartSec
+tf4Ok = tf4On and timeframe.in_seconds(tf4Res) >= chartSec
+tf5Ok = tf5On and timeframe.in_seconds(tf5Res) >= chartSec
+tf6Ok = tf6On and timeframe.in_seconds(tf6Res) >= chartSec
+
+// ============================================================================
+// FUNCTIONS
+// ============================================================================
+
+newTf(string tf, bool on, color cb, color cs) =>
+    TfState.new(
+      name  = tf,
+      on    = on,
+      cBull = cb,
+      cBear = cs,
+      hHist = array.new<float>(),
+      lHist = array.new<float>(),
+      sHist = array.new<int>(),
+      eHist = array.new<int>(),
+      fvgs  = array.new<Fvg>())
+
+// Draw the box, the origin wedge and the label for a freshly detected FVG.
+drawFvg(TfState st, Fvg f) =>
+    col     = f.bull ? st.cBull : st.cBear
+    bgCol   = color.new(col, fillTransp)
+    bordCol = color.new(col, borderTransp)
+
+    f.bx := box.new(f.leftBar, f.top, bar_index + extendBars, f.bottom
+      , border_color = bordCol, border_width = 1, bgcolor = bgCol)
+
+    // The wedge only exists when candle 1 and candle 3 are separated on the
+    // chart, which is always true unless the chart bar spacing degenerates.
+    if showWedge and f.leftBar > f.apexBar
+        flatY  = f.bull ? f.bottom : f.top      // level created by candle 1
+        slantY = f.bull ? f.top    : f.bottom   // level created by candle 3
+        f.flatLn  := line.new(f.apexBar, flatY, f.leftBar, flatY,  color = bordCol, width = 1)
+        f.slantLn := line.new(f.apexBar, flatY, f.leftBar, slantY, color = bordCol, width = 1)
+        f.lf      := linefill.new(f.flatLn, f.slantLn, bgCol)
+
+    if showLabel
+        f.lbl := label.new(bar_index + extendBars, math.avg(f.top, f.bottom), st.name
+          , style     = label.style_label_left
+          , color     = color.new(col, 100)
+          , textcolor = color.new(col, 0)
+          , size      = lblSize)
+
+deleteFvg(Fvg f) =>
+    if not na(f.lf)
+        linefill.delete(f.lf)
+    if not na(f.flatLn)
+        line.delete(f.flatLn)
+    if not na(f.slantLn)
+        line.delete(f.slantLn)
+    if not na(f.bx)
+        box.delete(f.bx)
+    if not na(f.lbl)
+        label.delete(f.lbl)
+
+// Restyle an FVG that price has just traded into for the first time.
+markTouched(TfState st, Fvg f) =>
+    col = f.bull ? st.cBull : st.cBear
+    if not na(f.bx)
+        box.set_bgcolor(f.bx, color.new(col, touchTransp))
+    if not na(f.lf)
+        linefill.set_color(f.lf, color.new(col, touchTransp))
+
+// Freeze an FVG at the bar that broke it.
+markBroken(TfState st, Fvg f) =>
+    col = f.bull ? st.cBull : st.cBear
+    if not na(f.bx)
+        box.set_right(f.bx, bar_index)
+        box.set_bgcolor(f.bx, color.new(col, brokenTransp))
+        box.set_border_style(f.bx, line.style_dashed)
+    if not na(f.lf)
+        linefill.set_color(f.lf, color.new(col, brokenTransp))
+    if not na(f.flatLn)
+        line.set_style(f.flatLn, line.style_dashed)
+    if not na(f.slantLn)
+        line.set_style(f.slantLn, line.style_dashed)
+    if not na(f.lbl)
+        label.delete(f.lbl)
+        f.lbl := na
+
+// Push the just-completed aggregated candle onto this timeframe's history.
+// Called on the first chart bar of a new period, so the completed candle ends
+// on the previous chart bar.
+pushPeriod(TfState st) =>
+    if not na(st.curStart)
+        array.unshift(st.hHist, st.curHigh)
+        array.unshift(st.lHist, st.curLow)
+        array.unshift(st.sHist, st.curStart)
+        array.unshift(st.eHist, bar_index - 1)
+        if array.size(st.hHist) > HIST_LEN
+            array.pop(st.hHist)
+            array.pop(st.lHist)
+            array.pop(st.sHist)
+            array.pop(st.eHist)
+
+// Look for an FVG in the three most recently completed candles of this
+// timeframe. Index 2 = candle 1 of the pattern, index 0 = candle 3.
+detectFvg(TfState st) =>
+    if array.size(st.hHist) >= 3
+        h1 = array.get(st.hHist, 2)
+        l1 = array.get(st.lHist, 2)
+        h3 = array.get(st.hHist, 0)
+        l3 = array.get(st.lHist, 0)
+        bullGap = l3 > h1
+        bearGap = h3 < l1
+        if bullGap or bearGap
+            gapTop = bullGap ? l3 : l1
+            gapBot = bullGap ? h1 : h3
+            if gapTop - gapBot >= minGap
+                Fvg f = Fvg.new(
+                  bull       = bullGap,
+                  top        = gapTop,
+                  bottom     = gapBot,
+                  apexBar    = array.get(st.eHist, 2),
+                  leftBar    = array.get(st.sHist, 0),
+                  createdBar = bar_index)
+                // Retire the oldest FVG if we are at the per-timeframe cap.
+                if array.size(st.fvgs) >= maxPerTf
+                    deleteFvg(array.shift(st.fvgs))
+                drawFvg(st, f)
+                array.push(st.fvgs, f)
+
+// Per-bar maintenance: touch/break tracking and right-edge extension.
+// Returns [touchFired, breakFired] for alerting.
+updateFvgs(TfState st) =>
+    bool tFired = false
+    bool bFired = false
+    if array.size(st.fvgs) > 0
+        for i = array.size(st.fvgs) - 1 to 0
+            Fvg f = array.get(st.fvgs, i)
+            if not f.broken
+                brokeNow = f.bull
+                  ? (breakOnWick ? low  < f.bottom : close < f.bottom)
+                  : (breakOnWick ? high > f.top    : close > f.top)
+                if not f.touched
+                    if high >= f.bottom and low <= f.top
+                        f.touched := true
+                        tFired := true
+                        if colorOnTouch
+                            markTouched(st, f)
+                if brokeNow
+                    f.broken    := true
+                    f.brokenBar := bar_index
+                    bFired      := true
+                    if keepBroken
+                        markBroken(st, f)
+                    else
+                        deleteFvg(f)
+                        array.remove(st.fvgs, i)
+                else
+                    if not na(f.bx)
+                        box.set_right(f.bx, bar_index + extendBars)
+                    if not na(f.lbl)
+                        label.set_x(f.lbl, bar_index + extendBars)
+    [tFired, bFired]
+
+// Advance one timeframe by one chart bar. Returns [touchFired, breakFired].
+processTf(TfState st, bool newPeriod) =>
+    if st.on
+        if newPeriod
+            pushPeriod(st)
+            st.curHigh  := high
+            st.curLow   := low
+            st.curStart := bar_index
+            detectFvg(st)
+        else
+            st.curHigh  := na(st.curHigh) ? high : math.max(st.curHigh, high)
+            st.curLow   := na(st.curLow)  ? low  : math.min(st.curLow,  low)
+            if na(st.curStart)
+                st.curStart := bar_index
+    // Safe to call unconditionally: a disabled timeframe never holds any FVGs.
+    updateFvgs(st)
+
+// ============================================================================
+// STATE
+// ============================================================================
+
+var TfState s1 = newTf(tf1Res, tf1Ok, tf1Bull, tf1Bear)
+var TfState s2 = newTf(tf2Res, tf2Ok, tf2Bull, tf2Bear)
+var TfState s3 = newTf(tf3Res, tf3Ok, tf3Bull, tf3Bear)
+var TfState s4 = newTf(tf4Res, tf4Ok, tf4Bull, tf4Bear)
+var TfState s5 = newTf(tf5Res, tf5Ok, tf5Bull, tf5Bear)
+var TfState s6 = newTf(tf6Res, tf6Ok, tf6Bull, tf6Bear)
+
+// timeframe.change() needs a simple string. On the chart timeframe it fires on
+// every bar, which is exactly what we want for chart-timeframe FVGs.
+new1 = timeframe.change(tf1Res)
+new2 = timeframe.change(tf2Res)
+new3 = timeframe.change(tf3Res)
+new4 = timeframe.change(tf4Res)
+new5 = timeframe.change(tf5Res)
+new6 = timeframe.change(tf6Res)
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+[t1, b1] = processTf(s1, new1)
+[t2, b2] = processTf(s2, new2)
+[t3, b3] = processTf(s3, new3)
+[t4, b4] = processTf(s4, new4)
+[t5, b5] = processTf(s5, new5)
+[t6, b6] = processTf(s6, new6)
+
+anyTouch = t1 or t2 or t3 or t4 or t5 or t6
+anyBreak = b1 or b2 or b3 or b4 or b5 or b6
+
+alertcondition(anyTouch, "FVG Touched", "Price traded into a fair value gap")
+alertcondition(anyBreak, "FVG Broken",  "Price broke through a fair value gap")

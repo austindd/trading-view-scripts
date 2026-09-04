@@ -54,6 +54,41 @@ Standalone S&D zone detection using z-score analysis to identify significant pri
 | `supply-demand-zones-v4.ps` | 471 | Z-score based zone detection. Identifies "explosive" candles via statistical outliers, creates zones at move origins. Tracks touched/crossed status. Configurable significance threshold and move-to-zone ratio filter. |
 | `supply-demand-zones-v8.ps` | 756 | **Multi-timeframe version.** Adds HTF zone detection with independent enable/colors. Maintains HTF candle history arrays for proper lookback. Debug labels option for troubleshooting. |
 
+### Fair Value Gap Series (`fair-value-gaps/`)
+
+FVG = a 3-candle pattern where candle 1 and candle 3 do not overlap, leaving an unfilled gap. Bullish: `low[0] > high[2]`. Bearish: `high[0] < low[2]`. An **IFVG** (inversion FVG) is an FVG that price has traded fully through, flipping it from support to resistance (or vice versa).
+
+| File | Lines | Description |
+|------|-------|-------------|
+| `fvg-ifvg.ps` | 480 | 5 timeframes, each with independent enable/colors and separate FVG vs IFVG colors. `FVGZone` type with `isIFVG` flag; zones convert in place rather than being recreated. Display modes: All / FVG Only / IFVG Only. Extension modes: `extend.right` or fixed bar count. Uses `request.security()` per TF. |
+| `fvg-ifvg-v2.ps` | 160 | **Pine v6** (the only v6 script in the repo). Single timeframe, adapted from a ChartPrime script. Percentage-based displacement filter (candle range must exceed a % of price). Overlap cleanup deletes older zones intersecting a new one. Unfilled zones retire into small 5-bar historical markers after `longevity` bars. Volume printed in the box text. |
+| `fvg-ifvg-v3.ps` | 198 | Single-timeframe rewrite of V2 with proper HTF support via `request.security()` + HTF OHLC history arrays. Longevity is measured in *TF candles* rather than chart bars. Adds alert flags. Explicitly follows the no-`[1]`-offset rule (see the CRITICAL section below). |
+| `fvg-mtf.ps` | 519 | 4 timeframes, LuxAlgo-derived architecture: state is kept in arrays and **all boxes are redrawn from scratch every bar** (`sendFvg`/`sendIfvg`), using `xloc.bar_time`. Tracks FVG → IFVG transitions with signal labels, plus separate broken-FVG and broken-IFVG arrays. ATR minimum size filter, max IFVG age in TF candles. |
+| `ifvg-detector-mtf.ps` | 379 | 4 timeframes, IFVG-only (regular FVGs are never drawn). Three box styles controlling how the box is bounded: Full Range / IFVG Boundary / FVG Zone. Same redraw-every-bar architecture as `fvg-mtf.ps`. |
+| `fvg-mtf-origin-v1.ps` | 373 | **6 timeframes with origin wedges.** Draws each FVG as a box plus a filled triangle that tapers back to a point at the close of candle 1, showing where the pattern started and ended. Aggregates HTF candles locally via `timeframe.change()` instead of `request.security()` — non-repainting and yields exact chart-bar indices for the wedge anchors. Tracks touched/broken per gap; broken gaps are cut off at the breaking bar. |
+| `lux-algo-ifvg-script.ps` | 175 | Unmodified vendor reference script (© LuxAlgo). Source of the redraw-every-bar `lab`/`fvg` type pattern used by `fvg-mtf.ps` and `ifvg-detector-mtf.ps`. Do not edit; use as reference. |
+
+Two distinct rendering architectures coexist here, and mixing them causes bugs:
+
+- **Persistent drawings** (`fvg-ifvg.ps`, `fvg-ifvg-v3.ps`, `fvg-mtf-origin-v1.ps`): a box is created once and mutated via `box.set_*`. Cheaper; box/line counts must be capped explicitly.
+- **Redraw every bar** (`fvg-mtf.ps`, `ifvg-detector-mtf.ps`, LuxAlgo): all drawings are recreated each bar from array state. Simpler state handling, but drawing limits are hit fast and per-object mutation is pointless since the object is discarded next bar.
+
+### Origin Wedge Pattern (`fvg-mtf-origin-v1.ps`)
+
+Pine has no polygon primitive, so the triangle is built from two `line`s sharing a start point, joined by a `linefill`:
+
+```pine
+flatY  = bull ? bottom : top      // level created by candle 1
+slantY = bull ? top    : bottom   // level created by candle 3
+flatLn  = line.new(apexBar, flatY, leftBar, flatY)   // apex → box, flat edge
+slantLn = line.new(apexBar, flatY, leftBar, slantY)  // apex → box, slanted edge
+lf      = linefill.new(flatLn, slantLn, fillColor)
+```
+
+`apexBar` = last chart bar of candle 1, `leftBar` = first chart bar of candle 3 (also the box's left edge), so the wedge and the box join seamlessly. Deleting either line deletes the `linefill`.
+
+To get `apexBar`/`leftBar`, HTF candles are aggregated from chart bars rather than fetched: on `timeframe.change(tf)` the developing high/low is pushed to history with `sBar = curStart`, `eBar = bar_index - 1`, then the aggregate resets. This sidesteps the `request.security()` offset trap entirely, at the cost of requiring the selected TF to be >= the chart TF (lower ones are skipped via `timeframe.in_seconds()` comparison).
+
 ### Specialized Indicators
 
 | File | Lines | Description |

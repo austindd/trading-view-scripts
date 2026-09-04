@@ -21,6 +21,7 @@ max_bars_back(time, 5000)
 // ============================================================================
 structureTimeframe = input.timeframe("", "Structure Timeframe", tooltip="Timeframe used for structure detection. 'Chart' uses the chart's own timeframe.", group="Structure")
 showStructureLines = input.bool(true, "Show Structure Lines (Peaks/Valleys)", group="Structure")
+showLevelLabels = input.bool(true, "Show High/Low Labels", tooltip="Marker labels at each swing high/low formation.", group="Structure")
 showBosLabels = input.bool(true, "Show BOS / CHOCH Labels", group="Structure")
 
 highColor = input.color(color.new(color.red, 0), "High Color", group="Structure")
@@ -263,6 +264,14 @@ addHigh(float price, int barIdx, string levelType) =>
                            style=line.style_solid)
 
     array.push(highs, HighLevel.new(price, barIdx, newLine, levelType))
+
+    if showLevelLabels
+        label.new(barIdx, price, "",
+                 style=label.style_label_down,
+                 color=highColor,
+                 textcolor=color.white,
+                 size=size.tiny)
+
     true
 
 // Add a new low level
@@ -276,6 +285,14 @@ addLow(float price, int barIdx, string levelType) =>
                            style=line.style_solid)
 
     array.push(lows, LowLevel.new(price, barIdx, newLine, levelType))
+
+    if showLevelLabels
+        label.new(barIdx, price, "",
+                 style=label.style_label_up,
+                 color=lowColor,
+                 textcolor=color.white,
+                 size=size.tiny)
+
     true
 
 // ============================================================================
