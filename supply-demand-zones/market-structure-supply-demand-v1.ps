@@ -44,7 +44,9 @@ indicator("Market Structure Supply & Demand V1 [SB]", "MS S&D V1 [SB]", overlay 
 //
 //   3. Lifecycle (follows S&D Zones V11): zones extend right, the fill turns
 //      gray on first touch, and a zone stops extending at the bar where it is
-//      fully broken (close beyond its far edge).
+//      fully broken (close beyond its far edge). Zones that are already fully
+//      broken by the time their AOI confirms are discarded outright and never
+//      rendered; only zones alive at confirmation enter the lifecycle.
 //
 // Both timeframes are aggregated locally from chart bars via
 // timeframe.change() (the fvg-mtf-origin-v1.ps pattern) rather than
@@ -76,6 +78,7 @@ maxAois            = input.int(15, "Max AOIs Kept", minval = 1, maxval = 50, gro
 grpZone = "Zone Detection"
 invalidateZoneSweep = input.bool(true, "Wick Sweep Invalidates Structure Level", group = grpZone, tooltip = "Same rule on the zone timeframe: the first break of the state machine's current valid high/low must be a body close-through. A wick trading through the level before any body close disqualifies it as a zone source (the state machine itself is unaffected, like sweeps in MSM).")
 zoneScope           = input.string("Overlap AOI", "Zone / AOI Relationship", options = ["Overlap AOI", "Fully Inside AOI"], group = grpZone, tooltip = "Whether a zone's price range merely has to intersect the AOI band or must sit entirely inside it.")
+omitPreTouched      = input.bool(false, "Discard Zones Touched Before AOI Confirms", group = grpZone, tooltip = "When enabled, a zone that price has already traded back into by the time its AOI confirms is discarded outright (like already-broken zones), instead of starting its life gray/touched.")
 minAtrMult          = input.float(0.0, "Min Zone Height (ATR multiple)", minval = 0, step = 0.05, group = grpZone, tooltip = "Ignore zones smaller than ATR * this value. 0 disables the filter. ATR is measured on the chart timeframe.")
 atrLen              = input.int(200, "ATR Length", minval = 1, group = grpZone)
 zoneHistLen         = input.int(1000, "Zone-TF Candle History", minval = 100, maxval = 2000, group = grpZone, tooltip = "How many completed zone-TF candles are kept for the retrospective scan when an AOI confirms. AOIs whose V reaches further back than this are only partially scanned.")
@@ -87,7 +90,7 @@ breakOnWick          = input.bool(false, "Break Zones on Wick (not just close)",
 
 grpDisp = "Display"
 showZones       = input.bool(true,  "Show Zones", group = grpDisp)
-showBrokenZones = input.bool(false, "Show Broken Zones", group = grpDisp, tooltip = "Broken zones are kept in memory either way; this only controls whether they stay drawn (cut off at the breaking bar).")
+showBrokenZones = input.bool(false, "Show Broken Zones", group = grpDisp, tooltip = "Applies to zones broken AFTER their AOI confirmed — they are kept in memory either way; this only controls whether they stay drawn (cut off at the breaking bar). Zones already broken when their AOI confirms are discarded outright and never drawn.")
 showAois        = input.bool(true,  "Show AOIs", group = grpDisp, tooltip = "Draw each confirmed AOI as a dashed outline spanning its structural V.")
 
 grpCol = "Colors"
@@ -378,10 +381,11 @@ zoneExists(array<Zone> zones, int leftBar, float top, float btm) =>
 
 // Replay a freshly created zone's life from the chart bar after its zone-TF
 // body break up to the current bar, so zones discovered retrospectively carry
-// the correct touched/broken status. (An early series in the up-leg is often
-// already broken again by the rally to the higher high — such zones are kept
-// but hidden unless Show Broken Zones is on.) Replay is capped at 5000 bars
-// back; anything older simply starts its life un-touched.
+// the correct touched/broken status. (An early break in the leg toward the
+// AOI's extreme is often broken again by the continued move — the caller
+// DISCARDS zones that come back from replay already broken, so they are never
+// stored or rendered.) Replay is capped at 5000 bars back; anything older
+// simply starts its life un-touched.
 replayZone(Zone z) =>
     int startOff = math.min(bar_index - z.createdBar - 1, 4999)
     if startOff >= 0
@@ -528,10 +532,15 @@ scanAoiZones(Aoi aoi) =>
                                           leftTime = array.get(zoneHist.tHist, vIdx),
                                           createdBar = array.get(zoneHist.eHist, i))
                                         replayZone(z)
-                                        array.unshift(demandZones, z)
-                                        if array.size(demandZones) > maxZones
-                                            array.pop(demandZones)
-                                        created += 1
+                                        // A zone already broken (or, when the
+                                        // option is on, already touched) by
+                                        // AOI confirmation never existed as
+                                        // far as rendering is concerned
+                                        if not z.broken and not (omitPreTouched and z.touched)
+                                            array.unshift(demandZones, z)
+                                            if array.size(demandZones) > maxZones
+                                                array.pop(demandZones)
+                                            created += 1
                     if not na(validLow) and not lowBroken
                         if zL(i) < validLow and zC(i) >= validLow
                             lowSwept := true
@@ -552,10 +561,15 @@ scanAoiZones(Aoi aoi) =>
                                           leftTime = array.get(zoneHist.tHist, vIdx),
                                           createdBar = array.get(zoneHist.eHist, i))
                                         replayZone(z)
-                                        array.unshift(supplyZones, z)
-                                        if array.size(supplyZones) > maxZones
-                                            array.pop(supplyZones)
-                                        created += 1
+                                        // A zone already broken (or, when the
+                                        // option is on, already touched) by
+                                        // AOI confirmation never existed as
+                                        // far as rendering is concerned
+                                        if not z.broken and not (omitPreTouched and z.touched)
+                                            array.unshift(supplyZones, z)
+                                            if array.size(supplyZones) > maxZones
+                                                array.pop(supplyZones)
+                                            created += 1
                     // ── State machine transitions (V9's main logic: BOS
                     // first, otherwise breakout/breakdown alternation) ──
                     if lookingForLow
