@@ -31,16 +31,16 @@ indicator("Market Structure Supply & Demand V1 [SB]", "MS S&D V1 [SB]", overlay 
 //                       ╳   ← AOI-TF body close below L confirms the AOI
 //
 //   2. Zones, detected on the (lower) zone timeframe inside the AOI:
-//      The same structure logic, one level down. Zone-TF swing points are
-//      tracked through the AOI window, and every break of the NEAREST
-//      structure level by a zone-TF candle BODY (a wick-first sweep again
-//      disqualifies by default) produces a zone. Inside a supply AOI that is
-//      an inverted-V: low #1, a local high, then a body close below low #1 —
-//      the zone spans [low #1 .. local high] (the broken level to the V's
-//      vertex, NOT the breaking extreme). Inside a demand AOI it is the
-//      mirrored V: high #1, a local low, then a body close above high #1 —
-//      zone = [local low .. high #1]. One AOI commonly yields several zones
-//      as successive nearest levels form and break.
+//      MSM's valid-high/valid-low state machine (from MSM V9) is run over the
+//      zone-TF candles in the AOI window. Every zone-TF candle BODY closing
+//      through the machine's most recent structure level in the AOI's
+//      direction produces a zone (a wick-first sweep of the level again
+//      disqualifies it by default). Inside a demand AOI: a body close above
+//      the current valid high (high #1) marks a zone from the local low
+//      between high #1 and the break — the V's vertex, which is also the
+//      machine's next valid low — up to high #1, NOT up to the breaking high
+//      (high #2). Supply AOIs mirror this with the current valid low. One
+//      AOI commonly yields several zones as structure alternates and breaks.
 //
 //   3. Lifecycle (follows S&D Zones V11): zones extend right, the fill turns
 //      gray on first touch, and a zone stops extending at the bar where it is
@@ -74,7 +74,7 @@ invalidateAoiSweep = input.bool(true, "Wick Sweep Invalidates Structure Point", 
 maxAois            = input.int(15, "Max AOIs Kept", minval = 1, maxval = 50, group = grpAoi)
 
 grpZone = "Zone Detection"
-invalidateZoneSweep = input.bool(true, "Wick Sweep Invalidates Structure Point", group = grpZone, tooltip = "Same rule on the zone timeframe: the first break of the nearest structure high/low must be a body close-through. A wick trading through the level before any body close disqualifies that swing point.")
+invalidateZoneSweep = input.bool(true, "Wick Sweep Invalidates Structure Level", group = grpZone, tooltip = "Same rule on the zone timeframe: the first break of the state machine's current valid high/low must be a body close-through. A wick trading through the level before any body close disqualifies it as a zone source (the state machine itself is unaffected, like sweeps in MSM).")
 zoneScope           = input.string("Overlap AOI", "Zone / AOI Relationship", options = ["Overlap AOI", "Fully Inside AOI"], group = grpZone, tooltip = "Whether a zone's price range merely has to intersect the AOI band or must sit entirely inside it.")
 minAtrMult          = input.float(0.0, "Min Zone Height (ATR multiple)", minval = 0, step = 0.05, group = grpZone, tooltip = "Ignore zones smaller than ATR * this value. 0 disables the filter. ATR is measured on the chart timeframe.")
 atrLen              = input.int(200, "ATR Length", minval = 1, group = grpZone)
@@ -361,7 +361,7 @@ attemptDemandAoi(SwingPoint sh) =>
     result
 
 // ============================================================================
-// ZONE SCANNING
+// ZONE SCANNING — MSM VALID-HIGH/VALID-LOW STATE MACHINE ON THE ZONE TF
 // ============================================================================
 
 // Nested AOIs (one break candle clearing several lows) would rediscover the
@@ -397,15 +397,75 @@ replayZone(Zone z) =>
                 break
     true
 
-// Scan the zone-TF candle history inside a freshly confirmed supply AOI,
-// running the structure logic one level down. Zone-TF 3-candle swing lows are
-// tracked through the window; whenever the NEAREST one (low #1) is broken by
-// a candle BODY closing below it, the inverted-V pattern
-// (low #1 → local high → body break) becomes a supply zone spanning
-// [low #1 .. local high] — the broken level to the V's vertex, not the
-// breaking extreme. Returns the number of zones created.
-scanSupplyZones(Aoi aoi) =>
+// --- Zone-TF candle accessors (index 0 = newest completed candle) ---
+zO(int i) => array.get(zoneHist.oHist, i)
+zH(int i) => array.get(zoneHist.hHist, i)
+zL(int i) => array.get(zoneHist.lHist, i)
+zC(int i) => array.get(zoneHist.cHist, i)
+
+// MSM helper: bearish candle closing below the previous candle's low.
+// (Nested checks — Pine's `and` is not short-circuit, so the bounds guard
+// must not share a condition with the array access.)
+zBearishBreakdown(int i) =>
+    bool result = false
+    if i + 1 < array.size(zoneHist.cHist)
+        result := zC(i) < zO(i) and zC(i) < zL(i + 1)
+    result
+
+// MSM helper: bullish candle closing above the previous candle's high
+zBullishBreakout(int i) =>
+    bool result = false
+    if i + 1 < array.size(zoneHist.cHist)
+        result := zC(i) > zO(i) and zC(i) > zH(i + 1)
+    result
+
+// Highest high among zone-TF candles [fromIdx .. toIdx] inclusive (fromIdx is
+// the older/larger index). Returns [price, idx].
+zHighestBetween(int fromIdx, int toIdx) =>
+    float bestP = na
+    int bestIdx = na
+    int f = math.min(fromIdx, array.size(zoneHist.hHist) - 1)
+    if f >= toIdx and toIdx >= 0
+        for k = f to toIdx
+            if na(bestP) or zH(k) > bestP
+                bestP := zH(k)
+                bestIdx := k
+    [bestP, bestIdx]
+
+// Lowest low among zone-TF candles [fromIdx .. toIdx] inclusive
+zLowestBetween(int fromIdx, int toIdx) =>
+    float bestP = na
+    int bestIdx = na
+    int f = math.min(fromIdx, array.size(zoneHist.lHist) - 1)
+    if f >= toIdx and toIdx >= 0
+        for k = f to toIdx
+            if na(bestP) or zL(k) < bestP
+                bestP := zL(k)
+                bestIdx := k
+    [bestP, bestIdx]
+
+// Run MSM's valid-high/valid-low state machine (MSM V9's single-TF machine)
+// over the zone-TF candles inside a freshly confirmed AOI and create a zone
+// for every body break of the machine's most recent structure level in the
+// AOI's direction:
+//
+//   demand AOI: body close above the current valid high (high #1) → zone
+//     spanning [local low between high #1 and the break .. high #1]. That
+//     local low is the V's vertex — exactly what the machine promotes to the
+//     next valid low — and anchors the zone's left edge.
+//   supply AOI: body close below the current valid low → mirrored zone
+//     spanning [low #1 .. local high between low #1 and the break].
+//
+// Faithful to MSM V9 with two deliberate differences: (1) initialization is
+// symmetric — the first bearish breakdown seeds a valid high OR the first
+// bullish breakout seeds a valid low, whichever the window offers first
+// (V9 only initializes off a breakdown); (2) a wick-first sweep of a level
+// marks it swept and, by default, disqualifies it as a zone source — the
+// state machine itself is unaffected, exactly like sweeps in V9.
+// Returns the number of zones created.
+scanAoiZones(Aoi aoi) =>
     int created = 0
+    bool wantSupply = aoi.dir == -1
     int n = array.size(zoneHist.cHist)
     if n > 0
         // Oldest history index still inside the AOI window (eHist is
@@ -417,115 +477,109 @@ scanSupplyZones(Aoi aoi) =>
             else
                 break
         if startIdx >= 0
-            float l1Price = na
-            int l1Idx = na
+            bool initialized = false
+            bool lookingForLow = false
+            bool lookingForHigh = false
+            float validHigh = na
+            int validHighIdx = na
+            bool highSwept = false
+            bool highBroken = false
+            float validLow = na
+            int validLowIdx = na
+            bool lowSwept = false
+            bool lowBroken = false
             // Walk oldest → newest (index 0 = newest candle)
             for i = startIdx to 0
-                // A swing low confirms one candle late: candle i+1 is the
-                // middle of the trio (i+2, i+1, i). It replaces the previous
-                // nearest structure low. (Candle i can never confirm a swing
-                // and break it at the same time — confirmation requires its
-                // low to stay above the swing.) The middle candle must be
-                // inside the AOI window; its older neighbor may precede it.
-                if i + 1 <= startIdx and i + 2 < n
-                    float mL = array.get(zoneHist.lHist, i + 1)
-                    if mL < array.get(zoneHist.lHist, i + 2) and mL < array.get(zoneHist.lHist, i)
-                        l1Price := mL
-                        l1Idx := i + 1
-                if not na(l1Price)
-                    float c = array.get(zoneHist.cHist, i)
-                    float l = array.get(zoneHist.lHist, i)
-                    if c < l1Price
-                        // Body break of the nearest low → zone from low #1 up
-                        // to the local high of the inverted V between them
-                        float vHigh = na
-                        int vIdx = na
-                        for k = l1Idx to i
-                            float kH = array.get(zoneHist.hHist, k)
-                            if na(vHigh) or kH > vHigh
-                                vHigh := kH
-                                vIdx := k
-                        float zTop = vHigh
-                        float zBtm = l1Price
-                        bool inPrice = zoneScopeInside
-                          ? zTop <= aoi.top and zBtm >= aoi.bottom
-                          : zTop >= aoi.bottom and zBtm <= aoi.top
-                        int zLeftBar = array.get(zoneHist.sHist, vIdx)
-                        if inPrice and zTop > zBtm and zTop - zBtm >= minZoneSize and not zoneExists(supplyZones, zLeftBar, zTop, zBtm)
-                            Zone z = Zone.new(dir = -1, top = zTop, bottom = zBtm,
-                              leftBar = zLeftBar,
-                              leftTime = array.get(zoneHist.tHist, vIdx),
-                              createdBar = array.get(zoneHist.eHist, i))
-                            replayZone(z)
-                            array.unshift(supplyZones, z)
-                            if array.size(supplyZones) > maxZones
-                                array.pop(supplyZones)
-                            created += 1
-                        l1Price := na
-                        l1Idx := na
-                    else if invalidateZoneSweep and l < l1Price
-                        // Wick-first sweep disqualifies the level
-                        l1Price := na
-                        l1Idx := na
-    created
-
-// Mirror: zone-TF 3-candle swing highs are tracked through the window;
-// whenever the NEAREST one (high #1) is broken by a candle BODY closing above
-// it, the V pattern (high #1 → local low → body break) becomes a demand zone
-// spanning [local low .. high #1] — not the breaking high (high #2).
-scanDemandZones(Aoi aoi) =>
-    int created = 0
-    int n = array.size(zoneHist.cHist)
-    if n > 0
-        int startIdx = -1
-        for i = 0 to n - 1
-            if array.get(zoneHist.eHist, i) >= aoi.leftBar
-                startIdx := i
-            else
-                break
-        if startIdx >= 0
-            float h1Price = na
-            int h1Idx = na
-            for i = startIdx to 0
-                if i + 1 <= startIdx and i + 2 < n
-                    float mH = array.get(zoneHist.hHist, i + 1)
-                    if mH > array.get(zoneHist.hHist, i + 2) and mH > array.get(zoneHist.hHist, i)
-                        h1Price := mH
-                        h1Idx := i + 1
-                if not na(h1Price)
-                    float c = array.get(zoneHist.cHist, i)
-                    float h = array.get(zoneHist.hHist, i)
-                    if c > h1Price
-                        // Body break of the nearest high → zone from the V's
-                        // local low up to high #1
-                        float vLow = na
-                        int vIdx = na
-                        for k = h1Idx to i
-                            float kL = array.get(zoneHist.lHist, k)
-                            if na(vLow) or kL < vLow
-                                vLow := kL
-                                vIdx := k
-                        float zTop = h1Price
-                        float zBtm = vLow
-                        bool inPrice = zoneScopeInside
-                          ? zTop <= aoi.top and zBtm >= aoi.bottom
-                          : zTop >= aoi.bottom and zBtm <= aoi.top
-                        int zLeftBar = array.get(zoneHist.sHist, vIdx)
-                        if inPrice and zTop > zBtm and zTop - zBtm >= minZoneSize and not zoneExists(demandZones, zLeftBar, zTop, zBtm)
-                            Zone z = Zone.new(dir = 1, top = zTop, bottom = zBtm,
-                              leftBar = zLeftBar,
-                              leftTime = array.get(zoneHist.tHist, vIdx),
-                              createdBar = array.get(zoneHist.eHist, i))
-                            replayZone(z)
-                            array.unshift(demandZones, z)
-                            if array.size(demandZones) > maxZones
-                                array.pop(demandZones)
-                            created += 1
-                        h1Price := na
-                        h1Idx := na
-                    else if invalidateZoneSweep and h > h1Price
-                        h1Price := na
-                        h1Idx := na
+                if not initialized
+                    if zBearishBreakdown(i)
+                        [p, idx] = zHighestBetween(startIdx, i)
+                        if not na(p)
+                            validHigh := p
+                            validHighIdx := idx
+                            initialized := true
+                            lookingForLow := true
+                    else if zBullishBreakout(i)
+                        [p, idx] = zLowestBetween(startIdx, i)
+                        if not na(p)
+                            validLow := p
+                            validLowIdx := idx
+                            initialized := true
+                            lookingForHigh := true
+                else
+                    // ── Level sweep/break tracking (V9's checkBrokenLevels,
+                    // reduced to the most recent level per side) ──
+                    if not na(validHigh) and not highBroken
+                        if zH(i) > validHigh and zC(i) <= validHigh
+                            highSwept := true
+                        else if zC(i) > validHigh
+                            highBroken := true
+                            if not wantSupply and not (invalidateZoneSweep and highSwept)
+                                [vP, vIdx] = zLowestBetween(validHighIdx - 1, i)
+                                if not na(vP)
+                                    float zTop = validHigh
+                                    float zBtm = vP
+                                    bool inPrice = zoneScopeInside
+                                      ? zTop <= aoi.top and zBtm >= aoi.bottom
+                                      : zTop >= aoi.bottom and zBtm <= aoi.top
+                                    int zLeftBar = array.get(zoneHist.sHist, vIdx)
+                                    if inPrice and zTop > zBtm and zTop - zBtm >= minZoneSize and not zoneExists(demandZones, zLeftBar, zTop, zBtm)
+                                        Zone z = Zone.new(dir = 1, top = zTop, bottom = zBtm,
+                                          leftBar = zLeftBar,
+                                          leftTime = array.get(zoneHist.tHist, vIdx),
+                                          createdBar = array.get(zoneHist.eHist, i))
+                                        replayZone(z)
+                                        array.unshift(demandZones, z)
+                                        if array.size(demandZones) > maxZones
+                                            array.pop(demandZones)
+                                        created += 1
+                    if not na(validLow) and not lowBroken
+                        if zL(i) < validLow and zC(i) >= validLow
+                            lowSwept := true
+                        else if zC(i) < validLow
+                            lowBroken := true
+                            if wantSupply and not (invalidateZoneSweep and lowSwept)
+                                [vP, vIdx] = zHighestBetween(validLowIdx - 1, i)
+                                if not na(vP)
+                                    float zTop = vP
+                                    float zBtm = validLow
+                                    bool inPrice = zoneScopeInside
+                                      ? zTop <= aoi.top and zBtm >= aoi.bottom
+                                      : zTop >= aoi.bottom and zBtm <= aoi.top
+                                    int zLeftBar = array.get(zoneHist.sHist, vIdx)
+                                    if inPrice and zTop > zBtm and zTop - zBtm >= minZoneSize and not zoneExists(supplyZones, zLeftBar, zTop, zBtm)
+                                        Zone z = Zone.new(dir = -1, top = zTop, bottom = zBtm,
+                                          leftBar = zLeftBar,
+                                          leftTime = array.get(zoneHist.tHist, vIdx),
+                                          createdBar = array.get(zoneHist.eHist, i))
+                                        replayZone(z)
+                                        array.unshift(supplyZones, z)
+                                        if array.size(supplyZones) > maxZones
+                                            array.pop(supplyZones)
+                                        created += 1
+                    // ── State machine transitions (V9's main logic: BOS
+                    // first, otherwise breakout/breakdown alternation) ──
+                    if lookingForLow
+                        bool bosBullish = not na(validLow) and zC(i) > validHigh
+                        if bosBullish or zBullishBreakout(i)
+                            [p, idx] = zLowestBetween(validHighIdx - 1, i)
+                            if not na(p)
+                                validLow := p
+                                validLowIdx := idx
+                                lowSwept := false
+                                lowBroken := false
+                                lookingForHigh := true
+                                lookingForLow := false
+                    else if lookingForHigh
+                        bool bosBearish = not na(validHigh) and zC(i) < validLow
+                        if bosBearish or zBearishBreakdown(i)
+                            [p, idx] = zHighestBetween(validLowIdx - 1, i)
+                            if not na(p)
+                                validHigh := p
+                                validHighIdx := idx
+                                highSwept := false
+                                highBroken := false
+                                lookingForLow := true
+                                lookingForHigh := false
     created
 
 // ============================================================================
@@ -607,7 +661,7 @@ if pushedAoi
                             if array.size(aois) > maxAois
                                 array.pop(aois)
                             supplyAoiFlag := true
-                            int created = scanSupplyZones(newAoi)
+                            int created = scanAoiZones(newAoi)
                             if created > 0
                                 supplyZoneCreatedFlag := true
                                 Zone newest = array.get(supplyZones, 0)
@@ -629,7 +683,7 @@ if pushedAoi
                             if array.size(aois) > maxAois
                                 array.pop(aois)
                             demandAoiFlag := true
-                            int created = scanDemandZones(newAoi)
+                            int created = scanAoiZones(newAoi)
                             if created > 0
                                 demandZoneCreatedFlag := true
                                 Zone newest = array.get(demandZones, 0)
