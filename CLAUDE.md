@@ -30,29 +30,26 @@ Scripts are deployed by copying content to TradingView's Pine Editor and saving/
 
 ## Scripts
 
-### Market Structure Mapper Series
+### Market Structure Mapper Series (`market-structure/`)
 
-The core of this repo. Each version builds on the previous:
+Market structure analysis with BOS detection and optional S&D zones. Each version builds on the previous:
 
 | File | Lines | Description |
 |------|-------|-------------|
-| `market-structure-mapper-v2.ps` | 367 | Foundational version. Identifies valid highs/lows, BOS, and liquidity sweeps using a state machine pattern with parallel arrays. |
-| `market-structure-mapper-v3.ps` | 1,115 | Adds higher timeframe (HTF) overlay with dual-timeframe tracking (CTF + HTF). |
-| `market-structure-mapper-v4.ps` | 1,141 | Refactors with custom types (`HighLevel`, `LowLevel`) replacing parallel arrays. Level classifications: strong, weak, broken, swept. |
-| `market-structure-mapper-v5.ps` | 1,838 | Adds supply/demand zones (`Zone` type) with box visualization, break conditions (wick vs close), and ATR-based min height filter. |
-| `market-structure-mapper-v6.ps` | 2,512 | Three-timeframe analysis (CTF + HTF + HTF2/trading range). S&D zones per timeframe. |
-| `market-structure-mapper-v7.ps` | 3,029 | **Latest version.** Full three-timeframe with comprehensive settings, independent toggles per TF, peaks/valleys visualization, broken zone extension. |
-| `__working_version_of_v7.ps` | 2,819 | Experimental variant of V7 with tweaked defaults (lime/maroon colors). |
-| `market-structure-mapper-strategy-v1.ps` | 2,836 | **Strategy** (not indicator). Backtestable zone trading with directional bias filter, R:R config (1:1–5:1), max active trades, zone intersection stats table. |
+| `market-structure/market-structure-mapper-v7.ps` | 3,029 | Three-timeframe (CTF + HTF + HTF2) with comprehensive settings, independent toggles per TF, peaks/valleys visualization, and broken zone extension. |
+| `market-structure/market-structure-mapper-v8.ps` | ~3,500 | Extended from v7 with additional features and refinements. |
+| `market-structure/market-structure-mapper-v9.ps` | ~3,600 | Latest version with further enhancements. |
+| `market-structure/market-structure-mapper-strategy-v1.ps` | 2,836 | **Strategy** (not indicator). Backtestable zone trading with directional bias filter, R:R config (1:1–5:1), max active trades, zone intersection stats table. |
 
-### Supply & Demand Zones Series
+### Supply & Demand Zones Series (`supply-demand-zones/`)
 
 Standalone S&D zone detection using z-score analysis to identify significant price moves:
 
 | File | Lines | Description |
 |------|-------|-------------|
-| `supply-demand-zones-v4.ps` | 471 | Z-score based zone detection. Identifies "explosive" candles via statistical outliers, creates zones at move origins. Tracks touched/crossed status. Configurable significance threshold and move-to-zone ratio filter. |
-| `supply-demand-zones-v8.ps` | 756 | **Multi-timeframe version.** Adds HTF zone detection with independent enable/colors. Maintains HTF candle history arrays for proper lookback. Debug labels option for troubleshooting. |
+| `supply-demand-zones/supply-demand-zones-v4.ps` | 471 | Z-score based zone detection. Identifies "explosive" candles via statistical outliers, creates zones at move origins. Tracks touched/crossed status. Configurable significance threshold and move-to-zone ratio filter. |
+| `supply-demand-zones/supply-demand-zones-v8.ps` | 756 | **Multi-timeframe version.** Adds HTF zone detection with independent enable/colors. Maintains HTF candle history arrays for proper lookback. Debug labels option for troubleshooting. |
+| `supply-demand-zones/market-structure-supply-demand-v1.ps` | ~650 | **Structure-based S&D (MSM-derived, no BOS/CHOCH).** Two-timeframe design: an HTF "AOI" confirms when a high-low-higherhigh's low is body-broken (wick-first sweep invalidates by default); a lower zone-TF retrospective scan then runs the same structure logic inside the AOI — every body break of the nearest zone-TF swing point marks a zone from the V's vertex to the broken level (high #1 / low #1, not the breaking extreme). Both TFs aggregated locally via `timeframe.change()` (the `fvg-mtf-origin-v1.ps` pattern). V11-style lifecycle: gray on touch, stop extending on full break. Zones created retrospectively are replayed through chart history for correct touched/broken status. |
 
 ### Fair Value Gap Series (`fair-value-gaps/`)
 
@@ -60,20 +57,20 @@ FVG = a 3-candle pattern where candle 1 and candle 3 do not overlap, leaving an 
 
 | File | Lines | Description |
 |------|-------|-------------|
-| `fvg-ifvg.ps` | 480 | 5 timeframes, each with independent enable/colors and separate FVG vs IFVG colors. `FVGZone` type with `isIFVG` flag; zones convert in place rather than being recreated. Display modes: All / FVG Only / IFVG Only. Extension modes: `extend.right` or fixed bar count. Uses `request.security()` per TF. |
-| `fvg-ifvg-v2.ps` | 160 | **Pine v6** (the only v6 script in the repo). Single timeframe, adapted from a ChartPrime script. Percentage-based displacement filter (candle range must exceed a % of price). Overlap cleanup deletes older zones intersecting a new one. Unfilled zones retire into small 5-bar historical markers after `longevity` bars. Volume printed in the box text. |
-| `fvg-ifvg-v3.ps` | 198 | Single-timeframe rewrite of V2 with proper HTF support via `request.security()` + HTF OHLC history arrays. Longevity is measured in *TF candles* rather than chart bars. Adds alert flags. Explicitly follows the no-`[1]`-offset rule (see the CRITICAL section below). |
-| `fvg-mtf.ps` | 519 | 4 timeframes, LuxAlgo-derived architecture: state is kept in arrays and **all boxes are redrawn from scratch every bar** (`sendFvg`/`sendIfvg`), using `xloc.bar_time`. Tracks FVG → IFVG transitions with signal labels, plus separate broken-FVG and broken-IFVG arrays. ATR minimum size filter, max IFVG age in TF candles. |
-| `ifvg-detector-mtf.ps` | 379 | 4 timeframes, IFVG-only (regular FVGs are never drawn). Three box styles controlling how the box is bounded: Full Range / IFVG Boundary / FVG Zone. Same redraw-every-bar architecture as `fvg-mtf.ps`. |
-| `fvg-mtf-origin-v1.ps` | 373 | **6 timeframes with origin wedges.** Draws each FVG as a box plus a filled triangle that tapers back to a point at the close of candle 1, showing where the pattern started and ended. Aggregates HTF candles locally via `timeframe.change()` instead of `request.security()` — non-repainting and yields exact chart-bar indices for the wedge anchors. Tracks touched/broken per gap; broken gaps are cut off at the breaking bar. |
-| `lux-algo-ifvg-script.ps` | 175 | Unmodified vendor reference script (© LuxAlgo). Source of the redraw-every-bar `lab`/`fvg` type pattern used by `fvg-mtf.ps` and `ifvg-detector-mtf.ps`. Do not edit; use as reference. |
+| `fair-value-gaps/fvg-ifvg.ps` | 480 | 5 timeframes, each with independent enable/colors and separate FVG vs IFVG colors. `FVGZone` type with `isIFVG` flag; zones convert in place rather than being recreated. Display modes: All / FVG Only / IFVG Only. Extension modes: `extend.right` or fixed bar count. Uses `request.security()` per TF. |
+| `fair-value-gaps/fvg-ifvg-v2.ps` | 160 | **Pine v6** (the only v6 script in the repo). Single timeframe, adapted from a ChartPrime script. Percentage-based displacement filter (candle range must exceed a % of price). Overlap cleanup deletes older zones intersecting a new one. Unfilled zones retire into small 5-bar historical markers after `longevity` bars. Volume printed in the box text. |
+| `fair-value-gaps/fvg-ifvg-v3.ps` | 198 | Single-timeframe rewrite of V2 with proper HTF support via `request.security()` + HTF OHLC history arrays. Longevity is measured in *TF candles* rather than chart bars. Adds alert flags. Explicitly follows the no-`[1]`-offset rule (see the CRITICAL section below). |
+| `fair-value-gaps/fvg-mtf.ps` | 519 | 4 timeframes, LuxAlgo-derived architecture: state is kept in arrays and **all boxes are redrawn from scratch every bar** (`sendFvg`/`sendIfvg`), using `xloc.bar_time`. Tracks FVG → IFVG transitions with signal labels, plus separate broken-FVG and broken-IFVG arrays. ATR minimum size filter, max IFVG age in TF candles. |
+| `fair-value-gaps/ifvg-detector-mtf.ps` | 379 | 4 timeframes, IFVG-only (regular FVGs are never drawn). Three box styles controlling how the box is bounded: Full Range / IFVG Boundary / FVG Zone. Same redraw-every-bar architecture as `fair-value-gaps/fvg-mtf.ps`. |
+| `fair-value-gaps/fvg-mtf-origin-v1.ps` | 373 | **6 timeframes with origin wedges.** Draws each FVG as a box plus a filled triangle that tapers back to a point at the close of candle 1, showing where the pattern started and ended. Aggregates HTF candles locally via `timeframe.change()` instead of `request.security()` — non-repainting and yields exact chart-bar indices for the wedge anchors. Tracks touched/broken per gap; broken gaps are cut off at the breaking bar. |
+| `fair-value-gaps/lux-algo-ifvg-script.ps` | 175 | Unmodified vendor reference script (© LuxAlgo). Source of the redraw-every-bar `lab`/`fvg` type pattern used by `fair-value-gaps/fvg-mtf.ps` and `fair-value-gaps/ifvg-detector-mtf.ps`. Do not edit; use as reference. |
 
 Two distinct rendering architectures coexist here, and mixing them causes bugs:
 
-- **Persistent drawings** (`fvg-ifvg.ps`, `fvg-ifvg-v3.ps`, `fvg-mtf-origin-v1.ps`): a box is created once and mutated via `box.set_*`. Cheaper; box/line counts must be capped explicitly.
-- **Redraw every bar** (`fvg-mtf.ps`, `ifvg-detector-mtf.ps`, LuxAlgo): all drawings are recreated each bar from array state. Simpler state handling, but drawing limits are hit fast and per-object mutation is pointless since the object is discarded next bar.
+- **Persistent drawings** (`fair-value-gaps/fvg-ifvg.ps`, `fair-value-gaps/fvg-ifvg-v3.ps`, `fair-value-gaps/fvg-mtf-origin-v1.ps`): a box is created once and mutated via `box.set_*`. Cheaper; box/line counts must be capped explicitly.
+- **Redraw every bar** (`fair-value-gaps/fvg-mtf.ps`, `fair-value-gaps/ifvg-detector-mtf.ps`, LuxAlgo): all drawings are recreated each bar from array state. Simpler state handling, but drawing limits are hit fast and per-object mutation is pointless since the object is discarded next bar.
 
-### Origin Wedge Pattern (`fvg-mtf-origin-v1.ps`)
+### Origin Wedge Pattern (`fair-value-gaps/fvg-mtf-origin-v1.ps`)
 
 Pine has no polygon primitive, so the triangle is built from two `line`s sharing a start point, joined by a `linefill`:
 
@@ -93,14 +90,14 @@ To get `apexBar`/`leftBar`, HTF candles are aggregated from chart bars rather th
 
 | File | Lines | Description |
 |------|-------|-------------|
-| `candlestick-swing-points.ps` | 120 | Plots horizontal lines from 3-candle swing points (middle candle high/low exceeds neighbors). Lines are solid until wicked (dotted) or closed through (stops extending). |
-| `candle-continuation-theory.ps` | 201 | HTF candle structure analysis for continuation signals. Visualizes HTF candle boxes (N, N-1, N-2) with BOS detection across HTF candles. |
-| `virgin-wick-theory.ps` | 97 | Identifies virgin wicks (uncrossed wick extremes from HTF candles). Array-based tracking with 2-candle expiry. Alerts on close-through. |
-| `htf-engulfing-sweep.ps` | 206 | Detects HTF engulfing patterns with sweep ray generation. Rays extend 2 HTF candles then stop. |
-| `engulfing-bar-play.ps` | 275 | Engulfing bar detection with configurable consecutive-candle filter (default: 3 prior candles in same direction). Ray extensions from pattern extremes. |
-| `wickless-candles.ps` | 29 | Simplest script. Draws horizontal lines at wickless candle levels. No state tracking. |
-| `wickless-candles-v2.ps` | 90 | Enhanced wickless detection with array-based level tracking, alert generation on formation/first cross/retest, and configurable tracking window (default: 20 bars). |
-| `market-structure-trend-lines.ps` | ~940 | Single-TF market structure (extracted from MSM V7) combined with ATR-based zig-zag trend lines through aligned structure highs/lows. Trend lines break when a new structure point deviates beyond ATR tolerance; broken lines remain on chart as dashed historical records. Supports skipping points on the "safe side" of the line. |
+| `swing-points/candlestick-swing-points.ps` | 120 | Plots horizontal lines from 3-candle swing points (middle candle high/low exceeds neighbors). Lines are solid until wicked (dotted) or closed through (stops extending). |
+| `misc/candle-continuation-theory.ps` | 201 | HTF candle structure analysis for continuation signals. Visualizes HTF candle boxes (N, N-1, N-2) with BOS detection across HTF candles. |
+| `virgin-wick-theory/virgin-wick-theory.ps` | 97 | Identifies virgin wicks (uncrossed wick extremes from HTF candles). Array-based tracking with 2-candle expiry. Alerts on close-through. |
+| `engulfing-patterns/htf-engulfing-sweep.ps` | 206 | Detects HTF engulfing patterns with sweep ray generation. Rays extend 2 HTF candles then stop. |
+| `engulfing-patterns/engulfing-bar-play.ps` | 275 | Engulfing bar detection with configurable consecutive-candle filter (default: 3 prior candles in same direction). Ray extensions from pattern extremes. |
+| `wickless-candles/wickless-candles.ps` | 29 | Simplest script. Draws horizontal lines at wickless candle levels. No state tracking. |
+| `wickless-candles/wickless-candles-v2.ps` | 90 | Enhanced wickless detection with array-based level tracking, alert generation on formation/first cross/retest, and configurable tracking window (default: 20 bars). |
+| `market-structure/market-structure-trend-lines.ps` | ~940 | Single-TF market structure (extracted from MSM V7) combined with ATR-based zig-zag trend lines through aligned structure highs/lows. Trend lines break when a new structure point deviates beyond ATR tolerance; broken lines remain on chart as dashed historical records. Supports skipping points on the "safe side" of the line. |
 
 ## Architecture Patterns
 
@@ -165,7 +162,7 @@ if newHTFCandle
 
 **Related fix:** When scanning for the specific LTF bar within an HTF swing candle, use the exact middle candle range `(Bar2-1, Bar1-1)` rather than a wider range like `(Bar2-1, bar_index)` to prevent accidentally selecting bars from adjacent candles.
 
-**Reference:** MSM V7 (`market-structure-mapper-v7.ps`) uses `htfHigh`, `htfLow`, `htfClose` directly (without `[1]`) after `htfNewCandle` detection in all its BOS and level-break logic. This is the proven correct pattern.
+**Reference:** MSM V7 (`market-structure/market-structure-mapper-v7.ps`) uses `htfHigh`, `htfLow`, `htfClose` directly (without `[1]`) after `htfNewCandle` detection in all its BOS and level-break logic. This is the proven correct pattern.
 
 ### HTF History Arrays Pattern (S&D Zones V8)
 
@@ -217,7 +214,7 @@ This allows iterating over previous HTF candles in detection loops, since `htfHi
 - **Changing detection logic:** Modify helper functions or main detection conditions
 - **Adjusting visuals:** Update line/label/box creation functions or `checkBrokenLevels()`
 - **Adding a new timeframe:** Follow the HTF pattern from V6+ (separate state variables, colors, and detection logic per TF)
-- **Adding alerts:** Follow `wickless-candles-v2.ps` or `virgin-wick-theory.ps` patterns for array-based alert tracking
+- **Adding alerts:** Follow `wickless-candles/wickless-candles-v2.ps` or `virgin-wick-theory/virgin-wick-theory.ps` patterns for array-based alert tracking
 
 ## Pine Script Language Notes
 
