@@ -79,6 +79,7 @@ grpZone = "Zone Detection"
 invalidateZoneSweep = input.bool(true, "Wick Sweep Invalidates Structure Level", group = grpZone, tooltip = "Same rule on the zone timeframe: the first break of the state machine's current valid high/low must be a body close-through. A wick trading through the level before any body close disqualifies it as a zone source (the state machine itself is unaffected, like sweeps in MSM).")
 zoneScope           = input.string("Overlap AOI", "Zone / AOI Relationship", options = ["Overlap AOI", "Fully Inside AOI"], group = grpZone, tooltip = "Whether a zone's price range merely has to intersect the AOI band or must sit entirely inside it.")
 omitPreTouched      = input.bool(false, "Discard Zones Touched Before AOI Confirms", group = grpZone, tooltip = "When enabled, a zone that price has already traded back into by the time its AOI confirms is discarded outright (like already-broken zones), instead of starting its life gray/touched.")
+structTouchOnly     = input.bool(false, "Pre-Confirm Touch Requires MSM High/Low", group = grpZone, tooltip = "Only affects 'Discard Zones Touched Before AOI Confirms': when enabled, a zone only counts as already-touched if the zone-TF structure machine formed a full valid high/low beyond the zone's proximal edge after the zone's creation. A quick tap into the zone that never forms structure does not count. Live touch tracking (the gray fill) is unaffected.")
 minAtrMult          = input.float(0.0, "Min Zone Height (ATR multiple)", minval = 0, step = 0.05, group = grpZone, tooltip = "Ignore zones smaller than ATR * this value. 0 disables the filter. ATR is measured on the chart timeframe.")
 atrLen              = input.int(200, "ATR Length", minval = 1, group = grpZone)
 zoneHistLen         = input.int(1000, "Zone-TF Candle History", minval = 100, maxval = 2000, group = grpZone, tooltip = "How many completed zone-TF candles are kept for the retrospective scan when an AOI confirms. AOIs whose V reaches further back than this are only partially scanned.")
@@ -492,6 +493,17 @@ scanAoiZones(Aoi aoi) =>
             int validLowIdx = na
             bool lowSwept = false
             bool lowBroken = false
+            // Zone candidates are collected during the walk and finalized
+            // afterwards, so structure points that form later in the window
+            // can inform the pre-confirmation touch test
+            array<Zone> cands = array.new<Zone>()
+            array<int> candBreakIdx = array.new<int>()
+            // Every structure point the machine registers (price + candle
+            // index of its extreme), for the structure-touch option
+            array<float> structHighP = array.new<float>()
+            array<int> structHighIdx = array.new<int>()
+            array<float> structLowP = array.new<float>()
+            array<int> structLowIdx = array.new<int>()
             // Walk oldest → newest (index 0 = newest candle)
             for i = startIdx to 0
                 if not initialized
@@ -502,6 +514,8 @@ scanAoiZones(Aoi aoi) =>
                             validHighIdx := idx
                             initialized := true
                             lookingForLow := true
+                            array.push(structHighP, p)
+                            array.push(structHighIdx, idx)
                     else if zBullishBreakout(i)
                         [p, idx] = zLowestBetween(startIdx, i)
                         if not na(p)
@@ -509,6 +523,8 @@ scanAoiZones(Aoi aoi) =>
                             validLowIdx := idx
                             initialized := true
                             lookingForHigh := true
+                            array.push(structLowP, p)
+                            array.push(structLowIdx, idx)
                 else
                     // ── Level sweep/break tracking (V9's checkBrokenLevels,
                     // reduced to the most recent level per side) ──
@@ -531,16 +547,8 @@ scanAoiZones(Aoi aoi) =>
                                           leftBar = zLeftBar,
                                           leftTime = array.get(zoneHist.tHist, vIdx),
                                           createdBar = array.get(zoneHist.eHist, i))
-                                        replayZone(z)
-                                        // A zone already broken (or, when the
-                                        // option is on, already touched) by
-                                        // AOI confirmation never existed as
-                                        // far as rendering is concerned
-                                        if not z.broken and not (omitPreTouched and z.touched)
-                                            array.unshift(demandZones, z)
-                                            if array.size(demandZones) > maxZones
-                                                array.pop(demandZones)
-                                            created += 1
+                                        array.push(cands, z)
+                                        array.push(candBreakIdx, i)
                     if not na(validLow) and not lowBroken
                         if zL(i) < validLow and zC(i) >= validLow
                             lowSwept := true
@@ -560,16 +568,8 @@ scanAoiZones(Aoi aoi) =>
                                           leftBar = zLeftBar,
                                           leftTime = array.get(zoneHist.tHist, vIdx),
                                           createdBar = array.get(zoneHist.eHist, i))
-                                        replayZone(z)
-                                        // A zone already broken (or, when the
-                                        // option is on, already touched) by
-                                        // AOI confirmation never existed as
-                                        // far as rendering is concerned
-                                        if not z.broken and not (omitPreTouched and z.touched)
-                                            array.unshift(supplyZones, z)
-                                            if array.size(supplyZones) > maxZones
-                                                array.pop(supplyZones)
-                                            created += 1
+                                        array.push(cands, z)
+                                        array.push(candBreakIdx, i)
                     // ── State machine transitions (V9's main logic: BOS
                     // first, otherwise breakout/breakdown alternation) ──
                     if lookingForLow
@@ -583,6 +583,8 @@ scanAoiZones(Aoi aoi) =>
                                 lowBroken := false
                                 lookingForHigh := true
                                 lookingForLow := false
+                                array.push(structLowP, p)
+                                array.push(structLowIdx, idx)
                     else if lookingForHigh
                         bool bosBearish = not na(validHigh) and zC(i) < validLow
                         if bosBearish or zBearishBreakdown(i)
@@ -594,6 +596,51 @@ scanAoiZones(Aoi aoi) =>
                                 highBroken := false
                                 lookingForLow := true
                                 lookingForHigh := false
+                                array.push(structHighP, p)
+                                array.push(structHighIdx, idx)
+            // ── Finalize candidates: replay each zone's life, then apply
+            // the discard rules ──
+            if array.size(cands) > 0
+                for ci = 0 to array.size(cands) - 1
+                    Zone z = array.get(cands, ci)
+                    int bIdx = array.get(candBreakIdx, ci)
+                    replayZone(z)
+                    // Pre-confirmation touch: chart-bar overlap by default.
+                    // With the structure-touch option, only a full MSM
+                    // high/low formed beyond the zone's proximal edge AFTER
+                    // the zone's creation counts (candle indices shrink
+                    // toward newer, so "after the break" means idx < bIdx —
+                    // a zone's own vertex never qualifies).
+                    bool preTouched = z.touched
+                    if structTouchOnly
+                        preTouched := false
+                        if z.dir == -1
+                            // supply: a valid high at/above the zone bottom
+                            if array.size(structHighP) > 0
+                                for si = 0 to array.size(structHighP) - 1
+                                    if array.get(structHighIdx, si) < bIdx and array.get(structHighP, si) >= z.bottom
+                                        preTouched := true
+                                        break
+                        else
+                            // demand: a valid low at/below the zone top
+                            if array.size(structLowP) > 0
+                                for si = 0 to array.size(structLowP) - 1
+                                    if array.get(structLowIdx, si) < bIdx and array.get(structLowP, si) <= z.top
+                                        preTouched := true
+                                        break
+                    // A zone already broken (or already touched, per the
+                    // options) by AOI confirmation never existed as far as
+                    // rendering is concerned
+                    if not z.broken and not (omitPreTouched and preTouched)
+                        if z.dir == -1
+                            array.unshift(supplyZones, z)
+                            if array.size(supplyZones) > maxZones
+                                array.pop(supplyZones)
+                        else
+                            array.unshift(demandZones, z)
+                            if array.size(demandZones) > maxZones
+                                array.pop(demandZones)
+                        created += 1
     created
 
 // ============================================================================
