@@ -1,0 +1,694 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Market Structure Supply & Demand V3 [SB]", "MS S&D V3 [SB]", overlay = true
+  , max_bars_back   = 5000
+  , max_boxes_count = 500)
+
+// ============================================================================
+// OVERVIEW
+// ============================================================================
+//
+// Marks supply & demand zones derived from the actual structure of price
+// action on two timeframes. No BOS/CHOCH machinery and no structure lines —
+// this replaces the Market Structure Mapper's signal layer with zones only.
+//
+// Supply (bearish) example — demand is the exact mirror:
+//
+//   1. AOI (Area Of Interest), detected on the AOI timeframe:
+//      A swing high (H1), a swing low (L), then a higher high (H2 > H1), and
+//      finally an AOI-TF candle BODY closes below L. If a wick trades below L
+//      before any body closes below it, the low is considered swept and (by
+//      default) no longer qualifies. The AOI is the upside-down-V region:
+//
+//                H2 ─────────────┐
+//               ╱  ╲             │
+//          H1  ╱    ╲            │   AOI price band = [L .. H2]
+//          ╱╲ ╱      ╲           │   AOI time span  = L's bar → break candle
+//         ╱  ╲        ╲          │
+//        ╱   L ────────╲─────────┘
+//                       ╳   ← AOI-TF body close below L confirms the AOI
+//
+//   2. Zone (the V2 algorithm, unchanged in V3 — differs from V1's zone-TF
+//      structure machine):
+//      ONE zone per AOI — the single highest-volume zone-TF candle in the
+//      AOI's reversal leg. For a supply AOI, candidates are the zone-TF
+//      candles from the candle containing the AOI's highest high down to,
+//      but NOT including, the AOI-TF breaking candle (the breaking candle is
+//      never a zone). A candidate only qualifies while its extreme is still
+//      virgin at confirmation: no later chart bar — the breaking candle and
+//      the confirmation bar included — has traded back up to the candidate's
+//      high. Among qualifying candidates the one with the most (chart-bar
+//      aggregated) volume wins, and the zone spans that candle's full
+//      high-low range. Demand AOIs mirror this with untouched lows on the
+//      leg up from the AOI's lowest low. Set Zone Timeframe = AOI Timeframe
+//      to pick from the AOI's own candles.
+//
+//   3. Lifecycle (follows S&D Zones V11): zones extend right, the fill turns
+//      gray on first touch, and a zone stops extending at the bar where it is
+//      fully broken (close beyond its far edge). A zone starts its life at
+//      AOI confirmation — the virgin-extreme rule has already guaranteed its
+//      distal edge is untouched up to that point.
+//
+//   4. V3 display features on top of the V2 engine:
+//      - The zone candle's aggregated volume can be printed inside the zone
+//        (left edge, vertically centered) as plain box text — no extra
+//        drawing objects, minimal visual weight.
+//      - "Top Volume Zones Per Side" renders only the N highest-volume
+//        ACTIVE zones per side (ties go to the more recent zone), with an
+//        optional chart-bar cutoff so only reasonably recent zones compete.
+//        Filtering affects rendering only — every zone is still tracked and
+//        alerts as usual.
+//
+// Both timeframes are aggregated locally from chart bars via
+// timeframe.change() (the fvg-mtf-origin-v1.ps pattern) rather than
+// request.security(). This avoids the request.security() [1] history-offset
+// trap documented in CLAUDE.md, is non-repainting, and yields the exact
+// chart-bar indices and per-candle volume needed for the retrospective scan
+// that runs when an AOI confirms. Trade-off: chart TF <= zone TF <= AOI TF
+// is required, and detection only reaches as far back as loaded chart bars.
+
+// Ensure sufficient historical buffer for the retrospective scans
+max_bars_back(high, 5000)
+max_bars_back(low, 5000)
+max_bars_back(open, 5000)
+max_bars_back(close, 5000)
+max_bars_back(time, 5000)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+grpTf = "Timeframes"
+aoiTfInput  = input.timeframe("240", "AOI Timeframe",  group = grpTf, tooltip = "Higher timeframe on which areas of interest (the structural V / inverted-V) are detected. Must be >= the zone timeframe.")
+zoneTfInput = input.timeframe("",    "Zone Timeframe", group = grpTf, tooltip = "Timeframe on which the actual zones are detected inside each AOI. Blank = chart timeframe. Must be >= the chart timeframe and <= the AOI timeframe.")
+
+grpAoi = "AOI Detection"
+invalidateAoiSweep = input.bool(true, "Wick Sweep Invalidates Structure Point", group = grpAoi, tooltip = "The first break of the structural low/high must be a body close-through. When enabled, a wick trading through the level before any body close disqualifies it from ever confirming an AOI.")
+maxAois            = input.int(15, "Max AOIs Kept", minval = 1, maxval = 50, group = grpAoi)
+
+grpZone = "Zone Detection"
+zoneScope           = input.string("Overlap AOI", "Zone / AOI Relationship", options = ["Overlap AOI", "Fully Inside AOI"], group = grpZone, tooltip = "Whether a candidate candle's price range merely has to intersect the AOI band or must sit entirely inside it.")
+minAtrMult          = input.float(0.0, "Min Zone Height (ATR multiple)", minval = 0, step = 0.05, group = grpZone, tooltip = "Ignore candidate candles smaller than ATR * this value. 0 disables the filter. ATR is measured on the chart timeframe.")
+atrLen              = input.int(200, "ATR Length", minval = 1, group = grpZone)
+zoneHistLen         = input.int(1000, "Zone-TF Candle History", minval = 100, maxval = 2000, group = grpZone, tooltip = "How many completed zone-TF candles are kept for the volume scan when an AOI confirms. AOIs whose reversal leg reaches further back than this are only partially scanned.")
+maxZones            = input.int(100, "Max Zones Per Side", minval = 1, maxval = 200, group = grpZone)
+
+grpLife = "Zone Lifecycle"
+changeColorOnTouched = input.bool(true, "Change Color When Touched", group = grpLife)
+breakOnWick          = input.bool(false, "Break Zones on Wick (not just close)", group = grpLife, tooltip = "A zone is fully broken when price passes completely through it. Off = requires a candle close beyond the far edge; On = a wick is enough.")
+
+grpDisp = "Display"
+showZones       = input.bool(true,  "Show Zones", group = grpDisp)
+showBrokenZones = input.bool(false, "Show Broken Zones", group = grpDisp, tooltip = "Applies to zones broken AFTER their AOI confirmed — they are kept in memory either way; this only controls whether they stay drawn (cut off at the breaking bar). Zones already broken when their AOI confirms are discarded outright and never drawn.")
+showAois        = input.bool(true,  "Show AOIs", group = grpDisp, tooltip = "Draw each confirmed AOI as a dashed outline spanning its structural V.")
+showZoneVolume  = input.bool(true,  "Show Zone Volume", group = grpDisp, tooltip = "Print the zone candle's aggregated volume inside the zone, at its left edge, vertically centered.")
+topZonesPerSide = input.int(0, "Top Volume Zones Per Side", minval = 0, maxval = 50, group = grpDisp, tooltip = "0 = render every zone. Otherwise only the N highest-volume ACTIVE (unbroken) zones render on each side; ties go to the more recent zone. Broken zones keep following 'Show Broken Zones'. Zones are still tracked and alert as usual — this filters rendering only.")
+topZonesCutoff  = input.int(0, "Top Zones Cutoff (chart bars back)", minval = 0, group = grpDisp, tooltip = "Only used when 'Top Volume Zones Per Side' is active. 0 = no limit. Otherwise zones whose candle began more than this many chart bars ago are excluded from the top-volume ranking and not rendered.")
+
+grpCol = "Colors"
+supplyZoneColorInput   = input.color(color.new(color.red,   70), "Supply Zone Color",    group = grpCol)
+supplyZoneBorderInput  = input.color(color.new(color.red,   50), "Supply Zone Border",   group = grpCol)
+demandZoneColorInput   = input.color(color.new(color.green, 70), "Demand Zone Color",    group = grpCol)
+demandZoneBorderInput  = input.color(color.new(color.green, 50), "Demand Zone Border",   group = grpCol)
+zoneTouchedColorInput  = input.color(color.new(color.gray,  80), "Zone Touched Color",   group = grpCol)
+aoiSupplyColorInput    = input.color(color.new(color.red,   40), "Supply AOI Outline",   group = grpCol)
+aoiDemandColorInput    = input.color(color.new(color.green, 40), "Demand AOI Outline",   group = grpCol)
+aoiFillTransp          = input.int(96, "AOI Fill Transparency", minval = 0, maxval = 100, group = grpCol)
+volumeTextColorInput   = input.color(color.new(color.gray,  30), "Zone Volume Text",     group = grpCol)
+
+// ============================================================================
+// TIMEFRAME RESOLUTION & VALIDATION
+// ============================================================================
+
+// Kept as inline expressions so they stay "simple string", which
+// timeframe.change() and timeframe.in_seconds() both require.
+aoiTfRes  = aoiTfInput  == "" ? timeframe.period : aoiTfInput
+zoneTfRes = zoneTfInput == "" ? timeframe.period : zoneTfInput
+
+chartSec = timeframe.in_seconds(timeframe.period)
+zoneSec  = timeframe.in_seconds(zoneTfRes)
+aoiSec   = timeframe.in_seconds(aoiTfRes)
+
+if barstate.isfirst
+    if zoneSec < chartSec
+        runtime.error("Zone Timeframe must be >= the chart timeframe (local aggregation cannot build candles below the chart TF).")
+    if aoiSec < zoneSec
+        runtime.error("AOI Timeframe must be >= the Zone Timeframe.")
+
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
+
+// Locally aggregated candle history for one timeframe.
+// Index 0 = most recently COMPLETED candle (unshift on period change).
+type CandleHist
+    array<float> oHist
+    array<float> hHist
+    array<float> lHist
+    array<float> cHist
+    array<float> vHist        // summed chart-bar volume of the candle
+    array<int>   sHist        // first chart bar of the candle
+    array<int>   eHist        // last chart bar of the candle
+    array<int>   tHist        // chart time of the candle's first bar
+    float        curOpen  = na    // developing candle
+    float        curHigh  = na
+    float        curLow   = na
+    float        curVol   = na
+    int          curStart = na
+    int          curStartTime = na
+    int          maxLen
+    int          count = 0        // total candles ever pushed (sequence numbering)
+
+// A confirmed 3-candle swing point on the AOI timeframe.
+type SwingPoint
+    int   seq             // AOI-TF candle sequence number of the middle candle
+    float price           // the swing extreme
+    int   extremeBar      // chart bar of the actual intra-candle extreme
+    int   extremeTime
+    bool  active = true   // false once body-broken or (optionally) wick-swept
+
+// A confirmed area of interest (the structural V / inverted-V).
+type Aoi
+    int   dir             // -1 = supply, 1 = demand
+    float top
+    float bottom
+    int   leftBar         // chart bar of the structural extreme (V start)
+    int   leftTime
+    int   extremeBar      // chart bar of the AOI's own extreme (highest high
+                          // for supply / lowest low for demand) — the start
+                          // of the reversal leg the zone is picked from
+    int   confirmBar      // last chart bar of the body-break AOI candle
+    int   confirmTime
+
+// A supply/demand zone: the picked high-volume candle inside an AOI.
+type Zone
+    int   dir             // -1 = supply, 1 = demand
+    float top
+    float bottom
+    int   leftBar         // first chart bar of the picked candle
+    int   leftTime
+    int   createdBar      // AOI confirmation bar — the zone's life starts here
+    float volume  = na    // the picked candle's aggregated chart-bar volume
+    bool  touched = false
+    bool  broken  = false
+    int   brokenTime = na
+
+// ============================================================================
+// STATE
+// ============================================================================
+
+var CandleHist zoneHist = CandleHist.new(
+  oHist = array.new<float>(), hHist = array.new<float>(), lHist = array.new<float>(),
+  cHist = array.new<float>(), vHist = array.new<float>(), sHist = array.new<int>(),
+  eHist = array.new<int>(),   tHist = array.new<int>(),   maxLen = zoneHistLen)
+
+var CandleHist aoiHist = CandleHist.new(
+  oHist = array.new<float>(), hHist = array.new<float>(), lHist = array.new<float>(),
+  cHist = array.new<float>(), vHist = array.new<float>(), sHist = array.new<int>(),
+  eHist = array.new<int>(),   tHist = array.new<int>(),   maxLen = 8)
+
+var array<SwingPoint> swingHighs = array.new<SwingPoint>()
+var array<SwingPoint> swingLows  = array.new<SwingPoint>()
+
+var array<Aoi>  aois        = array.new<Aoi>()
+var array<Zone> supplyZones = array.new<Zone>()
+var array<Zone> demandZones = array.new<Zone>()
+
+// Alert flags (V11 pattern: set during the bar, read by alertcondition, reset at end)
+var bool supplyAoiFlag         = false
+var bool demandAoiFlag         = false
+var bool supplyZoneCreatedFlag = false
+var bool demandZoneCreatedFlag = false
+var bool supplyTouchFlag       = false
+var bool demandTouchFlag       = false
+var bool supplyBreakFlag       = false
+var bool demandBreakFlag       = false
+
+var float supplyZoneCreatedTop = na
+var float supplyZoneCreatedBtm = na
+var float demandZoneCreatedTop = na
+var float demandZoneCreatedBtm = na
+
+// ATR must be computed on every bar for consistency
+minZoneSize = minAtrMult > 0 ? nz(ta.atr(atrLen)) * minAtrMult : 0.0
+
+zoneScopeInside = zoneScope == "Fully Inside AOI"
+
+// ============================================================================
+// AGGREGATION
+// ============================================================================
+
+// Advance one timeframe's local aggregation by one chart bar. On the first bar
+// of a new period the just-completed candle (which ended on the previous chart
+// bar, closing at close[1]) is pushed onto the history. Returns true when a
+// completed candle was pushed.
+advanceHist(CandleHist ch, bool newPeriod) =>
+    bool pushed = false
+    if newPeriod
+        if not na(ch.curStart)
+            array.unshift(ch.oHist, ch.curOpen)
+            array.unshift(ch.hHist, ch.curHigh)
+            array.unshift(ch.lHist, ch.curLow)
+            array.unshift(ch.cHist, close[1])
+            array.unshift(ch.vHist, nz(ch.curVol))
+            array.unshift(ch.sHist, ch.curStart)
+            array.unshift(ch.eHist, bar_index - 1)
+            array.unshift(ch.tHist, ch.curStartTime)
+            ch.count += 1
+            pushed := true
+            if array.size(ch.hHist) > ch.maxLen
+                array.pop(ch.oHist)
+                array.pop(ch.hHist)
+                array.pop(ch.lHist)
+                array.pop(ch.cHist)
+                array.pop(ch.vHist)
+                array.pop(ch.sHist)
+                array.pop(ch.eHist)
+                array.pop(ch.tHist)
+        ch.curOpen := open
+        ch.curHigh := high
+        ch.curLow := low
+        ch.curVol := nz(volume)
+        ch.curStart := bar_index
+        ch.curStartTime := time
+    else
+        ch.curOpen := na(ch.curOpen) ? open : ch.curOpen
+        ch.curHigh := na(ch.curHigh) ? high : math.max(ch.curHigh, high)
+        ch.curLow := na(ch.curLow) ? low : math.min(ch.curLow, low)
+        ch.curVol := nz(ch.curVol) + nz(volume)
+        if na(ch.curStart)
+            ch.curStart := bar_index
+            ch.curStartTime := time
+    pushed
+
+// ============================================================================
+// CHART-BAR SCAN HELPERS
+// ============================================================================
+
+// Highest high within one aggregated candle's chart-bar range.
+// Returns [price, chartBar, chartTime].
+findHighestInCandle(int sBar, int eBar) =>
+    float bestP = na
+    int bestBar = na
+    int bestT = na
+    int offA = bar_index - eBar
+    int offB = math.min(bar_index - sBar, 4999)
+    if offA >= 0 and offA <= offB
+        for j = offA to offB
+            if na(bestP) or high[j] > bestP
+                bestP := high[j]
+                bestBar := bar_index - j
+                bestT := time[j]
+    [bestP, bestBar, bestT]
+
+// Lowest low within one aggregated candle's chart-bar range.
+findLowestInCandle(int sBar, int eBar) =>
+    float bestP = na
+    int bestBar = na
+    int bestT = na
+    int offA = bar_index - eBar
+    int offB = math.min(bar_index - sBar, 4999)
+    if offA >= 0 and offA <= offB
+        for j = offA to offB
+            if na(bestP) or low[j] < bestP
+                bestP := low[j]
+                bestBar := bar_index - j
+                bestT := time[j]
+    [bestP, bestBar, bestT]
+
+// Highest high on chart bars from fromBar to the current bar. Ties keep the
+// most recent bar. Returns [price, chartBar].
+findHighestSince(int fromBar) =>
+    float bestP = na
+    int bestBar = na
+    int maxOff = math.min(bar_index - fromBar, 4999)
+    if maxOff >= 0
+        for j = 0 to maxOff
+            if na(bestP) or high[j] > bestP
+                bestP := high[j]
+                bestBar := bar_index - j
+    [bestP, bestBar]
+
+// Lowest low on chart bars from fromBar to the current bar.
+findLowestSince(int fromBar) =>
+    float bestP = na
+    int bestBar = na
+    int maxOff = math.min(bar_index - fromBar, 4999)
+    if maxOff >= 0
+        for j = 0 to maxOff
+            if na(bestP) or low[j] < bestP
+                bestP := low[j]
+                bestBar := bar_index - j
+    [bestP, bestBar]
+
+// ============================================================================
+// AOI CONFIRMATION
+// ============================================================================
+
+// A swing low was just body-broken on the AOI timeframe. Confirm the supply
+// AOI: there must be a swing high before the low (H1) and a higher high after
+// it (H2 > H1). AOI band = [low .. H2], spanning from the low to the break.
+attemptSupplyAoi(SwingPoint sl) =>
+    Aoi result = na
+    float h1 = na
+    if array.size(swingHighs) > 0
+        for i = array.size(swingHighs) - 1 to 0
+            SwingPoint sh = array.get(swingHighs, i)
+            if sh.seq < sl.seq
+                h1 := sh.price
+                break
+    if not na(h1)
+        [h2p, h2b] = findHighestSince(sl.extremeBar)
+        if not na(h2p)
+            if h2b > sl.extremeBar and h2p > h1
+                result := Aoi.new(dir = -1, top = h2p, bottom = sl.price,
+                  leftBar = sl.extremeBar, leftTime = sl.extremeTime,
+                  extremeBar = h2b,
+                  confirmBar = bar_index - 1, confirmTime = time[1])
+    result
+
+// Mirror: a swing high was just body-broken upward. Demand AOI requires a
+// swing low before it (L1) and a lower low after it (L2 < L1).
+attemptDemandAoi(SwingPoint sh) =>
+    Aoi result = na
+    float l1 = na
+    if array.size(swingLows) > 0
+        for i = array.size(swingLows) - 1 to 0
+            SwingPoint sl = array.get(swingLows, i)
+            if sl.seq < sh.seq
+                l1 := sl.price
+                break
+    if not na(l1)
+        [l2p, l2b] = findLowestSince(sh.extremeBar)
+        if not na(l2p)
+            if l2b > sh.extremeBar and l2p < l1
+                result := Aoi.new(dir = 1, top = sh.price, bottom = l2p,
+                  leftBar = sh.extremeBar, leftTime = sh.extremeTime,
+                  extremeBar = l2b,
+                  confirmBar = bar_index - 1, confirmTime = time[1])
+    result
+
+// ============================================================================
+// ZONE SCANNING — HIGHEST-VOLUME VIRGIN CANDLE IN THE AOI'S REVERSAL LEG
+// ============================================================================
+
+// Nested AOIs (one break candle clearing several levels) can pick the same
+// candle — skip exact duplicates.
+zoneExists(array<Zone> zones, int leftBar, float top, float btm) =>
+    bool found = false
+    if array.size(zones) > 0
+        for i = 0 to array.size(zones) - 1
+            Zone z = array.get(zones, i)
+            if z.leftBar == leftBar and z.top == top and z.bottom == btm
+                found := true
+                break
+    found
+
+// Pick the single V2 zone for a freshly confirmed AOI: the highest-volume
+// zone-TF candle in the AOI's reversal leg whose extreme is still virgin.
+//
+//   supply AOI: candidates run from the candle containing the AOI's highest
+//     high down to — but NOT including — the AOI-TF breaking candle (the
+//     breaking candle is never a zone). A candidate qualifies only while no
+//     later chart bar (the breaking candle and the confirmation bar
+//     included) has traded back up to its high. The zone spans the winning
+//     candle's full high-low range.
+//   demand AOI: mirrored — untouched lows on the leg up from the AOI's
+//     lowest low.
+//
+// Volume is the chart-bar volume summed into each aggregated zone-TF candle.
+// Walking newest → oldest while carrying the running extreme of everything
+// after the candle under test keeps the virgin check O(1) per candle.
+// Returns the number of zones created (0 or 1).
+scanAoiZone(Aoi aoi) =>
+    int created = 0
+    bool wantSupply = aoi.dir == -1
+    int n = array.size(zoneHist.cHist)
+    if n > 0 and array.size(aoiHist.sHist) > 0
+        // First chart bar of the AOI-TF breaking candle (just pushed, index
+        // 0): zone-TF candles from there onward belong to the break and are
+        // excluded from candidacy (but still count for the virgin test)
+        int breakStart = array.get(aoiHist.sHist, 0)
+        // Running extreme of every chart bar after the candle under test,
+        // seeded with the developing zone-TF candle so the confirmation bar
+        // (and any unaligned remainder) is covered
+        float runExt = wantSupply ? nz(zoneHist.curHigh, high) : nz(zoneHist.curLow, low)
+        float bestVol = na
+        int bestIdx = na
+        // Walk newest → oldest, stopping once past the AOI's extreme candle
+        for i = 0 to n - 1
+            int eB = array.get(zoneHist.eHist, i)
+            if eB < aoi.extremeBar
+                break
+            float hC = array.get(zoneHist.hHist, i)
+            float lC = array.get(zoneHist.lHist, i)
+            if eB < breakStart
+                bool virgin = wantSupply ? runExt < hC : runExt > lC
+                bool inPrice = zoneScopeInside
+                  ? hC <= aoi.top and lC >= aoi.bottom
+                  : hC >= aoi.bottom and lC <= aoi.top
+                if virgin and inPrice and hC > lC and hC - lC >= minZoneSize
+                    float v = array.get(zoneHist.vHist, i)
+                    if na(bestVol) or v > bestVol
+                        bestVol := v
+                        bestIdx := i
+            runExt := wantSupply ? math.max(runExt, hC) : math.min(runExt, lC)
+        if not na(bestIdx)
+            float zTop = array.get(zoneHist.hHist, bestIdx)
+            float zBtm = array.get(zoneHist.lHist, bestIdx)
+            int zLeftBar = array.get(zoneHist.sHist, bestIdx)
+            if wantSupply
+                if not zoneExists(supplyZones, zLeftBar, zTop, zBtm)
+                    array.unshift(supplyZones, Zone.new(dir = -1, top = zTop, bottom = zBtm,
+                      leftBar = zLeftBar, leftTime = array.get(zoneHist.tHist, bestIdx),
+                      createdBar = bar_index, volume = bestVol))
+                    if array.size(supplyZones) > maxZones
+                        array.pop(supplyZones)
+                    created += 1
+            else
+                if not zoneExists(demandZones, zLeftBar, zTop, zBtm)
+                    array.unshift(demandZones, Zone.new(dir = 1, top = zTop, bottom = zBtm,
+                      leftBar = zLeftBar, leftTime = array.get(zoneHist.tHist, bestIdx),
+                      createdBar = bar_index, volume = bestVol))
+                    if array.size(demandZones) > maxZones
+                        array.pop(demandZones)
+                    created += 1
+    created
+
+// ============================================================================
+// ZONE LIFECYCLE (per chart bar)
+// ============================================================================
+
+// Touch/break tracking on chart-bar prices. Returns [touchFired, breakFired].
+updateZones(array<Zone> zones) =>
+    bool tFired = false
+    bool bFired = false
+    if array.size(zones) > 0
+        for i = 0 to array.size(zones) - 1
+            Zone z = array.get(zones, i)
+            if not z.broken
+                if not z.touched and low <= z.top and high >= z.bottom
+                    z.touched := true
+                    tFired := true
+                bool brokeNow = z.dir == -1
+                  ? (breakOnWick ? high > z.top : close > z.top)
+                  : (breakOnWick ? low < z.bottom : close < z.bottom)
+                if brokeNow
+                    z.broken := true
+                    z.brokenTime := time
+                    bFired := true
+    [tFired, bFired]
+
+// ============================================================================
+// MAIN LOGIC
+// ============================================================================
+
+// Aggregate the zone TF BEFORE the AOI TF: when both periods roll over on the
+// same chart bar (the usual case), the AOI confirmation scan must already see
+// the final zone-TF candle of the completed AOI candle.
+bool zoneNewPeriod = timeframe.change(zoneTfRes)
+bool aoiNewPeriod = timeframe.change(aoiTfRes)
+
+advanceHist(zoneHist, zoneNewPeriod)
+bool pushedAoi = advanceHist(aoiHist, aoiNewPeriod)
+
+if pushedAoi
+    // ── Swing detection on the middle of the last three completed candles ──
+    // New swing points are registered BEFORE the break/sweep checks so the
+    // just-completed candle is evaluated against them immediately.
+    if array.size(aoiHist.hHist) >= 3
+        float mH = array.get(aoiHist.hHist, 1)
+        float mL = array.get(aoiHist.lHist, 1)
+        int mSeq = aoiHist.count - 2
+        int mSBar = array.get(aoiHist.sHist, 1)
+        int mEBar = array.get(aoiHist.eHist, 1)
+        if mH > array.get(aoiHist.hHist, 2) and mH > array.get(aoiHist.hHist, 0)
+            [p, b, t] = findHighestInCandle(mSBar, mEBar)
+            if not na(b)
+                array.push(swingHighs, SwingPoint.new(seq = mSeq, price = p, extremeBar = b, extremeTime = t))
+                if array.size(swingHighs) > 30
+                    array.shift(swingHighs)
+        if mL < array.get(aoiHist.lHist, 2) and mL < array.get(aoiHist.lHist, 0)
+            [p, b, t] = findLowestInCandle(mSBar, mEBar)
+            if not na(b)
+                array.push(swingLows, SwingPoint.new(seq = mSeq, price = p, extremeBar = b, extremeTime = t))
+                if array.size(swingLows) > 30
+                    array.shift(swingLows)
+
+    // ── Check the just-completed AOI candle against tracked swing points ──
+    if array.size(aoiHist.cHist) > 0
+        float cH = array.get(aoiHist.hHist, 0)
+        float cL = array.get(aoiHist.lHist, 0)
+        float cC = array.get(aoiHist.cHist, 0)
+
+        // Supply: body close below a tracked swing low confirms (or consumes) it
+        if array.size(swingLows) > 0
+            for i = array.size(swingLows) - 1 to 0
+                SwingPoint sl = array.get(swingLows, i)
+                if sl.active
+                    if cC < sl.price
+                        sl.active := false
+                        Aoi newAoi = attemptSupplyAoi(sl)
+                        if not na(newAoi)
+                            array.unshift(aois, newAoi)
+                            if array.size(aois) > maxAois
+                                array.pop(aois)
+                            supplyAoiFlag := true
+                            int created = scanAoiZone(newAoi)
+                            if created > 0
+                                supplyZoneCreatedFlag := true
+                                Zone newest = array.get(supplyZones, 0)
+                                supplyZoneCreatedTop := newest.top
+                                supplyZoneCreatedBtm := newest.bottom
+                    else if invalidateAoiSweep and cL < sl.price
+                        sl.active := false
+
+        // Demand: body close above a tracked swing high
+        if array.size(swingHighs) > 0
+            for i = array.size(swingHighs) - 1 to 0
+                SwingPoint sh = array.get(swingHighs, i)
+                if sh.active
+                    if cC > sh.price
+                        sh.active := false
+                        Aoi newAoi = attemptDemandAoi(sh)
+                        if not na(newAoi)
+                            array.unshift(aois, newAoi)
+                            if array.size(aois) > maxAois
+                                array.pop(aois)
+                            demandAoiFlag := true
+                            int created = scanAoiZone(newAoi)
+                            if created > 0
+                                demandZoneCreatedFlag := true
+                                Zone newest = array.get(demandZones, 0)
+                                demandZoneCreatedTop := newest.top
+                                demandZoneCreatedBtm := newest.bottom
+                    else if invalidateAoiSweep and cH > sh.price
+                        sh.active := false
+
+// Live touch/break tracking. A V2 zone starts its life at AOI confirmation,
+// so the confirmation bar itself is its first tracked bar (the virgin rule
+// only protects the distal edge — a zone whose range the confirmation bar
+// already reaches into is born touched).
+[sTouch, sBreak] = updateZones(supplyZones)
+[dTouch, dBreak] = updateZones(demandZones)
+supplyTouchFlag := supplyTouchFlag or sTouch
+supplyBreakFlag := supplyBreakFlag or sBreak
+demandTouchFlag := demandTouchFlag or dTouch
+demandBreakFlag := demandBreakFlag or dBreak
+
+// ============================================================================
+// RENDERING — redraw everything on the last bar only (MSM V9 / V11 pattern)
+// ============================================================================
+
+// Is this active zone within the top-zones cutoff window?
+withinCutoff(Zone z) =>
+    topZonesCutoff == 0 or bar_index - z.leftBar <= topZonesCutoff
+
+renderZones(array<Zone> zones, color fillCol, color borderCol) =>
+    int n = array.size(zones)
+    if n > 0
+        for i = 0 to n - 1
+            Zone z = array.get(zones, i)
+            bool draw = false
+            if z.broken
+                draw := showBrokenZones
+            else
+                draw := true
+                // Top-volume mode: only the N highest-volume active zones
+                // inside the cutoff window render. Rank by counting eligible
+                // zones with more volume; ties go to the more recent zone.
+                if topZonesPerSide > 0
+                    if not withinCutoff(z)
+                        draw := false
+                    else
+                        int higher = 0
+                        for j = 0 to n - 1
+                            if j != i
+                                Zone o = array.get(zones, j)
+                                if not o.broken
+                                    if withinCutoff(o)
+                                        if o.volume > z.volume or (o.volume == z.volume and o.leftBar > z.leftBar)
+                                            higher += 1
+                        draw := higher < topZonesPerSide
+            if draw
+                int rightT = z.broken ? z.brokenTime : time
+                color fillC = changeColorOnTouched and z.touched ? zoneTouchedColorInput : fillCol
+                // The volume printout rides on the box itself (no extra
+                // drawing objects): left-aligned, vertically centered.
+                string volTxt = showZoneVolume and not na(z.volume) ? str.tostring(z.volume, format.volume) : ""
+                box.new(z.leftTime, z.top, rightT, z.bottom, xloc = xloc.bar_time,
+                  bgcolor = fillC, border_color = borderCol,
+                  border_style = z.broken ? line.style_dashed : line.style_solid,
+                  text = volTxt, text_size = size.tiny, text_color = volumeTextColorInput,
+                  text_halign = text.align_left, text_valign = text.align_center)
+    true
+
+if barstate.islast
+    for bx in box.all
+        bx.delete()
+
+    if showAois and array.size(aois) > 0
+        for i = 0 to array.size(aois) - 1
+            Aoi a = array.get(aois, i)
+            color col = a.dir == -1 ? aoiSupplyColorInput : aoiDemandColorInput
+            box.new(a.leftTime, a.top, a.confirmTime, a.bottom, xloc = xloc.bar_time,
+              bgcolor = color.new(col, aoiFillTransp), border_color = col,
+              border_style = line.style_dashed)
+
+    if showZones
+        renderZones(supplyZones, supplyZoneColorInput, supplyZoneBorderInput)
+        renderZones(demandZones, demandZoneColorInput, demandZoneBorderInput)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+plot(supplyZoneCreatedTop, title = "Supply Zone Created Top",    display = display.none)
+plot(supplyZoneCreatedBtm, title = "Supply Zone Created Bottom", display = display.none)
+plot(demandZoneCreatedTop, title = "Demand Zone Created Top",    display = display.none)
+plot(demandZoneCreatedBtm, title = "Demand Zone Created Bottom", display = display.none)
+
+alertcondition(supplyAoiFlag,         title = "Supply AOI Confirmed", message = "Supply AOI confirmed on {{ticker}}")
+alertcondition(demandAoiFlag,         title = "Demand AOI Confirmed", message = "Demand AOI confirmed on {{ticker}}")
+alertcondition(supplyZoneCreatedFlag, title = "Supply Zone Created",  message = 'Supply Zone created on {{ticker}}, Top: {{plot("Supply Zone Created Top")}}, Bottom: {{plot("Supply Zone Created Bottom")}}')
+alertcondition(demandZoneCreatedFlag, title = "Demand Zone Created",  message = 'Demand Zone created on {{ticker}}, Top: {{plot("Demand Zone Created Top")}}, Bottom: {{plot("Demand Zone Created Bottom")}}')
+alertcondition(supplyTouchFlag,       title = "Supply Zone Touched",  message = "Price touched a Supply Zone on {{ticker}}")
+alertcondition(demandTouchFlag,       title = "Demand Zone Touched",  message = "Price touched a Demand Zone on {{ticker}}")
+alertcondition(supplyBreakFlag,       title = "Supply Zone Broken",   message = "A Supply Zone was fully broken on {{ticker}}")
+alertcondition(demandBreakFlag,       title = "Demand Zone Broken",   message = "A Demand Zone was fully broken on {{ticker}}")
+
+// Reset all alert flags at end of bar
+supplyAoiFlag := false
+demandAoiFlag := false
+supplyZoneCreatedFlag := false
+demandZoneCreatedFlag := false
+supplyTouchFlag := false
+demandTouchFlag := false
+supplyBreakFlag := false
+demandBreakFlag := false
+supplyZoneCreatedTop := na
+supplyZoneCreatedBtm := na
+demandZoneCreatedTop := na
+demandZoneCreatedBtm := na
