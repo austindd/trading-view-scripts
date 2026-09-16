@@ -662,6 +662,12 @@ updateZones(array<Zone> zones) =>
                   ? (breakOnWick ? high > z.top : close > z.top)
                   : (breakOnWick ? low < z.bottom : close < z.bottom)
                 if brokeNow
+                    // A break implies the zone was consumed even when price
+                    // fully gapped through it without any bar overlapping
+                    // the zone's range — mark it touched too so it renders
+                    // in the touched color. No touch alert is fired for
+                    // this; the break alert covers the event.
+                    z.touched := true
                     z.broken := true
                     z.brokenTime := time
                     bFired := true
