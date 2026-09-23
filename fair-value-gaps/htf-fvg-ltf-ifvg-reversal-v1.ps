@@ -31,14 +31,20 @@ indicator("HTF FVG + LTF IFVG Reversal V1 [SB]", "FVG/IFVG Reversal [SB]", overl
 //        - the HTF FVG must still be unbroken,
 //        - the HTF FVG must have been confirmed before the LTF pattern
 //          started (no hindsight matches),
-//        - the LTF FVG must sit inside the HTF FVG (overlap / fully inside /
-//          midpoint inside, selectable),
+//        - the tip of the IFVG must sit within the HTF FVG: the lowest low
+//          (bullish inversion) / highest high (bearish inversion) reached
+//          from candle 1 of the LTF pattern through the inverting candle.
+//          A move that pierced clean through one HTF FVG still counts if its
+//          tip rests inside a different one,
+//        - optionally, the LTF FVG itself must also sit inside the HTF FVG
+//          (overlap / fully inside / midpoint inside),
 //        - the LTF timeframe must be strictly lower than the HTF timeframe.
 //
 //     When at least one HTF FVG qualifies, the LTF candle that completed the
 //     inversion is marked with a highlight box around that candle and/or a
-//     label listing which LTF timeframe inverted inside which HTF timeframes.
-//     The IFVG zone itself is never drawn.
+//     small dot below (bull) / above (bear) it. Hovering the dot shows which
+//     LTF timeframe inverted inside which HTF timeframes. The IFVG zone itself
+//     is never drawn.
 //
 // All timeframes are aggregated locally from chart bars via timeframe.change()
 // (the fvg-mtf-origin-v1.ps pattern) rather than request.security(). This is
@@ -93,15 +99,14 @@ l3On = input.bool(true, "3", inline = "l3", group = grpLtf)
 l3Tf = input.timeframe("3", "", inline = "l3", group = grpLtf)
 l4On = input.bool(true, "4", inline = "l4", group = grpLtf)
 l4Tf = input.timeframe("5", "", inline = "l4", group = grpLtf)
-containMode = input.string("Overlap", "LTF FVG Must Be", options = ["Overlap", "Fully Inside", "Midpoint Inside"], group = grpLtf, tooltip = "How the LTF FVG must relate to the HTF FVG.\nOverlap: the two ranges intersect.\nFully Inside: the LTF FVG is entirely within the HTF FVG.\nMidpoint Inside: the LTF FVG's midpoint is within the HTF FVG.")
+containMode = input.string("Any", "LTF FVG Must Also Be", options = ["Any", "Overlap", "Fully Inside", "Midpoint Inside"], group = grpLtf, tooltip = "The IFVG's tip (lowest low for bullish / highest high for bearish, from the start of the LTF pattern through the inverting candle) must always sit within the HTF FVG. This adds an optional extra rule for the LTF FVG itself.\nAny: no extra rule.\nOverlap: the two ranges intersect.\nFully Inside: the LTF FVG is entirely within the HTF FVG.\nMidpoint Inside: the LTF FVG's midpoint is within the HTF FVG.")
 ltfMinAtr   = input.float(0.0, "Min Gap Size (ATR multiple)", minval = 0, step = 0.05, group = grpLtf, tooltip = "Ignore LTF gaps smaller than chart ATR * this value. 0 disables the filter.")
 ltfMaxAge   = input.int(30, "Max FVG Age (LTF candles)", minval = 1, maxval = 500, group = grpLtf, tooltip = "An LTF FVG older than this many candles of its own timeframe can no longer produce an inversion signal.")
 ltfMaxCands = input.int(50, "Max Tracked FVGs Per Timeframe", minval = 1, maxval = 200, group = grpLtf)
 
 grpSig = "Reversal Signals"
-markerStyle  = input.string("Label + Candle Box", "Marker", options = ["Label + Candle Box", "Label", "Candle Box"], group = grpSig, tooltip = "Candle Box outlines the LTF candle that completed the inversion (all of its chart bars). Label sits below (bull) / above (bear) that candle.")
-labelMode    = input.string("Timeframes", "Label Text", options = ["Timeframes", "Arrow Only"], group = grpSig, tooltip = "Timeframes: e.g. '1m in 5m/15m' = a 1m IFVG inside the 5m and 15m FVGs. Arrow Only: a plain triangle; the timeframe text is still shown as the label's hover tooltip.")
-labelSize    = input.string("small", "Label Size", options = ["tiny", "small", "normal"], group = grpSig)
+markerStyle  = input.string("Dot + Candle Box", "Marker", options = ["Dot + Candle Box", "Dot", "Candle Box"], group = grpSig, tooltip = "Candle Box outlines the LTF candle that completed the inversion (all of its chart bars). Dot sits below (bull) / above (bear) that candle; hover it to see the timeframes, e.g. '1m in 5m/15m'.")
+dotOffset    = input.float(0.3, "Dot Offset (ATR multiple)", minval = 0, step = 0.05, group = grpSig, tooltip = "Distance between the candle's wick and the dot.")
 sigBullCol   = input.color(#00e676, "Bull", inline = "sc", group = grpSig)
 sigBearCol   = input.color(#ff1744, "Bear", inline = "sc", group = grpSig)
 sigBoxTransp = input.int(75, "Candle Box Transparency", minval = 0, maxval = 100, group = grpSig)
@@ -124,6 +129,7 @@ type Fvg
     int   c1Start                 // first chart bar of candle 1 of the pattern
     int   leftBar                 // first chart bar of candle 3 (box left edge)
     int   createdBar              // chart bar the gap was confirmed on
+    float tip                     // LTF only: highest high (bull gap) / lowest low (bear gap) since candle 1
     int   age     = 0             // LTF only: own-timeframe candles completed since creation
     bool  touched = false
     bool  broken  = false
@@ -156,9 +162,8 @@ HIST_LEN  = 6
 atrVal    = nz(ta.atr(atrLen))
 htfMinGap = htfMinAtr * atrVal
 ltfMinGap = ltfMinAtr * atrVal
-lblSize   = labelSize == "normal" ? size.normal : labelSize == "small" ? size.small : size.tiny
-drawSigBox = markerStyle != "Label"
-drawSigLbl = markerStyle != "Candle Box"
+drawSigBox = markerStyle != "Dot"
+drawSigDot = markerStyle != "Candle Box"
 chartSec  = timeframe.in_seconds(timeframe.period)
 halfMs    = chartSec * 500        // half a chart bar, in milliseconds
 
@@ -299,7 +304,8 @@ detectFvg(TfState st, float minGap, int cap) =>
                   bottom     = gapBot,
                   c1Start    = array.get(st.sHist, 2),
                   leftBar    = array.get(st.sHist, 0),
-                  createdBar = bar_index)
+                  createdBar = bar_index,
+                  tip        = bullGap ? math.max(h1, array.get(st.hHist, 1), h3) : math.min(lo1, array.get(st.lHist, 1), lo3))
                 if array.size(st.fvgs) >= cap
                     deleteFvg(array.shift(st.fvgs))
                 if st.isHtf and showHtf
@@ -383,17 +389,18 @@ var array<label> sigLabels = array.new<label>()
 // LTF / MATCHING
 // ============================================================================
 
-// Does LTF gap f sit inside HTF gap z under the selected containment rule?
+// Does LTF gap f sit inside HTF gap z? The tip of the move must rest within
+// z, plus the optional containment rule for the gap itself.
 fvgInside(Fvg f, Fvg z) =>
     mid = math.avg(f.top, f.bottom)
-    bool ok = false
+    bool gapOk = true
     if containMode == "Overlap"
-        ok := f.bottom < z.top and f.top > z.bottom
+        gapOk := f.bottom < z.top and f.top > z.bottom
     else if containMode == "Fully Inside"
-        ok := f.top <= z.top and f.bottom >= z.bottom
-    else
-        ok := mid <= z.top and mid >= z.bottom
-    ok
+        gapOk := f.top <= z.top and f.bottom >= z.bottom
+    else if containMode == "Midpoint Inside"
+        gapOk := mid <= z.top and mid >= z.bottom
+    f.tip <= z.top and f.tip >= z.bottom and gapOk
 
 // True when any of the just-inverted LTF gaps sits inside an active HTF gap of
 // timeframe h that points the same way as the inversion and predates the LTF
@@ -441,12 +448,13 @@ drawSignalBox(bool bullSig, int startTime, float hi, float lo) =>
     if array.size(sigBoxes) > maxSignals
         box.delete(array.shift(sigBoxes))
 
-drawSignalLabel(bool bullSig, string txt, float y) =>
-    col   = bullSig ? sigBullCol : sigBearCol
-    arrow = labelMode == "Arrow Only"
-    sty   = arrow ? (bullSig ? label.style_triangleup : label.style_triangledown) : (bullSig ? label.style_label_up : label.style_label_down)
-    l = label.new(bar_index - 1, y, arrow ? "" : txt
-      , style = sty, color = col, textcolor = color.white, size = lblSize, tooltip = txt)
+// Small text-less dot below (bull) / above (bear) the inverting candle. The
+// timeframe summary is kept as a hover tooltip.
+drawSignalDot(bool bullSig, string txt, float y) =>
+    col = bullSig ? sigBullCol : sigBearCol
+    off = dotOffset * atrVal
+    l = label.new(bar_index - 1, bullSig ? y - off : y + off, ""
+      , style = label.style_circle, color = col, size = size.tiny, tooltip = txt)
     array.push(sigLabels, l)
     if array.size(sigLabels) > maxSignals
         label.delete(array.shift(sigLabels))
@@ -474,6 +482,7 @@ processLtf(TfState st, bool newPeriod) =>
                     for i = array.size(st.fvgs) - 1 to 0
                         Fvg f = array.get(st.fvgs, i)
                         f.age := f.age + 1
+                        f.tip := f.bull ? math.max(f.tip, cHigh) : math.min(f.tip, cLow)
                         bool inverted = f.bull ? cClose < f.bottom : cClose > f.top
                         if inverted
                             if f.bull
@@ -549,7 +558,7 @@ processHtf(s4, hn4)
 processHtf(s5, hn5)
 processHtf(s6, hn6)
 
-// One label per direction per bar, combining every LTF timeframe that fired.
+// One dot per direction per bar, combining every LTF timeframe that fired.
 bullTxt = appendName(appendName(appendName(bt1, bt2, "\n"), bt3, "\n"), bt4, "\n")
 bearTxt = appendName(appendName(appendName(rt1, rt2, "\n"), rt3, "\n"), rt4, "\n")
 bullY   = minNa(minNa(by1, by2), minNa(by3, by4))
@@ -558,11 +567,11 @@ bearY   = maxNa(maxNa(ry1, ry2), maxNa(ry3, ry4))
 bullSignal = bullTxt != ""
 bearSignal = bearTxt != ""
 
-if drawSigLbl
+if drawSigDot
     if bullSignal
-        drawSignalLabel(true, bullTxt, bullY)
+        drawSignalDot(true, bullTxt, bullY)
     if bearSignal
-        drawSignalLabel(false, bearTxt, bearY)
+        drawSignalDot(false, bearTxt, bearY)
 
 // ============================================================================
 // SKIPPED TIMEFRAME NOTICE
