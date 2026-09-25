@@ -101,11 +101,12 @@ l4On = input.bool(true, "4", inline = "l4", group = grpLtf)
 l4Tf = input.timeframe("5", "", inline = "l4", group = grpLtf)
 containMode = input.string("Any", "LTF FVG Must Also Be", options = ["Any", "Overlap", "Fully Inside", "Midpoint Inside"], group = grpLtf, tooltip = "The IFVG's tip (lowest low for bullish / highest high for bearish, from the start of the LTF pattern through the inverting candle) must always sit within the HTF FVG. This adds an optional extra rule for the LTF FVG itself.\nAny: no extra rule.\nOverlap: the two ranges intersect.\nFully Inside: the LTF FVG is entirely within the HTF FVG.\nMidpoint Inside: the LTF FVG's midpoint is within the HTF FVG.")
 ltfMinAtr   = input.float(0.0, "Min Gap Size (ATR multiple)", minval = 0, step = 0.05, group = grpLtf, tooltip = "Ignore LTF gaps smaller than chart ATR * this value. 0 disables the filter.")
-ltfMaxAge   = input.int(30, "Max FVG Age (LTF candles)", minval = 1, maxval = 500, group = grpLtf, tooltip = "An LTF FVG older than this many candles of its own timeframe can no longer produce an inversion signal.")
+ltfMaxBars  = input.int(6, "Max Candles To Form IFVG", minval = 4, maxval = 500, group = grpLtf, tooltip = "Maximum number of LTF candles from candle 1 of the FVG through the candle that closes through it, inclusive. The 3-candle FVG plus the inverting candle is the minimum (4). A gap that has not been closed through within this many candles is dropped.")
 ltfMaxCands = input.int(50, "Max Tracked FVGs Per Timeframe", minval = 1, maxval = 200, group = grpLtf)
 
 grpSig = "Reversal Signals"
 markerStyle  = input.string("Dot + Candle Box", "Marker", options = ["Dot + Candle Box", "Dot", "Candle Box"], group = grpSig, tooltip = "Candle Box outlines the LTF candle that completed the inversion (all of its chart bars). Dot sits below (bull) / above (bear) that candle; hover it to see the timeframes, e.g. '1m in 5m/15m'.")
+dotSize      = input.string("Small", "Dot Size", options = ["Tiny", "Small", "Normal"], group = grpSig)
 dotOffset    = input.float(0.3, "Dot Offset (ATR multiple)", minval = 0, step = 0.05, group = grpSig, tooltip = "Distance between the candle's wick and the dot.")
 sigBullCol   = input.color(#00e676, "Bull", inline = "sc", group = grpSig)
 sigBearCol   = input.color(#ff1744, "Bear", inline = "sc", group = grpSig)
@@ -130,7 +131,7 @@ type Fvg
     int   leftBar                 // first chart bar of candle 3 (box left edge)
     int   createdBar              // chart bar the gap was confirmed on
     float tip                     // LTF only: highest high (bull gap) / lowest low (bear gap) since candle 1
-    int   age     = 0             // LTF only: own-timeframe candles completed since creation
+    int   age     = 0             // LTF only: own-timeframe candles completed after candle 3
     bool  touched = false
     bool  broken  = false
     box   bx      = na
@@ -163,6 +164,7 @@ atrVal    = nz(ta.atr(atrLen))
 htfMinGap = htfMinAtr * atrVal
 ltfMinGap = ltfMinAtr * atrVal
 drawSigBox = markerStyle != "Dot"
+dotSz      = dotSize == "Tiny" ? size.tiny : dotSize == "Small" ? size.small : size.normal
 drawSigDot = markerStyle != "Candle Box"
 chartSec  = timeframe.in_seconds(timeframe.period)
 halfMs    = chartSec * 500        // half a chart bar, in milliseconds
@@ -448,13 +450,14 @@ drawSignalBox(bool bullSig, int startTime, float hi, float lo) =>
     if array.size(sigBoxes) > maxSignals
         box.delete(array.shift(sigBoxes))
 
-// Small text-less dot below (bull) / above (bear) the inverting candle. The
+// Small dot below (bull) / above (bear) the inverting candle, drawn as a
+// bullet character because label.style_circle bottoms out too large. The
 // timeframe summary is kept as a hover tooltip.
 drawSignalDot(bool bullSig, string txt, float y) =>
     col = bullSig ? sigBullCol : sigBearCol
     off = dotOffset * atrVal
-    l = label.new(bar_index - 1, bullSig ? y - off : y + off, ""
-      , style = label.style_circle, color = col, size = size.tiny, tooltip = txt)
+    l = label.new(bar_index - 1, bullSig ? y - off : y + off, "•"
+      , style = label.style_none, textcolor = col, size = dotSz, tooltip = txt)
     array.push(sigLabels, l)
     if array.size(sigLabels) > maxSignals
         label.delete(array.shift(sigLabels))
@@ -483,6 +486,8 @@ processLtf(TfState st, bool newPeriod) =>
                         Fvg f = array.get(st.fvgs, i)
                         f.age := f.age + 1
                         f.tip := f.bull ? math.max(f.tip, cHigh) : math.min(f.tip, cLow)
+                        // Inversion needs the LTF candle to CLOSE beyond the gap's
+                        // far edge; a wick through it does not count.
                         bool inverted = f.bull ? cClose < f.bottom : cClose > f.top
                         if inverted
                             if f.bull
@@ -490,7 +495,9 @@ processLtf(TfState st, bool newPeriod) =>
                             else
                                 array.push(invBull, f)
                             array.remove(st.fvgs, i)
-                        else if f.age > ltfMaxAge
+                        // Candles 1-3 plus f.age later candles; drop the gap
+                        // once no further candle could complete the IFVG in time.
+                        else if 3 + f.age >= ltfMaxBars
                             array.remove(st.fvgs, i)
                 if array.size(invBull) > 0
                     string bullNames = htfMatchNames(invBull, true, st.sec)
