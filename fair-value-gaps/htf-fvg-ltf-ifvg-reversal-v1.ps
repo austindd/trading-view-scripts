@@ -36,6 +36,12 @@ indicator("HTF FVG + LTF IFVG Reversal V1 [SB]", "FVG/IFVG Reversal [SB]", overl
 //          from candle 1 of the LTF pattern through the inverting candle.
 //          A move that pierced clean through one HTF FVG still counts if its
 //          tip rests inside a different one,
+//        - (optional, on by default) the tip must be the most extreme price
+//          since the HTF FVG was confirmed: a bullish IFVG's low must be the
+//          lowest low printed since the bullish HTF FVG formed (bearish:
+//          highest high). An IFVG that reacts off an earlier, deeper
+//          incursion into the HTF FVG is rejected, keeping only spontaneous
+//          reversals from a fresh extreme,
 //        - optionally, the LTF FVG itself must also sit inside the HTF FVG
 //          (overlap / fully inside / midpoint inside),
 //        - the LTF timeframe must be strictly lower than the HTF timeframe.
@@ -100,6 +106,7 @@ l3Tf = input.timeframe("3", "", inline = "l3", group = grpLtf)
 l4On = input.bool(true, "4", inline = "l4", group = grpLtf)
 l4Tf = input.timeframe("5", "", inline = "l4", group = grpLtf)
 containMode = input.string("Any", "LTF FVG Must Also Be", options = ["Any", "Overlap", "Fully Inside", "Midpoint Inside"], group = grpLtf, tooltip = "The IFVG's tip (lowest low for bullish / highest high for bearish, from the start of the LTF pattern through the inverting candle) must always sit within the HTF FVG. This adds an optional extra rule for the LTF FVG itself.\nAny: no extra rule.\nOverlap: the two ranges intersect.\nFully Inside: the LTF FVG is entirely within the HTF FVG.\nMidpoint Inside: the LTF FVG's midpoint is within the HTF FVG.")
+freshExt    = input.bool(true, "Tip Must Be Fresh Extreme", group = grpLtf, tooltip = "A bullish IFVG only counts if its tip is the lowest low printed since the HTF FVG formed (bearish: the highest high). Rejects IFVGs that are reactions to an earlier, deeper incursion into the HTF FVG.")
 ltfMinAtr   = input.float(0.0, "Min Gap Size (ATR multiple)", minval = 0, step = 0.05, group = grpLtf, tooltip = "Ignore LTF gaps smaller than chart ATR * this value. 0 disables the filter.")
 ltfMaxBars  = input.int(6, "Max Candles To Form IFVG", minval = 4, maxval = 500, group = grpLtf, tooltip = "Maximum number of LTF candles from candle 1 of the FVG through the candle that closes through it, inclusive. The 3-candle FVG plus the inverting candle is the minimum (4). A gap that has not been closed through within this many candles is dropped.")
 ltfMaxCands = input.int(50, "Max Tracked FVGs Per Timeframe", minval = 1, maxval = 200, group = grpLtf)
@@ -131,6 +138,7 @@ type Fvg
     int   leftBar                 // first chart bar of candle 3 (box left edge)
     int   createdBar              // chart bar the gap was confirmed on
     float tip                     // LTF only: highest high (bull gap) / lowest low (bear gap) since candle 1
+    float ext     = na            // HTF only: lowest low (bull gap) / highest high (bear gap) since confirmation
     int   age     = 0             // LTF only: own-timeframe candles completed after candle 3
     bool  touched = false
     bool  broken  = false
@@ -339,6 +347,7 @@ updateHtf(TfState st, bool newPeriod) =>
         for i = array.size(st.fvgs) - 1 to 0
             Fvg f = array.get(st.fvgs, i)
             if not f.broken
+                f.ext := f.bull ? (na(f.ext) ? low : math.min(f.ext, low)) : (na(f.ext) ? high : math.max(f.ext, high))
                 bool brokeNow = false
                 if htfBreakMode == "Wick"
                     brokeNow := f.bull ? low < f.bottom : high > f.top
@@ -392,7 +401,9 @@ var array<label> sigLabels = array.new<label>()
 // ============================================================================
 
 // Does LTF gap f sit inside HTF gap z? The tip of the move must rest within
-// z, plus the optional containment rule for the gap itself.
+// z (and optionally be z's most extreme price since confirmation), plus the
+// optional containment rule for the gap itself. z.ext covers chart bars up to
+// the inverting candle's last bar because matching runs before updateHtf.
 fvgInside(Fvg f, Fvg z) =>
     mid = math.avg(f.top, f.bottom)
     bool gapOk = true
@@ -402,7 +413,8 @@ fvgInside(Fvg f, Fvg z) =>
         gapOk := f.top <= z.top and f.bottom >= z.bottom
     else if containMode == "Midpoint Inside"
         gapOk := mid <= z.top and mid >= z.bottom
-    f.tip <= z.top and f.tip >= z.bottom and gapOk
+    bool extOk = not freshExt or (z.bull ? f.tip <= z.ext : f.tip >= z.ext)
+    f.tip <= z.top and f.tip >= z.bottom and gapOk and extOk
 
 // True when any of the just-inverted LTF gaps sits inside an active HTF gap of
 // timeframe h that points the same way as the inversion and predates the LTF
