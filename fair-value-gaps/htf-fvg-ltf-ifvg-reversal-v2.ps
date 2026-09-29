@@ -1,0 +1,845 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("HTF FVG + LTF IFVG Reversal V2 [SB]", "FVG/IFVG Reversal V2 [SB]", overlay = true
+  , max_bars_back    = 5000
+  , max_labels_count = 500
+  , max_boxes_count  = 500)
+
+// ============================================================================
+// OVERVIEW
+// ============================================================================
+//
+// ICT-style reversal pattern: a lower-timeframe (LTF) inverse fair value gap
+// (IFVG) that forms inside a higher-timeframe (HTF) fair value gap (FVG).
+//
+//   * HTF side: fair value gaps are detected on up to 6 timeframes (default
+//     5m, 10m, 15m, 30m, 1h, 4h). They are tracked until price closes through
+//     them and can optionally be drawn as zones. All HTF zones share a single
+//     bull colour and a single bear colour regardless of timeframe.
+//
+//   * LTF side: fair value gaps are detected on up to 4 timeframes (default
+//     1m, 2m, 3m, 5m) but never drawn. When an LTF candle CLOSES through one
+//     of them (a bearish LTF FVG closed above = bullish inversion, a bullish
+//     LTF FVG closed below = bearish inversion) the LTF FVG is checked against
+//     the active HTF FVGs:
+//
+//        - the HTF FVG must point the same way as the inversion (a bullish
+//          inversion needs a bullish HTF FVG, i.e. price is reversing up out
+//          of HTF support),
+//        - the HTF FVG must still be unbroken,
+//        - the HTF FVG must have been confirmed before the LTF pattern
+//          started (no hindsight matches),
+//        - the tip of the IFVG must sit within the HTF FVG: the lowest low
+//          (bullish inversion) / highest high (bearish inversion) reached
+//          from candle 1 of the LTF pattern through the inverting candle.
+//          A move that pierced clean through one HTF FVG still counts if its
+//          tip rests inside a different one,
+//        - (optional, on by default) the tip must be the most extreme price
+//          since the HTF FVG was confirmed: a bullish IFVG's low must be the
+//          lowest low printed since the bullish HTF FVG formed (bearish:
+//          highest high). An IFVG that reacts off an earlier, deeper
+//          incursion into the HTF FVG is rejected, keeping only spontaneous
+//          reversals from a fresh extreme,
+//        - optionally, the LTF FVG itself must also sit inside the HTF FVG
+//          (overlap / fully inside / midpoint inside),
+//        - the LTF timeframe must be strictly lower than the HTF timeframe.
+//
+//   * Key level sweeps (V2): an inversion also qualifies, independently of the
+//     HTF FVG rules above, when its tip swept a key level and the inverting
+//     candle closed back on the original side of it (bullish: tip below the
+//     level, close above; bearish: the reverse). Levels, each toggleable:
+//     Asia / London / NY session highs & lows of the last N completed
+//     sessions, the most recent premarket high & low, weekly and monthly
+//     open, previous week / month / 4h candle open, close and midpoint.
+//     Session and premarket highs only count for bearish sweeps and lows
+//     only for bullish sweeps; opens, closes and midpoints count both ways.
+//     A level must already exist when candle 1 of the LTF pattern starts.
+//
+//   * Opposing FVG filter (V2, optional, on by default): an inversion that
+//     would otherwise qualify is rejected when an unbroken opposing HTF FVG
+//     sits within 1:1 of it. The risk is the distance from the tip to the
+//     inverting candle's close; if any opposing HTF FVG (bearish for a
+//     bullish signal) overlaps the range from the close out to close + that
+//     distance, there is no room for a 1R move and the signal is dropped.
+//
+//     When at least one HTF FVG or key level qualifies, the LTF candle that
+//     completed the inversion is marked with a highlight box around that candle and/or a
+//     small dot below (bull) / above (bear) it. Hovering the dot shows which
+//     LTF timeframe inverted inside which HTF timeframes. The IFVG zone itself
+//     is never drawn.
+//
+// All timeframes are aggregated locally from chart bars via timeframe.change()
+// (the fvg-mtf-origin-v1.ps pattern) rather than request.security(). This is
+// non-repainting, avoids the [1] offset trap documented in CLAUDE.md, and
+// yields exact chart-bar indices for the candle markers. The trade-off is
+// that every selected timeframe must be >= the chart timeframe; lower ones
+// are skipped and listed in a small table. Use a 1m chart for the defaults.
+//
+// Signals fire on the first chart bar after the inverting LTF candle closes,
+// which in real time is the same instant as that candle's close.
+//
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+grpHtf = "HTF Fair Value Gaps"
+showHtf       = input.bool(true, "Show HTF FVG Zones", group = grpHtf, tooltip = "Draw HTF fair value gaps as boxes. Detection and matching run regardless of this setting.")
+htfBullCol    = input.color(#089981, "Bull", inline = "hc", group = grpHtf)
+htfBearCol    = input.color(#f23645, "Bear", inline = "hc", group = grpHtf)
+htfBreakMode  = input.string("HTF Close", "Break Condition", options = ["HTF Close", "Chart Close", "Wick"], group = grpHtf, tooltip = "When an HTF FVG stops being valid for matching.\nHTF Close: a candle of the FVG's own timeframe closes beyond the far edge.\nChart Close: any chart bar closes beyond the far edge.\nWick: any chart bar wicks beyond the far edge.")
+htfMinAtr     = input.float(0.0, "Min Gap Size (ATR multiple)", minval = 0, step = 0.05, group = grpHtf, tooltip = "Ignore HTF gaps smaller than chart ATR * this value. 0 disables the filter.")
+htfMaxPerTf   = input.int(20, "Max FVGs Per Timeframe", minval = 1, maxval = 60, group = grpHtf, tooltip = "Oldest HTF FVGs are dropped once this limit is exceeded.")
+htfKeepBroken = input.bool(false, "Keep Broken Zones", group = grpHtf, tooltip = "Keep broken HTF zones on the chart, cut off at the breaking bar. Off deletes them to reduce clutter.")
+htfFade       = input.bool(true, "Fade On Touch", group = grpHtf)
+htfShowLabel  = input.bool(false, "Show Timeframe Label On Zones", group = grpHtf)
+htfExtend     = input.int(10, "Extend Right (bars)", minval = 0, maxval = 200, group = grpHtf)
+fillTransp    = input.int(88, "Fill Transparency", minval = 0, maxval = 100, group = grpHtf)
+touchTransp   = input.int(94, "Touched Transparency", minval = 0, maxval = 100, group = grpHtf)
+brokenTransp  = input.int(97, "Broken Transparency", minval = 0, maxval = 100, group = grpHtf)
+borderTransp  = input.int(55, "Border Transparency", minval = 0, maxval = 100, group = grpHtf)
+
+grpHtfTf = "HTF Timeframes"
+h1On = input.bool(true, "1", inline = "h1", group = grpHtfTf)
+h1Tf = input.timeframe("5",   "", inline = "h1", group = grpHtfTf)
+h2On = input.bool(true, "2", inline = "h2", group = grpHtfTf)
+h2Tf = input.timeframe("10",  "", inline = "h2", group = grpHtfTf)
+h3On = input.bool(true, "3", inline = "h3", group = grpHtfTf)
+h3Tf = input.timeframe("15",  "", inline = "h3", group = grpHtfTf)
+h4On = input.bool(true, "4", inline = "h4", group = grpHtfTf)
+h4Tf = input.timeframe("30",  "", inline = "h4", group = grpHtfTf)
+h5On = input.bool(true, "5", inline = "h5", group = grpHtfTf)
+h5Tf = input.timeframe("60",  "", inline = "h5", group = grpHtfTf)
+h6On = input.bool(true, "6", inline = "h6", group = grpHtfTf)
+h6Tf = input.timeframe("240", "", inline = "h6", group = grpHtfTf)
+
+grpLtf = "LTF Inverse Fair Value Gaps"
+l1On = input.bool(true, "1", inline = "l1", group = grpLtf)
+l1Tf = input.timeframe("1", "", inline = "l1", group = grpLtf)
+l2On = input.bool(true, "2", inline = "l2", group = grpLtf)
+l2Tf = input.timeframe("2", "", inline = "l2", group = grpLtf)
+l3On = input.bool(true, "3", inline = "l3", group = grpLtf)
+l3Tf = input.timeframe("3", "", inline = "l3", group = grpLtf)
+l4On = input.bool(true, "4", inline = "l4", group = grpLtf)
+l4Tf = input.timeframe("5", "", inline = "l4", group = grpLtf)
+containMode = input.string("Any", "LTF FVG Must Also Be", options = ["Any", "Overlap", "Fully Inside", "Midpoint Inside"], group = grpLtf, tooltip = "The IFVG's tip (lowest low for bullish / highest high for bearish, from the start of the LTF pattern through the inverting candle) must always sit within the HTF FVG. This adds an optional extra rule for the LTF FVG itself.\nAny: no extra rule.\nOverlap: the two ranges intersect.\nFully Inside: the LTF FVG is entirely within the HTF FVG.\nMidpoint Inside: the LTF FVG's midpoint is within the HTF FVG.")
+freshExt    = input.bool(true, "Tip Must Be Fresh Extreme", group = grpLtf, tooltip = "A bullish IFVG only counts if its tip is the lowest low printed since the HTF FVG formed (bearish: the highest high). Rejects IFVGs that are reactions to an earlier, deeper incursion into the HTF FVG.")
+ltfMinAtr   = input.float(0.0, "Min Gap Size (ATR multiple)", minval = 0, step = 0.05, group = grpLtf, tooltip = "Ignore LTF gaps smaller than chart ATR * this value. 0 disables the filter.")
+ltfMaxBars  = input.int(6, "Max Candles To Form IFVG", minval = 4, maxval = 500, group = grpLtf, tooltip = "Maximum number of LTF candles from candle 1 of the FVG through the candle that closes through it, inclusive. The 3-candle FVG plus the inverting candle is the minimum (4). A gap that has not been closed through within this many candles is dropped.")
+ltfMaxCands = input.int(50, "Max Tracked FVGs Per Timeframe", minval = 1, maxval = 200, group = grpLtf)
+
+grpSig = "Reversal Signals"
+markerStyle  = input.string("Dot + Candle Box", "Marker", options = ["Dot + Candle Box", "Dot", "Candle Box"], group = grpSig, tooltip = "Candle Box outlines the LTF candle that completed the inversion (all of its chart bars). Dot sits below (bull) / above (bear) that candle; hover it to see what qualified it, e.g. '1m in 5m/15m + swept Asia L, PW Mid'.")
+dotSize      = input.string("Small", "Dot Size", options = ["Tiny", "Small", "Normal"], group = grpSig)
+dotOffset    = input.float(0.3, "Dot Offset (ATR multiple)", minval = 0, step = 0.05, group = grpSig, tooltip = "Distance between the candle's wick and the dot.")
+sigBullCol   = input.color(#00e676, "Bull", inline = "sc", group = grpSig)
+sigBearCol   = input.color(#ff1744, "Bear", inline = "sc", group = grpSig)
+sigBoxTransp = input.int(75, "Candle Box Transparency", minval = 0, maxval = 100, group = grpSig)
+maxSignals   = input.int(200, "Max Signals Kept", minval = 10, maxval = 400, group = grpSig, tooltip = "Oldest signal markers are deleted beyond this count.")
+dynAlerts    = input.bool(true, "Send Dynamic Alerts", group = grpSig, tooltip = "Fire alert() messages naming the timeframes involved. Requires an alert created with 'Any alert() function call'. The static alert conditions below work regardless.")
+
+grpFlt = "Filters"
+oppFilter = input.bool(true, "Block If Opposing HTF FVG Within 1:1", group = grpFlt, tooltip = "Reject an inversion when an unbroken opposing HTF FVG (bearish for a bullish signal, and vice versa) overlaps the range from the inverting candle's close out to 1x the distance from the IFVG's tip to that close. Applies to HTF FVG and key level sweep signals alike.")
+
+grpKey = "Key Level Sweeps"
+useSweeps = input.bool(true, "Signal On Key Level Sweeps", group = grpKey, tooltip = "Also signal an inversion whose tip swept beyond one of the enabled levels below while the inverting candle closed back on the original side. Works independently of the HTF FVG rules.")
+sessTz    = input.string("America/New_York", "Session Timezone", group = grpKey)
+sessBack  = input.int(3, "Session Levels Lookback (sessions)", minval = 1, maxval = 20, group = grpKey, tooltip = "How many completed Asia / London / NY sessions back to use highs and lows from. 1 = only the most recent completed session of each.")
+asiaSess  = input.session("2000-0000", "Asia",   inline = "ka", group = grpKey)
+asiaHiOn  = input.bool(true, "High", inline = "ka", group = grpKey)
+asiaLoOn  = input.bool(true, "Low",  inline = "ka", group = grpKey)
+ldnSess   = input.session("0200-0500", "London", inline = "kl", group = grpKey)
+ldnHiOn   = input.bool(true, "High", inline = "kl", group = grpKey)
+ldnLoOn   = input.bool(true, "Low",  inline = "kl", group = grpKey)
+nySess    = input.session("0930-1600", "NY",     inline = "kn", group = grpKey)
+nyHiOn    = input.bool(true, "High", inline = "kn", group = grpKey)
+nyLoOn    = input.bool(true, "Low",  inline = "kn", group = grpKey)
+preSess   = input.session("0400-0930", "Premarket", inline = "kp", group = grpKey)
+preHiOn   = input.bool(true, "High", inline = "kp", group = grpKey)
+preLoOn   = input.bool(true, "Low",  inline = "kp", group = grpKey)
+woOn      = input.bool(true, "Weekly Open",  inline = "ko", group = grpKey)
+moOn      = input.bool(true, "Monthly Open", inline = "ko", group = grpKey)
+pwoOn     = input.bool(true, "Prev Week Open",  inline = "kw", group = grpKey)
+pwcOn     = input.bool(true, "Close", inline = "kw", group = grpKey)
+pwmOn     = input.bool(true, "Mid",   inline = "kw", group = grpKey)
+pmoOn     = input.bool(true, "Prev Month Open", inline = "km", group = grpKey)
+pmcOn     = input.bool(true, "Close", inline = "km", group = grpKey)
+pmmOn     = input.bool(true, "Mid",   inline = "km", group = grpKey)
+p4oOn     = input.bool(true, "Prev 4H Open",    inline = "k4", group = grpKey)
+p4cOn     = input.bool(true, "Close", inline = "k4", group = grpKey)
+p4mOn     = input.bool(true, "Mid",   inline = "k4", group = grpKey)
+
+grpGen = "General"
+atrLen = input.int(200, "ATR Length", minval = 1, group = grpGen, tooltip = "ATR (chart timeframe) used by the minimum gap size filters.")
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+// One fair value gap. HTF gaps own a box (and optional label); LTF gaps own
+// no drawings and only live until they invert or expire.
+type Fvg
+    bool  bull                    // true = bullish (gap below price)
+    float top
+    float bottom
+    int   c1Start                 // first chart bar of candle 1 of the pattern
+    int   leftBar                 // first chart bar of candle 3 (box left edge)
+    int   createdBar              // chart bar the gap was confirmed on
+    float tip                     // LTF only: highest high (bull gap) / lowest low (bear gap) since candle 1
+    float ext     = na            // HTF only: lowest low (bull gap) / highest high (bear gap) since confirmation
+    int   age     = 0             // LTF only: own-timeframe candles completed after candle 3
+    bool  touched = false
+    bool  broken  = false
+    box   bx      = na
+    label lbl     = na
+
+// Per-timeframe state: locally aggregated candle history + live FVGs.
+type TfState
+    string       name
+    int          sec              // timeframe length in seconds
+    bool         on
+    bool         isHtf
+    array<float> hHist            // index 0 = most recently completed candle
+    array<float> lHist
+    array<int>   sHist            // first chart bar of that candle
+    array<int>   eHist            // last chart bar of that candle
+    array<int>   tHist            // open time of the first chart bar of that candle
+    float        curHigh    = na  // developing candle
+    float        curLow     = na
+    int          curStart   = na
+    int          curTime    = na
+    bool         curPartial = false   // developing candle did not start on a period boundary
+    array<Fvg>   fvgs
+
+// ============================================================================
+// CONSTANTS & CALCS
+// ============================================================================
+
+HIST_LEN  = 6
+atrVal    = nz(ta.atr(atrLen))
+htfMinGap = htfMinAtr * atrVal
+ltfMinGap = ltfMinAtr * atrVal
+drawSigBox = markerStyle != "Dot"
+dotSz      = dotSize == "Tiny" ? size.tiny : dotSize == "Small" ? size.small : size.normal
+drawSigDot = markerStyle != "Candle Box"
+chartSec  = timeframe.in_seconds(timeframe.period)
+halfMs    = chartSec * 500        // half a chart bar, in milliseconds
+
+// Resolved timeframe strings. Blank = chart timeframe. Kept as inline
+// expressions so they remain "simple string" for timeframe.change().
+h1Res = h1Tf == "" ? timeframe.period : h1Tf
+h2Res = h2Tf == "" ? timeframe.period : h2Tf
+h3Res = h3Tf == "" ? timeframe.period : h3Tf
+h4Res = h4Tf == "" ? timeframe.period : h4Tf
+h5Res = h5Tf == "" ? timeframe.period : h5Tf
+h6Res = h6Tf == "" ? timeframe.period : h6Tf
+l1Res = l1Tf == "" ? timeframe.period : l1Tf
+l2Res = l2Tf == "" ? timeframe.period : l2Tf
+l3Res = l3Tf == "" ? timeframe.period : l3Tf
+l4Res = l4Tf == "" ? timeframe.period : l4Tf
+
+h1Sec = timeframe.in_seconds(h1Res)
+h2Sec = timeframe.in_seconds(h2Res)
+h3Sec = timeframe.in_seconds(h3Res)
+h4Sec = timeframe.in_seconds(h4Res)
+h5Sec = timeframe.in_seconds(h5Res)
+h6Sec = timeframe.in_seconds(h6Res)
+l1Sec = timeframe.in_seconds(l1Res)
+l2Sec = timeframe.in_seconds(l2Res)
+l3Sec = timeframe.in_seconds(l3Res)
+l4Sec = timeframe.in_seconds(l4Res)
+
+// Timeframes below the chart timeframe cannot be aggregated from chart bars.
+h1Ok = h1On and h1Sec >= chartSec
+h2Ok = h2On and h2Sec >= chartSec
+h3Ok = h3On and h3Sec >= chartSec
+h4Ok = h4On and h4Sec >= chartSec
+h5Ok = h5On and h5Sec >= chartSec
+h6Ok = h6On and h6Sec >= chartSec
+l1Ok = l1On and l1Sec >= chartSec
+l2Ok = l2On and l2Sec >= chartSec
+l3Ok = l3On and l3Sec >= chartSec
+l4Ok = l4On and l4Sec >= chartSec
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+// "5" -> "5m", "60" -> "1h", "240" -> "4h", "D" -> "D".
+tfName(string tf) =>
+    float n   = str.tonumber(tf)
+    string out = tf
+    if not na(n)
+        out := n >= 60 and n % 60 == 0 ? str.tostring(n / 60) + "h" : str.tostring(n) + "m"
+    out
+
+appendName(string list, string nm, string sep) =>
+    list == "" ? nm : list + sep + nm
+
+newTf(string tf, int sec, bool on, bool isHtf) =>
+    TfState.new(
+      name  = tf,
+      sec   = sec,
+      on    = on,
+      isHtf = isHtf,
+      hHist = array.new<float>(),
+      lHist = array.new<float>(),
+      sHist = array.new<int>(),
+      eHist = array.new<int>(),
+      tHist = array.new<int>(),
+      fvgs  = array.new<Fvg>())
+
+// ---- HTF zone drawing -------------------------------------------------------
+
+drawHtfFvg(TfState st, Fvg f) =>
+    col = f.bull ? htfBullCol : htfBearCol
+    f.bx := box.new(f.leftBar, f.top, bar_index + htfExtend, f.bottom
+      , border_color = color.new(col, borderTransp), border_width = 1
+      , bgcolor = color.new(col, fillTransp))
+    if htfShowLabel
+        f.lbl := label.new(bar_index + htfExtend, math.avg(f.top, f.bottom), tfName(st.name)
+          , style = label.style_label_left, color = color.new(col, 100)
+          , textcolor = color.new(col, 0), size = size.tiny)
+
+deleteFvg(Fvg f) =>
+    if not na(f.bx)
+        box.delete(f.bx)
+    if not na(f.lbl)
+        label.delete(f.lbl)
+
+markTouched(Fvg f) =>
+    if not na(f.bx)
+        box.set_bgcolor(f.bx, color.new(f.bull ? htfBullCol : htfBearCol, touchTransp))
+
+markBroken(Fvg f) =>
+    if not na(f.lbl)
+        label.delete(f.lbl)
+        f.lbl := na
+    if not na(f.bx)
+        box.set_right(f.bx, bar_index)
+        box.set_bgcolor(f.bx, color.new(f.bull ? htfBullCol : htfBearCol, brokenTransp))
+        box.set_border_style(f.bx, line.style_dashed)
+
+// ---- Local candle aggregation ----------------------------------------------
+
+// Push the just-completed aggregated candle onto this timeframe's history.
+// Called on the first chart bar of a new period, so the completed candle ends
+// on the previous chart bar. Returns true when a full candle was pushed.
+pushPeriod(TfState st) =>
+    bool pushed = false
+    if not na(st.curStart) and not st.curPartial
+        array.unshift(st.hHist, st.curHigh)
+        array.unshift(st.lHist, st.curLow)
+        array.unshift(st.sHist, st.curStart)
+        array.unshift(st.eHist, bar_index - 1)
+        array.unshift(st.tHist, st.curTime)
+        if array.size(st.hHist) > HIST_LEN
+            array.pop(st.hHist)
+            array.pop(st.lHist)
+            array.pop(st.sHist)
+            array.pop(st.eHist)
+            array.pop(st.tHist)
+        pushed := true
+    pushed
+
+// Look for an FVG in the three most recently completed candles of this
+// timeframe. Index 2 = candle 1 of the pattern, index 0 = candle 3.
+detectFvg(TfState st, float minGap, int cap) =>
+    if array.size(st.hHist) >= 3
+        h1 = array.get(st.hHist, 2)
+        lo1 = array.get(st.lHist, 2)
+        h3 = array.get(st.hHist, 0)
+        lo3 = array.get(st.lHist, 0)
+        bullGap = lo3 > h1
+        bearGap = h3 < lo1
+        if bullGap or bearGap
+            gapTop = bullGap ? lo3 : lo1
+            gapBot = bullGap ? h1 : h3
+            if gapTop - gapBot >= minGap
+                Fvg f = Fvg.new(
+                  bull       = bullGap,
+                  top        = gapTop,
+                  bottom     = gapBot,
+                  c1Start    = array.get(st.sHist, 2),
+                  leftBar    = array.get(st.sHist, 0),
+                  createdBar = bar_index,
+                  tip        = bullGap ? math.max(h1, array.get(st.hHist, 1), h3) : math.min(lo1, array.get(st.lHist, 1), lo3))
+                if array.size(st.fvgs) >= cap
+                    deleteFvg(array.shift(st.fvgs))
+                if st.isHtf and showHtf
+                    drawHtfFvg(st, f)
+                array.push(st.fvgs, f)
+
+// Accumulate the current chart bar into the developing candle, starting a new
+// candle when the period changed.
+aggregate(TfState st, bool newPeriod) =>
+    if newPeriod
+        st.curHigh    := high
+        st.curLow     := low
+        st.curStart   := bar_index
+        st.curTime    := time
+        st.curPartial := false
+    else
+        st.curHigh := na(st.curHigh) ? high : math.max(st.curHigh, high)
+        st.curLow  := na(st.curLow)  ? low  : math.min(st.curLow,  low)
+        if na(st.curStart)
+            st.curStart   := bar_index
+            st.curTime    := time
+            st.curPartial := true
+
+// ---- HTF processing --------------------------------------------------------
+
+// Touch / break tracking and right-edge extension for HTF zones.
+updateHtf(TfState st, bool newPeriod) =>
+    if array.size(st.fvgs) > 0
+        for i = array.size(st.fvgs) - 1 to 0
+            Fvg f = array.get(st.fvgs, i)
+            if not f.broken
+                f.ext := f.bull ? (na(f.ext) ? low : math.min(f.ext, low)) : (na(f.ext) ? high : math.max(f.ext, high))
+                bool brokeNow = false
+                if htfBreakMode == "Wick"
+                    brokeNow := f.bull ? low < f.bottom : high > f.top
+                else if htfBreakMode == "Chart Close"
+                    brokeNow := f.bull ? close < f.bottom : close > f.top
+                else if newPeriod
+                    brokeNow := f.bull ? close[1] < f.bottom : close[1] > f.top
+                if not f.touched
+                    if high >= f.bottom and low <= f.top
+                        f.touched := true
+                        if htfFade
+                            markTouched(f)
+                if brokeNow
+                    f.broken := true
+                    if htfKeepBroken
+                        markBroken(f)
+                    else
+                        array.remove(st.fvgs, i)
+                        deleteFvg(f)
+                else
+                    if not na(f.bx)
+                        box.set_right(f.bx, bar_index + htfExtend)
+                    if not na(f.lbl)
+                        label.set_x(f.lbl, bar_index + htfExtend)
+
+processHtf(TfState st, bool newPeriod) =>
+    if st.on
+        if newPeriod
+            pushPeriod(st)
+        aggregate(st, newPeriod)
+        if newPeriod
+            detectFvg(st, htfMinGap, htfMaxPerTf)
+        updateHtf(st, newPeriod)
+
+// ============================================================================
+// HTF STATE
+// ============================================================================
+
+var TfState s1 = newTf(h1Res, h1Sec, h1Ok, true)
+var TfState s2 = newTf(h2Res, h2Sec, h2Ok, true)
+var TfState s3 = newTf(h3Res, h3Sec, h3Ok, true)
+var TfState s4 = newTf(h4Res, h4Sec, h4Ok, true)
+var TfState s5 = newTf(h5Res, h5Sec, h5Ok, true)
+var TfState s6 = newTf(h6Res, h6Sec, h6Ok, true)
+
+var array<box>   sigBoxes  = array.new<box>()
+var array<label> sigLabels = array.new<label>()
+
+// ============================================================================
+// KEY LEVELS
+// ============================================================================
+
+// Completed-session highs/lows for one session window. Index 0 = most recent.
+type Sess
+    string       name
+    int          keep             // completed sessions retained
+    bool         hiOn
+    bool         loOn
+    array<float> hi
+    array<float> lo
+    array<int>   endBar           // last chart bar of that session
+    float        curHi  = na
+    float        curLo  = na
+    bool         active = false
+
+newSess(string name, int keep, bool hiOn, bool loOn) =>
+    Sess.new(name, keep, hiOn, loOn, array.new<float>(), array.new<float>(), array.new<int>())
+
+// Track the developing session and archive it on the first bar after it ends.
+updateSess(Sess s, bool inSess) =>
+    if inSess
+        if not s.active
+            s.curHi  := high
+            s.curLo  := low
+            s.active := true
+        else
+            s.curHi := math.max(s.curHi, high)
+            s.curLo := math.min(s.curLo, low)
+    else if s.active
+        array.unshift(s.hi, s.curHi)
+        array.unshift(s.lo, s.curLo)
+        array.unshift(s.endBar, bar_index - 1)
+        if array.size(s.hi) > s.keep
+            array.pop(s.hi)
+            array.pop(s.lo)
+            array.pop(s.endBar)
+        s.active := false
+
+var Sess sAsia = newSess("Asia",   sessBack, asiaHiOn, asiaLoOn)
+var Sess sLdn  = newSess("LDN",    sessBack, ldnHiOn,  ldnLoOn)
+var Sess sNy   = newSess("NY",     sessBack, nyHiOn,   nyLoOn)
+var Sess sPre  = newSess("PreMkt", 1,        preHiOn,  preLoOn)
+
+inAsia = not na(time(timeframe.period, asiaSess, sessTz))
+inLdn  = not na(time(timeframe.period, ldnSess,  sessTz))
+inNy   = not na(time(timeframe.period, nySess,   sessTz))
+inPre  = not na(time(timeframe.period, preSess,  sessTz))
+
+// Current open plus the previous completed candle of W / M / 4h. lookahead_on
+// with [1] on the completed candle is the standard non-repainting form; the
+// current open is fixed from the period's first bar.
+[wOpen, pwO, pwH, pwL, pwC] = request.security(syminfo.tickerid, "W",   [open, open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[mOpen, pmO, pmH, pmL, pmC] = request.security(syminfo.tickerid, "M",   [open, open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[p4O, p4H, p4L, p4C]        = request.security(syminfo.tickerid, "240", [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+
+// First chart bar on which the current W / M / 4h values apply. A level only
+// counts for an LTF pattern that starts on or after this bar.
+var int wSince  = na
+var int mSince  = na
+var int h4Since = na
+if timeframe.change("W")
+    wSince := bar_index
+if timeframe.change("M")
+    mSince := bar_index
+if timeframe.change("240")
+    h4Since := bar_index
+
+// ============================================================================
+// LTF / MATCHING
+// ============================================================================
+
+// Does LTF gap f sit inside HTF gap z? The tip of the move must rest within
+// z (and optionally be z's most extreme price since confirmation), plus the
+// optional containment rule for the gap itself. z.ext covers chart bars up to
+// the inverting candle's last bar because matching runs before updateHtf.
+fvgInside(Fvg f, Fvg z) =>
+    mid = math.avg(f.top, f.bottom)
+    bool gapOk = true
+    if containMode == "Overlap"
+        gapOk := f.bottom < z.top and f.top > z.bottom
+    else if containMode == "Fully Inside"
+        gapOk := f.top <= z.top and f.bottom >= z.bottom
+    else if containMode == "Midpoint Inside"
+        gapOk := mid <= z.top and mid >= z.bottom
+    bool extOk = not freshExt or (z.bull ? f.tip <= z.ext : f.tip >= z.ext)
+    f.tip <= z.top and f.tip >= z.bottom and gapOk and extOk
+
+// True when any of the just-inverted LTF gaps sits inside an active HTF gap of
+// timeframe h that points the same way as the inversion and predates the LTF
+// pattern. The LTF timeframe must be strictly lower than the HTF timeframe.
+matchOne(TfState h, array<Fvg> cands, bool bullSig, int ltfSec) =>
+    bool hit = false
+    if h.on and ltfSec < h.sec and array.size(h.fvgs) > 0
+        for i = 0 to array.size(h.fvgs) - 1
+            Fvg z = array.get(h.fvgs, i)
+            if z.bull == bullSig and not z.broken
+                for j = 0 to array.size(cands) - 1
+                    Fvg f = array.get(cands, j)
+                    if z.createdBar <= f.c1Start and fvgInside(f, z)
+                        hit := true
+                        break
+            if hit
+                break
+    hit
+
+// Names of every HTF timeframe with a qualifying gap, joined with "/".
+htfMatchNames(array<Fvg> cands, bool bullSig, int ltfSec) =>
+    string out = ""
+    if matchOne(s1, cands, bullSig, ltfSec)
+        out := appendName(out, tfName(s1.name), "/")
+    if matchOne(s2, cands, bullSig, ltfSec)
+        out := appendName(out, tfName(s2.name), "/")
+    if matchOne(s3, cands, bullSig, ltfSec)
+        out := appendName(out, tfName(s3.name), "/")
+    if matchOne(s4, cands, bullSig, ltfSec)
+        out := appendName(out, tfName(s4.name), "/")
+    if matchOne(s5, cands, bullSig, ltfSec)
+        out := appendName(out, tfName(s5.name), "/")
+    if matchOne(s6, cands, bullSig, ltfSec)
+        out := appendName(out, tfName(s6.name), "/")
+    out
+
+// Append nm to a ", "-separated list unless it is already there.
+addUnique(string list, string nm) =>
+    str.contains(", " + list + ", ", ", " + nm + ", ") ? list : appendName(list, nm, ", ")
+
+// Did the move with tip f.tip sweep lvl and close back on the original side?
+isSweep(float lvl, Fvg f, bool bullSig, float cClose) =>
+    bool ok = false
+    if not na(lvl)
+        ok := bullSig ? f.tip < lvl and cClose > lvl : f.tip > lvl and cClose < lvl
+    ok
+
+// Session / premarket lows are swept by bullish inversions, highs by bearish.
+sessSweeps(Sess s, string list, Fvg f, bool bullSig, float cClose) =>
+    string out = list
+    if bullSig ? s.loOn : s.hiOn
+        int n = math.min(array.size(s.hi), s.keep)
+        if n > 0
+            for i = 0 to n - 1
+                if array.get(s.endBar, i) < f.c1Start
+                    float lvl = bullSig ? array.get(s.lo, i) : array.get(s.hi, i)
+                    if isSweep(lvl, f, bullSig, cClose)
+                        out := addUnique(out, s.name + (bullSig ? " L" : " H") + (i > 0 ? "(" + str.tostring(i + 1) + ")" : ""))
+    out
+
+// Opens, closes and midpoints can be swept from either side.
+lvlSweep(string list, string nm, bool on, float lvl, int since, Fvg f, bool bullSig, float cClose) =>
+    string out = list
+    if on and not na(since)
+        if since <= f.c1Start and isSweep(lvl, f, bullSig, cClose)
+            out := addUnique(out, nm)
+    out
+
+// Names of every enabled key level swept by any of the candidates.
+sweepNames(array<Fvg> cands, bool bullSig, float cClose) =>
+    string out = ""
+    for f in cands
+        out := sessSweeps(sAsia, out, f, bullSig, cClose)
+        out := sessSweeps(sLdn,  out, f, bullSig, cClose)
+        out := sessSweeps(sNy,   out, f, bullSig, cClose)
+        out := sessSweeps(sPre,  out, f, bullSig, cClose)
+        out := lvlSweep(out, "WO",      woOn,  wOpen,             wSince,  f, bullSig, cClose)
+        out := lvlSweep(out, "MO",      moOn,  mOpen,             mSince,  f, bullSig, cClose)
+        out := lvlSweep(out, "PWO",     pwoOn, pwO,               wSince,  f, bullSig, cClose)
+        out := lvlSweep(out, "PWC",     pwcOn, pwC,               wSince,  f, bullSig, cClose)
+        out := lvlSweep(out, "PW Mid",  pwmOn, math.avg(pwH, pwL), wSince, f, bullSig, cClose)
+        out := lvlSweep(out, "PMO",     pmoOn, pmO,               mSince,  f, bullSig, cClose)
+        out := lvlSweep(out, "PMC",     pmcOn, pmC,               mSince,  f, bullSig, cClose)
+        out := lvlSweep(out, "PM Mid",  pmmOn, math.avg(pmH, pmL), mSince, f, bullSig, cClose)
+        out := lvlSweep(out, "P4H O",   p4oOn, p4O,               h4Since, f, bullSig, cClose)
+        out := lvlSweep(out, "P4H C",   p4cOn, p4C,               h4Since, f, bullSig, cClose)
+        out := lvlSweep(out, "P4H Mid", p4mOn, math.avg(p4H, p4L), h4Since, f, bullSig, cClose)
+    out
+
+// True when an unbroken HTF FVG of timeframe h opposing the signal overlaps
+// the price range [lo, hi].
+opposingIn(TfState h, bool bullSig, float lo, float hi) =>
+    bool near = false
+    if h.on
+        for z in h.fvgs
+            if z.bull != bullSig and not z.broken and z.bottom <= hi and z.top >= lo
+                near := true
+                break
+    near
+
+// 1:1 room check: the range from the close out to one tip-to-close distance
+// beyond it must be free of opposing HTF FVGs on every enabled HTF.
+roomFor1R(Fvg f, bool bullSig, float cClose) =>
+    float risk = math.abs(cClose - f.tip)
+    float lo   = bullSig ? cClose : cClose - risk
+    float hi   = bullSig ? cClose + risk : cClose
+    not (opposingIn(s1, bullSig, lo, hi) or opposingIn(s2, bullSig, lo, hi) or opposingIn(s3, bullSig, lo, hi)
+      or opposingIn(s4, bullSig, lo, hi) or opposingIn(s5, bullSig, lo, hi) or opposingIn(s6, bullSig, lo, hi))
+
+// Tooltip text for one LTF timeframe and direction, or "" when nothing
+// qualifies. Candidates failing the 1:1 filter are discarded first, so each
+// reported match belongs to a candidate with room for 1R.
+signalText(TfState st, array<Fvg> cands, bool bullSig, float cClose) =>
+    string out = ""
+    if array.size(cands) > 0
+        array<Fvg> ok = array.new<Fvg>()
+        for f in cands
+            if not oppFilter or roomFor1R(f, bullSig, cClose)
+                array.push(ok, f)
+        if array.size(ok) > 0
+            string htfNames = htfMatchNames(ok, bullSig, st.sec)
+            string swept    = useSweeps ? sweepNames(ok, bullSig, cClose) : ""
+            string parts    = htfNames != "" ? "in " + htfNames : ""
+            if swept != ""
+                parts := appendName(parts, "swept " + swept, " + ")
+            if parts != ""
+                out := tfName(st.name) + " " + parts
+    out
+
+// Outline the LTF candle that completed the inversion. The candle ended on the
+// previous chart bar; time coordinates let the box wrap single-bar candles.
+drawSignalBox(bool bullSig, int startTime, float hi, float lo) =>
+    col = bullSig ? sigBullCol : sigBearCol
+    b = box.new(startTime - halfMs, hi, time[1] + halfMs, lo
+      , xloc = xloc.bar_time, border_color = col, border_width = 1
+      , bgcolor = color.new(col, sigBoxTransp))
+    array.push(sigBoxes, b)
+    if array.size(sigBoxes) > maxSignals
+        box.delete(array.shift(sigBoxes))
+
+// Small dot below (bull) / above (bear) the inverting candle, drawn as a
+// bullet character because label.style_circle bottoms out too large. The
+// timeframe summary is kept as a hover tooltip.
+drawSignalDot(bool bullSig, string txt, float y) =>
+    col = bullSig ? sigBullCol : sigBearCol
+    off = dotOffset * atrVal
+    l = label.new(bar_index - 1, bullSig ? y - off : y + off, "•"
+      , style = label.style_none, textcolor = col, size = dotSz, tooltip = txt)
+    array.push(sigLabels, l)
+    if array.size(sigLabels) > maxSignals
+        label.delete(array.shift(sigLabels))
+
+// Advance one LTF timeframe by one chart bar. On a period change the candle
+// that just closed is checked for inversions of tracked LTF gaps; each
+// inversion that lands inside a qualifying HTF gap or sweeps a key level
+// becomes a signal.
+// Returns [bullText, bearText, bullY, bearY] — text is "" when no signal.
+processLtf(TfState st, bool newPeriod) =>
+    string bullTxt = ""
+    string bearTxt = ""
+    float  bullY   = na
+    float  bearY   = na
+    if st.on
+        if newPeriod
+            bool pushed = pushPeriod(st)
+            if pushed
+                float cClose = close[1]
+                float cHigh  = array.get(st.hHist, 0)
+                float cLow   = array.get(st.lHist, 0)
+                int   cTime  = array.get(st.tHist, 0)
+                array<Fvg> invBull = array.new<Fvg>()   // LTF gaps that just inverted bullish
+                array<Fvg> invBear = array.new<Fvg>()
+                if array.size(st.fvgs) > 0
+                    for i = array.size(st.fvgs) - 1 to 0
+                        Fvg f = array.get(st.fvgs, i)
+                        f.age := f.age + 1
+                        f.tip := f.bull ? math.max(f.tip, cHigh) : math.min(f.tip, cLow)
+                        // Inversion needs the LTF candle to CLOSE beyond the gap's
+                        // far edge; a wick through it does not count.
+                        bool inverted = f.bull ? cClose < f.bottom : cClose > f.top
+                        if inverted
+                            if f.bull
+                                array.push(invBear, f)
+                            else
+                                array.push(invBull, f)
+                            array.remove(st.fvgs, i)
+                        // Candles 1-3 plus f.age later candles; drop the gap
+                        // once no further candle could complete the IFVG in time.
+                        else if 3 + f.age >= ltfMaxBars
+                            array.remove(st.fvgs, i)
+                bullTxt := signalText(st, invBull, true, cClose)
+                if bullTxt != ""
+                    bullY := cLow
+                    if drawSigBox
+                        drawSignalBox(true, cTime, cHigh, cLow)
+                bearTxt := signalText(st, invBear, false, cClose)
+                if bearTxt != ""
+                    bearY := cHigh
+                    if drawSigBox
+                        drawSignalBox(false, cTime, cHigh, cLow)
+        aggregate(st, newPeriod)
+        if newPeriod
+            detectFvg(st, ltfMinGap, ltfMaxCands)
+    [bullTxt, bearTxt, bullY, bearY]
+
+minNa(float a, float b) =>
+    na(a) ? b : na(b) ? a : math.min(a, b)
+
+maxNa(float a, float b) =>
+    na(a) ? b : na(b) ? a : math.max(a, b)
+
+// ============================================================================
+// LTF STATE
+// ============================================================================
+
+var TfState t1 = newTf(l1Res, l1Sec, l1Ok, false)
+var TfState t2 = newTf(l2Res, l2Sec, l2Ok, false)
+var TfState t3 = newTf(l3Res, l3Sec, l3Ok, false)
+var TfState t4 = newTf(l4Res, l4Sec, l4Ok, false)
+
+// timeframe.change() needs a simple string. On the chart timeframe it fires on
+// every bar.
+hn1 = timeframe.change(h1Res)
+hn2 = timeframe.change(h2Res)
+hn3 = timeframe.change(h3Res)
+hn4 = timeframe.change(h4Res)
+hn5 = timeframe.change(h5Res)
+hn6 = timeframe.change(h6Res)
+ln1 = timeframe.change(l1Res)
+ln2 = timeframe.change(l2Res)
+ln3 = timeframe.change(l3Res)
+ln4 = timeframe.change(l4Res)
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+// LTF matching runs first so it sees HTF state as committed at the close of
+// the inverting candle (the previous chart bar), not this bar's developing
+// prices.
+[bt1, rt1, by1, ry1] = processLtf(t1, ln1)
+[bt2, rt2, by2, ry2] = processLtf(t2, ln2)
+[bt3, rt3, by3, ry3] = processLtf(t3, ln3)
+[bt4, rt4, by4, ry4] = processLtf(t4, ln4)
+
+// Sessions archive on the first bar after they end, like HTF candles, so the
+// update order relative to matching does not change which sessions qualify.
+updateSess(sAsia, inAsia)
+updateSess(sLdn,  inLdn)
+updateSess(sNy,   inNy)
+updateSess(sPre,  inPre)
+
+processHtf(s1, hn1)
+processHtf(s2, hn2)
+processHtf(s3, hn3)
+processHtf(s4, hn4)
+processHtf(s5, hn5)
+processHtf(s6, hn6)
+
+// One dot per direction per bar, combining every LTF timeframe that fired.
+bullTxt = appendName(appendName(appendName(bt1, bt2, "\n"), bt3, "\n"), bt4, "\n")
+bearTxt = appendName(appendName(appendName(rt1, rt2, "\n"), rt3, "\n"), rt4, "\n")
+bullY   = minNa(minNa(by1, by2), minNa(by3, by4))
+bearY   = maxNa(maxNa(ry1, ry2), maxNa(ry3, ry4))
+
+bullSignal = bullTxt != ""
+bearSignal = bearTxt != ""
+
+if drawSigDot
+    if bullSignal
+        drawSignalDot(true, bullTxt, bullY)
+    if bearSignal
+        drawSignalDot(false, bearTxt, bearY)
+
+// ============================================================================
+// SKIPPED TIMEFRAME NOTICE
+// ============================================================================
+
+skipped = ""
+skipped := h1On and not h1Ok ? appendName(skipped, tfName(h1Res), ", ") : skipped
+skipped := h2On and not h2Ok ? appendName(skipped, tfName(h2Res), ", ") : skipped
+skipped := h3On and not h3Ok ? appendName(skipped, tfName(h3Res), ", ") : skipped
+skipped := h4On and not h4Ok ? appendName(skipped, tfName(h4Res), ", ") : skipped
+skipped := h5On and not h5Ok ? appendName(skipped, tfName(h5Res), ", ") : skipped
+skipped := h6On and not h6Ok ? appendName(skipped, tfName(h6Res), ", ") : skipped
+skipped := l1On and not l1Ok ? appendName(skipped, tfName(l1Res), ", ") : skipped
+skipped := l2On and not l2Ok ? appendName(skipped, tfName(l2Res), ", ") : skipped
+skipped := l3On and not l3Ok ? appendName(skipped, tfName(l3Res), ", ") : skipped
+skipped := l4On and not l4Ok ? appendName(skipped, tfName(l4Res), ", ") : skipped
+
+var table notice = na
+if barstate.islast and skipped != ""
+    if na(notice)
+        notice := table.new(position.top_right, 1, 1)
+    table.cell(notice, 0, 0, "Skipped (below chart TF): " + skipped
+      , text_color = color.gray, text_size = size.small)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+alertcondition(bullSignal, "Bullish IFVG Reversal", "LTF IFVG inverted bullish inside an HTF FVG or after a key level sweep")
+alertcondition(bearSignal, "Bearish IFVG Reversal", "LTF IFVG inverted bearish inside an HTF FVG or after a key level sweep")
+alertcondition(bullSignal or bearSignal, "Any IFVG Reversal", "LTF IFVG inverted inside an HTF FVG or after a key level sweep")
+
+if dynAlerts
+    if bullSignal
+        alert("Bullish IFVG reversal " + syminfo.ticker + ": " + str.replace_all(bullTxt, "\n", "; "), alert.freq_once_per_bar)
+    if bearSignal
+        alert("Bearish IFVG reversal " + syminfo.ticker + ": " + str.replace_all(bearTxt, "\n", "; "), alert.freq_once_per_bar)
