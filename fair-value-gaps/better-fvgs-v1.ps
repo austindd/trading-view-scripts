@@ -1,0 +1,858 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Better FVGs V1 [SB]", "Better FVGs [SB]", overlay = true
+  , max_bars_back    = 5000
+  , max_lines_count  = 500
+  , max_labels_count = 500
+  , max_boxes_count  = 500)
+
+// ============================================================================
+// OVERVIEW
+// ============================================================================
+//
+// Fair value gaps built from MARKET STRUCTURE instead of three candles.
+//
+// A classic FVG is three candles where candle 1 and candle 3 do not overlap.
+// A structure FVG is the same idea one level up: two MSM structure legs that do
+// not overlap. It is exactly the "sweepable" test from MSM Sweepable V1:
+//
+//   Bearish structure FVG — when MSM confirms a structure HIGH H (price P):
+//     1. Walk back through earlier structure points to the most recent HIGH
+//        strictly above P (lower or equal highs are skipped).
+//     2. Take the structure LOW printed immediately before that high (Lref).
+//     3. If Lref > P, the range [P, Lref] is a gap: price left Lref, ran up,
+//        came back down through Lref and the whole move back up topped at P
+//        without reaching Lref again. Gap = P (bottom) .. Lref (top).
+//
+//   Bullish structure FVG — mirror: the most recent LOW strictly below P, the
+//   HIGH immediately before it (Hpre) must be below P. Gap = Hpre .. P.
+//
+//   Bearish (gap above price)
+//
+//                 Href
+//                  /\
+//          \      /  \
+//           \    /    \
+//            \  /      \
+//    Lref     \/ . . . .\. . . . . . . . . top    = Lref
+//                        \    ### gap ###
+//                         \     /\ H . . . bottom = P
+//                          \   /  \
+//                           \ /    \
+//                            V
+//
+//   Bullish is the same picture flipped: Hpre -> Lref -> rally -> L,
+//   gap from Hpre (bottom) up to L = P (top).
+//
+// The opposite-edge point (Lref / Hpre) plays candle 1, the gap-forming point
+// (H / L) plays candle 3, and the leg between them traded through the gap once.
+//
+// Structure points alternate H/L, so every structure point between the
+// backtracked point and the new point sits outside the gap — that is what makes
+// it a gap. The test only reads points that already existed when the new point
+// was confirmed, so a gap is final the moment it is drawn and never repaints.
+//
+// Drawing follows FVG MTF Origin V1: an origin wedge from the opposite edge's
+// structure point (the "candle 1" level) to the gap-forming point (the "candle
+// 3" level), joined to a box that extends right from the gap-forming point.
+//
+// Structure engine: the point-producing part of MSM V9's state machine (valid
+// high / valid low, BOS, breakout / breakdown candles, extremes scanned over
+// chart bars), unchanged. Lines, labels, CHOCH and S&D zones are not needed to
+// produce structure points, so they are left out. Each enabled timeframe runs
+// its own engine on candles aggregated locally from chart bars:
+//   - a candle is closed on its last chart bar (time_close >= time_close(tf),
+//     on a confirmed bar), falling back to the first bar of the next period if
+//     that test never fired (irregular sessions);
+//   - no request.security(), so the [1] offset trap in CLAUDE.md cannot occur
+//     and every structure point lands on its exact chart bar.
+// On the chart timeframe this reproduces MSM Sweepable V1's points exactly.
+// A timeframe below the chart timeframe cannot be aggregated and is skipped.
+//
+// Gap lifecycle:
+//   Active    -> touched when price trades into it; CE = 50% level.
+//   Broken    -> price passes the far edge (close or wick). With inversion on,
+//                the gap flips into an IFVG of the opposite role.
+//   IFVG      -> dies when price passes back through its other edge.
+//   Expired   -> optional maximum age.
+//
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+grpStruct = "Structure"
+histLen       = input.int(1000, "Structure History Length", minval = 10, maxval = 5000, group = grpStruct, tooltip = "How many past structure points (per timeframe) the backtrack can search. A point with no qualifying earlier high/low inside this history forms no gap.")
+maxBacktrack  = input.int(0, "Max Backtrack (points)", minval = 0, maxval = 1000, group = grpStruct, tooltip = "Only accept a gap when the backtracked high/low is within this many structure points of the new point. Smaller values keep only gaps formed by recent structure. 0 = unlimited (same as MSM Sweepable).")
+wickCheck     = input.string("Off", "Candle Validation", options = ["Off", "Trim", "Reject"], group = grpStruct, tooltip = "Structure points ignore wicks that never became points. This checks the chart candles between the move through the gap and the gap-forming point.\n\nOff: pure structure (matches MSM Sweepable).\nTrim: if a wick re-entered the gap, shrink the gap to the untouched part.\nReject: discard gaps that a wick re-entered.")
+showPoints    = input.bool(false, "Show Structure Points", group = grpStruct, tooltip = "Small markers on every structure point the engine prints (hover for details). Useful to see what each gap was built from.")
+maxPoints     = input.int(40, "Max Structure Points Per TF", minval = 1, maxval = 80, group = grpStruct)
+
+grpGap = "Gaps"
+showBull      = input.bool(true, "Bullish Gaps", inline = "dir", group = grpGap)
+showBear      = input.bool(true, "Bearish Gaps", inline = "dir", group = grpGap)
+minAtrMult    = input.float(0.0, "Min Gap Size (ATR multiple)", minval = 0, step = 0.05, group = grpGap, tooltip = "Ignore gaps smaller than this many ATRs. ATR is measured on the gap's own timeframe. 0 disables.")
+maxAtrMult    = input.float(0.0, "Max Gap Size (ATR multiple)", minval = 0, step = 0.5, group = grpGap, tooltip = "Ignore gaps larger than this many ATRs. 0 disables.")
+atrLen        = input.int(14, "ATR Length", minval = 1, group = grpGap)
+breakPref     = input.string("Close", "Break Condition", options = ["Close", "Wick"], group = grpGap, tooltip = "A gap is broken when price passes its far edge. 'Close' needs a candle close beyond it, 'Wick' only a wick. Also used for an IFVG passing back through its other edge.")
+useInversion  = input.bool(true, "Invert Broken Gaps (IFVG)", group = grpGap, tooltip = "A broken gap flips into an inversion gap of the opposite role (a broken bullish gap becomes resistance, and vice versa) until price passes back through it.")
+maxAge        = input.int(0, "Max Gap Age (bars)", minval = 0, group = grpGap, tooltip = "Retire gaps that are still alive this many chart bars after they formed. 0 = never.")
+maxPerTf      = input.int(20, "Max Gaps Per Timeframe", minval = 1, maxval = 40, group = grpGap, tooltip = "When exceeded, the oldest dead gap is removed first, otherwise the oldest gap. Each gap uses up to 1 box, 3 lines and 1 label (indicator limit: 500 of each).")
+
+grpDisp = "Display"
+showWedge     = input.bool(true, "Show Origin Wedge", group = grpDisp, tooltip = "Triangle from the structure point that set the opposite edge to the point that formed the gap.")
+showCe        = input.bool(true, "Show CE (50%) Line", group = grpDisp)
+shrinkOnFill  = input.bool(false, "Shrink As Filled", group = grpDisp, tooltip = "The box shows only the part of the gap price has not traded into yet.")
+showLabel     = input.bool(true, "Show Timeframe Label", group = grpDisp, tooltip = "Label at the right edge of live gaps. Hover it for the gap's structure points and status.")
+labelSize     = input.string("tiny", "Label Size", options = ["tiny", "small", "normal"], group = grpDisp)
+extendBars    = input.int(10, "Extend Right (bars)", minval = 0, maxval = 100, group = grpDisp)
+keepBroken    = input.bool(true, "Keep Dead Gaps", group = grpDisp, tooltip = "Keep broken / expired gaps, cut off at the bar they died. If off they are deleted.")
+maxVisible    = input.int(0, "Max Visible Live Gaps Per Side", minval = 0, maxval = 40, group = grpDisp, tooltip = "Per timeframe, show only the N live gaps nearest to price on each side (support / resistance). Hidden gaps are still tracked and alerted. 0 = show all.")
+fadeOnTouch   = input.bool(true, "Fade On Touch", group = grpDisp)
+fillTransp    = input.int(80, "Fill Transparency", minval = 0, maxval = 100, group = grpDisp)
+touchTransp   = input.int(90, "Touched Transparency", minval = 0, maxval = 100, group = grpDisp)
+ifvgTransp    = input.int(88, "IFVG Transparency", minval = 0, maxval = 100, group = grpDisp)
+deadTransp    = input.int(96, "Dead Transparency", minval = 0, maxval = 100, group = grpDisp)
+borderTransp  = input.int(40, "Border Transparency", minval = 0, maxval = 100, group = grpDisp)
+
+grpTf1 = "Timeframe 1"
+tf1On   = input.bool(true,  "Enable",  inline = "a1", group = grpTf1)
+tf1Tf   = input.timeframe("", "",      inline = "a1", group = grpTf1, tooltip = "Blank = chart timeframe.")
+tf1Bull = input.color(#089981, "Bull", inline = "b1", group = grpTf1)
+tf1Bear = input.color(#f23645, "Bear", inline = "b1", group = grpTf1)
+
+grpTf2 = "Timeframe 2"
+tf2On   = input.bool(false, "Enable",  inline = "a2", group = grpTf2)
+tf2Tf   = input.timeframe("15", "",    inline = "a2", group = grpTf2)
+tf2Bull = input.color(#26a69a, "Bull", inline = "b2", group = grpTf2)
+tf2Bear = input.color(#ef5350, "Bear", inline = "b2", group = grpTf2)
+
+grpTf3 = "Timeframe 3"
+tf3On   = input.bool(false, "Enable",  inline = "a3", group = grpTf3)
+tf3Tf   = input.timeframe("60", "",    inline = "a3", group = grpTf3)
+tf3Bull = input.color(#2962ff, "Bull", inline = "b3", group = grpTf3)
+tf3Bear = input.color(#ff9800, "Bear", inline = "b3", group = grpTf3)
+
+grpTf4 = "Timeframe 4"
+tf4On   = input.bool(false, "Enable",  inline = "a4", group = grpTf4)
+tf4Tf   = input.timeframe("240", "",   inline = "a4", group = grpTf4)
+tf4Bull = input.color(#7e57c2, "Bull", inline = "b4", group = grpTf4)
+tf4Bear = input.color(#d81b60, "Bear", inline = "b4", group = grpTf4)
+
+grpAlert = "Alerts"
+dynAlerts     = input.bool(true, "Send Dynamic Alerts", group = grpAlert, tooltip = "Fire alert() messages naming the timeframe and prices. Requires an alert created with 'Any alert() function call'. The static alert conditions work regardless.")
+alertFreq     = input.string("Once Per Bar Close", "Dynamic Alert Frequency", options = ["Once Per Bar Close", "Once Per Bar"], group = grpAlert)
+alNew         = input.bool(true, "New Gap",       inline = "al1", group = grpAlert)
+alTouch       = input.bool(true, "Touched",       inline = "al1", group = grpAlert)
+alCe          = input.bool(false, "CE Reached",   inline = "al1", group = grpAlert)
+alBreak       = input.bool(true, "Broken / Inverted", inline = "al2", group = grpAlert)
+alIfvgEnd     = input.bool(false, "IFVG Broken",  inline = "al2", group = grpAlert)
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+// One structure point, in the order the engine printed them (alternating H/L).
+type SwingPoint
+    bool  isHigh
+    float price
+    int   bar
+
+// One structure FVG and its drawings.
+type Gap
+    bool     bull                 // original direction: true = bullish (support)
+    float    top
+    float    bottom
+    int      apexBar              // structure point that set the opposite edge ("candle 1")
+    int      leftBar              // gap-forming structure point ("candle 3"), box left edge
+    int      createdBar           // last chart bar the engine had seen; tracking starts after it
+    string   tip                  // static part of the label tooltip
+    float    fill                 // deepest price traded into the gap while active
+    int      status   = 0         // 0 = active, 1 = inverted (IFVG), 2 = dead
+    bool     touched  = false
+    bool     ceHit    = false
+    bool     retested = false     // IFVG traded into after inverting
+    int      invBar   = na
+    int      deadTime = na
+    string   reason   = ""
+    bool     hidden   = false
+    box      bx       = na
+    line     flatLn   = na        // wedge edge on the opposite-edge level
+    line     slantLn  = na        // wedge edge running to the gap-forming level
+    line     ceLn     = na
+    linefill lf       = na
+    label    lbl      = na
+
+// Per-timeframe state: candle aggregation, structure engine and gaps.
+type TfState
+    string            name
+    bool              on
+    color             cBull
+    color             cBear
+    // developing candle
+    float             cO       = na
+    float             cH       = na
+    float             cL       = na
+    float             cC       = na
+    int               cStart   = na
+    bool              cOpen    = false
+    // previous completed candle
+    float             pH       = na
+    float             pL       = na
+    float             pC       = na
+    float             atr      = na
+    // MSM state machine
+    bool              ready    = false
+    bool              lookLow  = false
+    bool              lookHigh = false
+    float             vHigh    = na
+    float             vLow     = na
+    int               vHighBar = na
+    int               vLowBar  = na
+    array<SwingPoint> hist
+    array<Gap>        gaps
+    array<label>      marks
+    // per-bar events
+    bool              evNewBull = false
+    bool              evNewBear = false
+    bool              evTouch   = false
+    bool              evCe      = false
+    bool              evBreak   = false
+    bool              evIfvgEnd = false
+    string            msg       = ""
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+breakOnWick = breakPref == "Wick"
+lblSize     = labelSize == "normal" ? size.normal : labelSize == "small" ? size.small : size.tiny
+alFreq      = alertFreq == "Once Per Bar" ? alert.freq_once_per_bar : alert.freq_once_per_bar_close
+MAX_BACK    = 4999                // deepest history offset any scan uses
+
+// Resolved timeframe strings. Kept as inline expressions so they stay "simple
+// string", which timeframe.change() and time_close() require.
+tf1Res = tf1Tf == "" ? timeframe.period : tf1Tf
+tf2Res = tf2Tf == "" ? timeframe.period : tf2Tf
+tf3Res = tf3Tf == "" ? timeframe.period : tf3Tf
+tf4Res = tf4Tf == "" ? timeframe.period : tf4Tf
+
+chartSec = timeframe.in_seconds(timeframe.period)
+tf1Ok = tf1On and timeframe.in_seconds(tf1Res) >= chartSec
+tf2Ok = tf2On and timeframe.in_seconds(tf2Res) >= chartSec
+tf3Ok = tf3On and timeframe.in_seconds(tf3Res) >= chartSec
+tf4Ok = tf4On and timeframe.in_seconds(tf4Res) >= chartSec
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+// "5" -> "5m", "60" -> "1h", "240" -> "4h", "D" -> "D".
+tfName(string tf) =>
+    float n    = str.tonumber(tf)
+    string out = tf
+    if not na(n)
+        out := n >= 60 and n % 60 == 0 ? str.tostring(n / 60) + "h" : str.tostring(n) + "m"
+    out
+
+appendName(string list, string nm, string sep) =>
+    list == "" ? nm : list + sep + nm
+
+fmtPx(float p) =>
+    str.tostring(p, format.mintick)
+
+fmtTime(int t) =>
+    na(t) ? "n/a" : str.format_time(t, "yyyy-MM-dd HH:mm", syminfo.timezone)
+
+// Open time of a chart bar, na when it is beyond the history buffer.
+barTime(int b) =>
+    int t   = na
+    int off = bar_index - b
+    if off >= 0 and off <= MAX_BACK
+        t := time[off]
+    t
+
+newTf(string tf, bool on, color cb, color cs) =>
+    TfState.new(
+      name  = tfName(tf),
+      on    = on,
+      cBull = cb,
+      cBear = cs,
+      hist  = array.new<SwingPoint>(),
+      gaps  = array.new<Gap>(),
+      marks = array.new<label>())
+
+addMsg(TfState st, string s) =>
+    st.msg := appendName(st.msg, st.name + " " + s, "; ")
+
+// Highest high over chart bars [fromBar, toBar]; ties go to the most recent bar
+// (same as MSM's findHighestBetween).
+highestIn(int fromBar, int toBar) =>
+    float best    = na
+    int   bestBar = na
+    int   lo      = math.max(fromBar, bar_index - MAX_BACK)
+    if toBar >= lo
+        for b = toBar to lo
+            float h = high[bar_index - b]
+            if na(best) or h > best
+                best    := h
+                bestBar := b
+    [best, bestBar]
+
+lowestIn(int fromBar, int toBar) =>
+    float best    = na
+    int   bestBar = na
+    int   lo      = math.max(fromBar, bar_index - MAX_BACK)
+    if toBar >= lo
+        for b = toBar to lo
+            float l = low[bar_index - b]
+            if na(best) or l < best
+                best    := l
+                bestBar := b
+    [best, bestBar]
+
+// ============================================================================
+// GAP DRAWING
+// ============================================================================
+
+// Direction the gap currently acts in (an IFVG plays the opposite role).
+roleBull(Gap g) =>
+    g.status == 1 ? not g.bull : g.bull
+
+// Distance from price to the near edge of a live gap (0 when inside).
+gapDist(Gap g) =>
+    roleBull(g) ? math.max(0.0, close - g.top) : math.max(0.0, g.bottom - close)
+
+statusText(Gap g) =>
+    string s = ""
+    if g.status == 2
+        s := g.reason + " @ " + fmtTime(g.deadTime)
+    else if g.status == 1
+        s := "Inverted (IFVG)" + (g.retested ? ", retested" : "")
+    else
+        float h   = g.top - g.bottom
+        float pen = g.bull ? g.top - g.fill : g.fill - g.bottom
+        float pct = h > 0 ? math.max(0.0, math.min(100.0, pen / h * 100)) : 0.0
+        s := g.touched ? "Touched, " + str.tostring(pct, "#") + "% filled" + (g.ceHit ? ", CE reached" : "") : "Untouched"
+    s
+
+// "bullish structure FVG 1.2300-1.2345" for alert messages.
+gapDesc(Gap g) =>
+    (g.bull ? "bullish" : "bearish") + " structure " + (g.status == 1 ? "IFVG " : "FVG ") + fmtPx(g.bottom) + "-" + fmtPx(g.top)
+
+// Single source of truth for a gap's colours and styles.
+styleGap(TfState st, Gap g) =>
+    color col = roleBull(g) ? st.cBull : st.cBear
+    int ft = g.status == 2 ? deadTransp :
+             g.status == 1 ? ((fadeOnTouch and g.retested) ? touchTransp : ifvgTransp) :
+             (fadeOnTouch and g.touched) ? touchTransp : fillTransp
+    int bt = g.status == 2 ? math.max(borderTransp, 70) : borderTransp
+    if g.hidden
+        ft := 100
+        bt := 100
+    color  fillC = color.new(col, ft)
+    color  bordC = color.new(col, bt)
+    string sty   = g.status == 2 ? line.style_dashed : g.status == 1 ? line.style_dotted : line.style_solid
+    if not na(g.bx)
+        box.set_bgcolor(g.bx, fillC)
+        box.set_border_color(g.bx, bordC)
+        box.set_border_style(g.bx, sty)
+    if not na(g.flatLn)
+        line.set_color(g.flatLn, bordC)
+        line.set_style(g.flatLn, sty)
+    if not na(g.slantLn)
+        line.set_color(g.slantLn, bordC)
+        line.set_style(g.slantLn, sty)
+    if not na(g.lf)
+        linefill.set_color(g.lf, fillC)
+    if not na(g.ceLn)
+        line.set_color(g.ceLn, bordC)
+    if not na(g.lbl)
+        label.set_text(g.lbl, st.name + (g.status == 1 ? " IFVG" : ""))
+        label.set_textcolor(g.lbl, color.new(col, g.hidden ? 100 : 0))
+        label.set_tooltip(g.lbl, g.tip + "\nStatus: " + statusText(g))
+
+drawGap(TfState st, Gap g) =>
+    int right = bar_index + extendBars
+    g.bx := box.new(g.leftBar, g.top, right, g.bottom, border_width = 1)
+    // The wedge needs the two structure points on different bars.
+    if showWedge and g.leftBar > g.apexBar and g.apexBar >= bar_index - 9999
+        float flatY  = g.bull ? g.bottom : g.top    // level set by the opposite-edge point
+        float slantY = g.bull ? g.top    : g.bottom // level set by the gap-forming point
+        g.flatLn  := line.new(g.apexBar, flatY, g.leftBar, flatY,  width = 1)
+        g.slantLn := line.new(g.apexBar, flatY, g.leftBar, slantY, width = 1)
+        g.lf      := linefill.new(g.flatLn, g.slantLn, color.new(color.gray, 100))
+    if showCe
+        float mid = math.avg(g.top, g.bottom)
+        g.ceLn := line.new(g.leftBar, mid, right, mid, width = 1, style = line.style_dashed)
+    if showLabel
+        g.lbl := label.new(right, math.avg(g.top, g.bottom), st.name
+          , style     = label.style_label_left
+          , color     = color.new(color.gray, 100)
+          , size      = lblSize)
+    styleGap(st, g)
+
+deleteGap(Gap g) =>
+    if not na(g.lf)
+        linefill.delete(g.lf)
+    if not na(g.flatLn)
+        line.delete(g.flatLn)
+    if not na(g.slantLn)
+        line.delete(g.slantLn)
+    if not na(g.ceLn)
+        line.delete(g.ceLn)
+    if not na(g.bx)
+        box.delete(g.bx)
+    if not na(g.lbl)
+        label.delete(g.lbl)
+
+// Freeze a gap at the current bar.
+killGap(TfState st, Gap g, string reason) =>
+    g.status   := 2
+    g.reason   := reason
+    g.deadTime := time
+    if not na(g.bx)
+        box.set_right(g.bx, bar_index)
+    if not na(g.ceLn)
+        line.set_x2(g.ceLn, bar_index)
+    if not na(g.lbl)
+        label.delete(g.lbl)
+        g.lbl := na
+    styleGap(st, g)
+
+// Resize the box to the unfilled part (Shrink As Filled), or back to full.
+fitBox(Gap g) =>
+    if not na(g.bx)
+        if shrinkOnFill and g.status == 0
+            if g.bull
+                box.set_top(g.bx, math.max(g.bottom, math.min(g.top, g.fill)))
+            else
+                box.set_bottom(g.bx, math.min(g.top, math.max(g.bottom, g.fill)))
+        else
+            box.set_top(g.bx, g.top)
+            box.set_bottom(g.bx, g.bottom)
+
+// ============================================================================
+// GAP CREATION
+// ============================================================================
+
+// Called when the engine confirms a structure point that passed the gap test.
+// isHigh = the new point is a high (bearish gap). Returns true if a gap is made.
+tryCreateGap(TfState st, bool isHigh, float price, int bar, float refP, int refB, float oppP, int oppB, int endBar) =>
+    bool  ok      = isHigh ? showBear : showBull
+    float top     = isHigh ? oppP  : price
+    float bot     = isHigh ? price : oppP
+    bool  trimmed = false
+
+    // Candle validation: after the backtracked point, find the first bar that
+    // traded through the gap-forming level, then the deepest wick back into the
+    // gap before the gap-forming point.
+    if ok and wickCheck != "Off"
+        int   s       = math.max(refB + 1, bar_index - MAX_BACK)
+        int   e       = bar - 1
+        bool  crossed = false
+        float rv      = na
+        if e >= s
+            for b = s to e
+                int off = bar_index - b
+                if not crossed
+                    crossed := isHigh ? low[off] < price : high[off] > price
+                else
+                    rv := isHigh ? (na(rv) ? high[off] : math.max(rv, high[off]))
+                                 : (na(rv) ? low[off]  : math.min(rv, low[off]))
+        bool intruded = not na(rv) and (isHigh ? rv > bot : rv < top)
+        if intruded
+            if wickCheck == "Reject"
+                ok := false
+            else
+                trimmed := true
+                if isHigh
+                    bot := rv
+                else
+                    top := rv
+
+    ok := ok and top > bot
+
+    float h = top - bot
+    if ok and not na(st.atr) and st.atr > 0
+        if minAtrMult > 0 and h < st.atr * minAtrMult
+            ok := false
+        if maxAtrMult > 0 and h > st.atr * maxAtrMult
+            ok := false
+
+    if ok
+        string atrTxt = na(st.atr) or st.atr <= 0 ? "" : ", " + str.tostring(h / st.atr, "#.##") + " ATR"
+        string tip = (isHigh ? "Bearish" : "Bullish") + " structure FVG · " + st.name +
+             "\nRange: " + fmtPx(bot) + " – " + fmtPx(top) + " (" + fmtPx(h) + atrTxt + ")" +
+             "\nGap-forming " + (isHigh ? "high " : "low ") + fmtPx(price) + " @ " + fmtTime(barTime(bar)) +
+             "\nOpposite edge " + (isHigh ? "low " : "high ") + fmtPx(oppP) + " @ " + fmtTime(barTime(oppB)) +
+             "\nBacktracked " + (isHigh ? "high " : "low ") + fmtPx(refP) + " @ " + fmtTime(barTime(refB)) +
+             (trimmed ? "\nTrimmed by candle validation" : "") +
+             "\nConfirmed @ " + fmtTime(barTime(endBar))
+        Gap g = Gap.new(
+          bull       = not isHigh,
+          top        = top,
+          bottom     = bot,
+          apexBar    = oppB,
+          leftBar    = bar,
+          createdBar = endBar,
+          tip        = tip,
+          fill       = isHigh ? bot : top)
+        drawGap(st, g)
+        array.push(st.gaps, g)
+
+        // Over the cap: drop the oldest dead gap, else the oldest gap.
+        if array.size(st.gaps) > maxPerTf
+            int idx = 0
+            for i = 0 to array.size(st.gaps) - 1
+                if array.get(st.gaps, i).status == 2
+                    idx := i
+                    break
+            deleteGap(array.remove(st.gaps, idx))
+
+        if isHigh
+            st.evNewBear := true
+        else
+            st.evNewBull := true
+        if dynAlerts and alNew
+            addMsg(st, gapDesc(g) + " formed")
+    ok
+
+// ============================================================================
+// STRUCTURE ENGINE
+// ============================================================================
+
+addMarker(TfState st, bool isHigh, float price, int bar, bool formedGap) =>
+    string tip = st.name + " structure " + (isHigh ? "high " : "low ") + fmtPx(price) +
+         (formedGap ? "\nFormed a " + (isHigh ? "bearish" : "bullish") + " structure FVG" : "")
+    label lb = label.new(bar, price, ""
+      , style   = isHigh ? label.style_triangledown : label.style_triangleup
+      , color   = color.new(isHigh ? st.cBear : st.cBull, formedGap ? 0 : 50)
+      , size    = size.tiny
+      , tooltip = tip)
+    array.push(st.marks, lb)
+    while array.size(st.marks) > maxPoints
+        label.delete(array.shift(st.marks))
+
+// Record a structure point. The gap test runs first, against points that
+// already existed (MSM Sweepable's evalSweepable), so it never repaints.
+addPoint(TfState st, bool isHigh, float price, int bar, int endBar) =>
+    bool  gapOk = false
+    float refP  = na
+    int   refB  = na
+    float oppP  = na
+    int   oppB  = na
+    int   n     = array.size(st.hist)
+    if n > 0
+        for i = n - 1 to 0
+            if maxBacktrack > 0 and n - i > maxBacktrack
+                break
+            SwingPoint p = array.get(st.hist, i)
+            if p.isHigh == isHigh and (isHigh ? p.price > price : p.price < price)
+                refP := p.price
+                refB := p.bar
+                // Opposite point immediately before it. Points alternate, so this
+                // is i - 1; the walk only guards against a broken alternation.
+                if i > 0
+                    for j = i - 1 to 0
+                        SwingPoint q = array.get(st.hist, j)
+                        if q.isHigh != isHigh
+                            oppP := q.price
+                            oppB := q.bar
+                            break
+                if not na(oppP)
+                    gapOk := isHigh ? oppP > price : oppP < price
+                break
+
+    array.push(st.hist, SwingPoint.new(isHigh, price, bar))
+    while array.size(st.hist) > histLen
+        array.shift(st.hist)
+
+    bool made = false
+    if gapOk
+        made := tryCreateGap(st, isHigh, price, bar, refP, refB, oppP, oppB, endBar)
+    if showPoints
+        addMarker(st, isHigh, price, bar, made)
+
+// Run MSM V9's point-producing state machine on one completed candle whose last
+// chart bar is endBar. Extremes are scanned over chart bars, exactly like MSM's
+// findLowestBetween / findHighestBetween (which exclude the valid level's own bar).
+closeCandle(TfState st, int endBar) =>
+    float o = st.cO
+    float h = st.cH
+    float l = st.cL
+    float c = st.cC
+
+    float tr = na(st.pC) ? h - l : math.max(h - l, math.abs(h - st.pC), math.abs(l - st.pC))
+    st.atr := na(st.atr) ? tr : (st.atr * (atrLen - 1) + tr) / atrLen
+
+    bool bearBreakdown = c < o and c < st.pL      // false while pL is na
+    bool bullBreakout  = c > o and c > st.pH
+
+    if not st.ready
+        // Initialisation: first bearish breakdown -> highest high in history.
+        if bearBreakdown
+            [hp, hb] = highestIn(0, endBar)
+            if not na(hp)
+                st.vHigh    := hp
+                st.vHighBar := hb
+                st.ready    := true
+                st.lookLow  := true
+                addPoint(st, true, hp, hb, endBar)
+    else if st.lookLow
+        // Bullish BOS (close above the valid high) or a bullish breakout candle
+        // confirms the low of the pullback.
+        if (not na(st.vHigh) and not na(st.vLow) and c > st.vHigh) or bullBreakout
+            [lp, lb] = lowestIn(st.vHighBar + 1, endBar)
+            if not na(lp)
+                st.vLow     := lp
+                st.vLowBar  := lb
+                st.lookLow  := false
+                st.lookHigh := true
+                addPoint(st, false, lp, lb, endBar)
+    else if st.lookHigh
+        if (not na(st.vLow) and not na(st.vHigh) and c < st.vLow) or bearBreakdown
+            [hp, hb] = highestIn(st.vLowBar + 1, endBar)
+            if not na(hp)
+                st.vHigh    := hp
+                st.vHighBar := hb
+                st.lookHigh := false
+                st.lookLow  := true
+                addPoint(st, true, hp, hb, endBar)
+
+    st.pH := h
+    st.pL := l
+    st.pC := c
+
+// ============================================================================
+// GAP LIFECYCLE
+// ============================================================================
+
+updateGaps(TfState st) =>
+    int n = array.size(st.gaps)
+    if n > 0
+        for i = n - 1 to 0
+            Gap g = array.get(st.gaps, i)
+            if g.status < 2 and bar_index > g.createdBar
+                bool  restyle = false
+                float mid     = math.avg(g.top, g.bottom)
+
+                if g.status == 0
+                    bool broke = false
+                    if g.bull
+                        if low < g.fill
+                            g.fill := low
+                            fitBox(g)
+                        if not g.touched and low <= g.top
+                            g.touched  := true
+                            restyle    := true
+                            st.evTouch := true
+                            if dynAlerts and alTouch
+                                addMsg(st, gapDesc(g) + " touched")
+                        if not g.ceHit and low <= mid
+                            g.ceHit := true
+                            st.evCe := true
+                            if dynAlerts and alCe
+                                addMsg(st, gapDesc(g) + " CE reached")
+                        broke := breakOnWick ? low < g.bottom : close < g.bottom
+                    else
+                        if high > g.fill
+                            g.fill := high
+                            fitBox(g)
+                        if not g.touched and high >= g.bottom
+                            g.touched  := true
+                            restyle    := true
+                            st.evTouch := true
+                            if dynAlerts and alTouch
+                                addMsg(st, gapDesc(g) + " touched")
+                        if not g.ceHit and high >= mid
+                            g.ceHit := true
+                            st.evCe := true
+                            if dynAlerts and alCe
+                                addMsg(st, gapDesc(g) + " CE reached")
+                        broke := breakOnWick ? high > g.top : close > g.top
+
+                    if broke
+                        st.evBreak := true
+                        if useInversion
+                            if dynAlerts and alBreak
+                                addMsg(st, gapDesc(g) + " broken, now IFVG")
+                            g.status := 1
+                            g.invBar := bar_index
+                            fitBox(g)
+                            restyle  := true
+                        else
+                            killGap(st, g, "Broken")
+                            if dynAlerts and alBreak
+                                addMsg(st, gapDesc(g) + " broken")
+
+                else if bar_index > g.invBar
+                    // IFVG: a broken bullish gap is now resistance, and vice versa.
+                    bool died = false
+                    if g.bull
+                        if not g.retested and high >= g.bottom
+                            g.retested := true
+                            restyle    := true
+                        died := breakOnWick ? high > g.top : close > g.top
+                    else
+                        if not g.retested and low <= g.top
+                            g.retested := true
+                            restyle    := true
+                        died := breakOnWick ? low < g.bottom : close < g.bottom
+                    if died
+                        st.evIfvgEnd := true
+                        if dynAlerts and alIfvgEnd
+                            addMsg(st, gapDesc(g) + " broken")
+                        killGap(st, g, "IFVG broken")
+
+                if g.status < 2 and maxAge > 0 and bar_index - g.createdBar >= maxAge
+                    killGap(st, g, "Expired")
+
+                if g.status == 2
+                    if not keepBroken
+                        deleteGap(g)
+                        array.remove(st.gaps, i)
+                else if restyle
+                    styleGap(st, g)
+
+// Advance one timeframe by one chart bar.
+//   newPeriod    = first chart bar of a new candle of this timeframe
+//   lastOfPeriod = confirmed last chart bar of the current candle
+processTf(TfState st, bool newPeriod, bool lastOfPeriod) =>
+    st.evNewBull := false
+    st.evNewBear := false
+    st.evTouch   := false
+    st.evCe      := false
+    st.evBreak   := false
+    st.evIfvgEnd := false
+    st.msg       := ""
+    if st.on
+        if newPeriod or na(st.cStart)
+            // Fallback close for a candle whose last bar was not recognised.
+            if st.cOpen
+                closeCandle(st, bar_index - 1)
+            st.cO     := open
+            st.cH     := high
+            st.cL     := low
+            st.cC     := close
+            st.cStart := bar_index
+            st.cOpen  := true
+        else if st.cOpen
+            st.cH := math.max(st.cH, high)
+            st.cL := math.min(st.cL, low)
+            st.cC := close
+        if st.cOpen and lastOfPeriod
+            closeCandle(st, bar_index)
+            st.cOpen := false
+        updateGaps(st)
+
+// Last-bar housekeeping: nearest-N visibility, final styles, right-edge extension.
+refreshTf(TfState st) =>
+    int n = array.size(st.gaps)
+    if n > 0
+        int right = bar_index + extendBars
+        for i = 0 to n - 1
+            Gap g = array.get(st.gaps, i)
+            bool hide = false
+            if g.status < 2 and maxVisible > 0
+                bool  rb     = roleBull(g)
+                float d      = gapDist(g)
+                int   closer = 0
+                for j = 0 to n - 1
+                    if j != i
+                        Gap o = array.get(st.gaps, j)
+                        if o.status < 2 and roleBull(o) == rb
+                            float od = gapDist(o)
+                            if od < d or (od == d and j > i)
+                                closer += 1
+                hide := closer >= maxVisible
+            g.hidden := hide
+            if g.status < 2
+                if not na(g.bx)
+                    box.set_right(g.bx, right)
+                if not na(g.ceLn)
+                    line.set_x2(g.ceLn, right)
+                if not na(g.lbl)
+                    label.set_x(g.lbl, right)
+            styleGap(st, g)
+
+// ============================================================================
+// STATE & MAIN
+// ============================================================================
+
+var TfState s1 = newTf(tf1Res, tf1Ok, tf1Bull, tf1Bear)
+var TfState s2 = newTf(tf2Res, tf2Ok, tf2Bull, tf2Bear)
+var TfState s3 = newTf(tf3Res, tf3Ok, tf3Bull, tf3Bear)
+var TfState s4 = newTf(tf4Res, tf4Ok, tf4Bull, tf4Bear)
+
+// Series calls at global scope so they run on every bar.
+new1 = timeframe.change(tf1Res)
+new2 = timeframe.change(tf2Res)
+new3 = timeframe.change(tf3Res)
+new4 = timeframe.change(tf4Res)
+
+tc1 = time_close(tf1Res)
+tc2 = time_close(tf2Res)
+tc3 = time_close(tf3Res)
+tc4 = time_close(tf4Res)
+
+last1 = barstate.isconfirmed and not na(tc1) and time_close >= tc1
+last2 = barstate.isconfirmed and not na(tc2) and time_close >= tc2
+last3 = barstate.isconfirmed and not na(tc3) and time_close >= tc3
+last4 = barstate.isconfirmed and not na(tc4) and time_close >= tc4
+
+processTf(s1, new1, last1)
+processTf(s2, new2, last2)
+processTf(s3, new3, last3)
+processTf(s4, new4, last4)
+
+if barstate.islast
+    refreshTf(s1)
+    refreshTf(s2)
+    refreshTf(s3)
+    refreshTf(s4)
+
+// ============================================================================
+// SKIPPED TIMEFRAME NOTICE
+// ============================================================================
+
+skipped = ""
+skipped := tf1On and not tf1Ok ? appendName(skipped, tfName(tf1Res), ", ") : skipped
+skipped := tf2On and not tf2Ok ? appendName(skipped, tfName(tf2Res), ", ") : skipped
+skipped := tf3On and not tf3Ok ? appendName(skipped, tfName(tf3Res), ", ") : skipped
+skipped := tf4On and not tf4Ok ? appendName(skipped, tfName(tf4Res), ", ") : skipped
+
+var table notice = na
+if barstate.islast and skipped != ""
+    if na(notice)
+        notice := table.new(position.top_right, 1, 1)
+    table.cell(notice, 0, 0, "Skipped (below chart TF): " + skipped
+      , text_color = color.gray, text_size = size.small)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+anyNewBull = s1.evNewBull or s2.evNewBull or s3.evNewBull or s4.evNewBull
+anyNewBear = s1.evNewBear or s2.evNewBear or s3.evNewBear or s4.evNewBear
+anyTouch   = s1.evTouch   or s2.evTouch   or s3.evTouch   or s4.evTouch
+anyCe      = s1.evCe      or s2.evCe      or s3.evCe      or s4.evCe
+anyBreak   = s1.evBreak   or s2.evBreak   or s3.evBreak   or s4.evBreak
+anyIfvgEnd = s1.evIfvgEnd or s2.evIfvgEnd or s3.evIfvgEnd or s4.evIfvgEnd
+
+alertcondition(anyNewBull, "New Bullish Structure FVG", "Bullish structure FVG formed on {{ticker}}")
+alertcondition(anyNewBear, "New Bearish Structure FVG", "Bearish structure FVG formed on {{ticker}}")
+alertcondition(anyTouch,   "Structure FVG Touched",     "Price traded into a structure FVG on {{ticker}}")
+alertcondition(anyCe,      "Structure FVG CE Reached",  "Price reached the 50% level of a structure FVG on {{ticker}}")
+alertcondition(anyBreak,   "Structure FVG Broken",      "Price broke through a structure FVG on {{ticker}}")
+alertcondition(anyIfvgEnd, "Structure IFVG Broken",     "Price broke back through a structure IFVG on {{ticker}}")
+
+if dynAlerts
+    string allMsg = ""
+    allMsg := s1.msg != "" ? appendName(allMsg, s1.msg, "; ") : allMsg
+    allMsg := s2.msg != "" ? appendName(allMsg, s2.msg, "; ") : allMsg
+    allMsg := s3.msg != "" ? appendName(allMsg, s3.msg, "; ") : allMsg
+    allMsg := s4.msg != "" ? appendName(allMsg, s4.msg, "; ") : allMsg
+    if allMsg != ""
+        alert(syminfo.ticker + ": " + allMsg, alFreq)
