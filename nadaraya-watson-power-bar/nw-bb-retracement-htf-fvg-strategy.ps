@@ -1,0 +1,559 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TheTrdFloor
+//
+// In many strategies, it's quite common to use a scaled ATR to help define a stop-loss, and it's not uncommon to use it for take-profit targets
+// as well.  While there are quite a few indicators that plot ATR bands already on TV, we could not find one that actually performed the exact
+// way that we wanted.  They all had at least one of the following gaps:
+//   * The ATR offset was not configurable (usually hard-coded to be based off the high or low, while we generally prefer to use close)
+//   * It would only print a single band (either the upper or lower), which would require the same indicator to be added twice
+//   * The ATR scaling factor was either not configurable or only stepped in whole numbers (often time fractional factors like 1.5 yield better results)
+//
+// Also, when looking at some of the behaviors of the ATR bands, you can see that when price first levels out, you can draw a "consolidation zone" from
+// the first peak of the upper ATR band to the first valley of the lower ATR band and look for price to break and close outside of that zone.  When that
+// happens, price will usually make a notable move in that direction.
+//
+// While we have made some updates and enhancements to this indicator, and have every intention of continuing to do so as we find worthy opportunities
+// for enhancement, credit is still due to the origianl author:  AlexanderTeaH
+//
+// HTF FVG entry filter added by scientificbest: every entry is only taken when price is inside an active higher-timeframe fair value gap.
+// The HTF FVG engine is taken from fair-value-gaps/htf-fvg-ltf-ifvg-reversal-v1.ps (local candle aggregation via timeframe.change(),
+// non-repainting). Exits are never filtered.
+//
+//@version=5
+strategy('Nadaraya-Watson + BB% Strategy + Retracement + HTF FVG Filter [SB]', shorttitle="NW + BB% + Ret + FVG [SB]", overlay=false, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_type=strategy.commission.percent, initial_capital=1000, use_bar_magnifier=true, max_bars_back=5000, max_boxes_count=500, max_labels_count=500) // These had to be taken out as they're not compatible with plotting a table...   , timeframe="", timeframe_gaps=false
+
+bb_length = input.int(20, minval=1)
+bb_src = input(close, title="Source")
+bb_mult = input.float(2.0, minval=0.001, maxval=50, title="StdDev", step=0.05)
+bb_smoothing_factor = input.int(2, "BB Smoothing Factor", minval = 0)
+bb_basis = ta.sma(bb_src, bb_length)
+bb_dev = bb_mult * ta.stdev(bb_src, bb_length)
+bb_upper = bb_basis + bb_dev
+bb_lower = bb_basis - bb_dev
+bb_bbr_raw = (bb_src - bb_lower)/(bb_upper - bb_lower)
+bb_bbr = ta.ema(bb_bbr_raw, bb_smoothing_factor)
+plot(bb_bbr, "Bollinger Bands %B", color=#26A69A)
+bb_band1 = hline(1, "Overbought", color=#787B86, linestyle=hline.style_dashed)
+hline(0.5, "Middle Band", color=color.new(#787B86, 50))
+bb_band0 = hline(0, "Oversold", color=#787B86, linestyle=hline.style_dashed)
+fill(bb_band1, bb_band0, color=color.rgb(38, 166, 154, 90), title="Background")
+
+
+// Settings
+src = input.source(close, 'Source')
+h = input.float(8., 'Lookback Window', minval=3., tooltip='The number of bars used for the estimation. This is a sliding value that represents the most recent historical bars. Recommended range: 3-50')
+r = input.float(8., 'Relative Weighting', step=0.25, tooltip='Relative weighting of time frames. As this value approaches zero, the longer time frames will exert more influence on the estimation. As this value approaches infinity, the behavior of the Rational Quadratic Kernel will become identical to the Gaussian kernel. Recommended range: 0.25-25')
+x_0 = input.int(25, "Start Regression at Bar", tooltip='Bar index on which to start regression. The first bars of a chart are often highly volatile, and omission of these initial bars often leads to a better overall fit. Recommended range: 5-25')
+smoothColors = input.bool(false, "Smooth Colors", tooltip="Uses a crossover based mechanism to determine colors. This often results in less color transitions overall.", inline='1', group='Colors')
+lag = input.int(2, "Lag", tooltip="Lag for crossover detection. Lower values result in earlier crossovers. Recommended range: 1-2", inline='1', group='Colors')
+// Renamed from `size` so it does not shadow the size.* namespace used by the FVG labels.
+kernel_size = array.size(array.from(src)) // size of the data series
+use_reg_smoothing = input.bool(true, "Use Regression Smoothing")
+reg_smoothing_factor = input.int(3, "Regression Smoothing Factor", minval = 1)
+
+// Further Reading:
+// The Kernel Cookbook: Advice on Covariance functions. David Duvenaud. Published June 2014.
+// Estimation of the bandwidth parameter in Nadaraya-Watson kernel non-parametric regression based on universal threshold level. Ali T, Heyam Abd Al-Majeed Hayawi, Botani I. Published February 26, 2021.
+kernel_regression(_src, _size, _h) =>
+    float _currentWeight = 0.
+    float _cumulativeWeight = 0.
+    for i = 0 to _size + x_0
+        y = _src[i]
+        w = math.pow(1 + (math.pow(i, 2) / ((math.pow(_h, 2) * 2 * r))), -r)
+        _currentWeight += y*w
+        _cumulativeWeight += w
+    _currentWeight / _cumulativeWeight
+
+// Estimations
+yhat1_raw = kernel_regression(src, kernel_size, h)
+yhat2_raw = kernel_regression(src, kernel_size, h-lag)
+
+yhat1 = use_reg_smoothing ? ta.hma(yhat1_raw, reg_smoothing_factor) : yhat1_raw
+yhat2 = use_reg_smoothing ? ta.hma(yhat2_raw, reg_smoothing_factor) : yhat2_raw
+
+// Rates of Change
+bool wasBearish = yhat1[2] > yhat1[1]
+bool wasBullish = yhat1[2] < yhat1[1]
+bool isBearish = yhat1[1] > yhat1
+bool isBullish = yhat1[1] < yhat1
+bool isBearishChange = isBearish and wasBullish
+bool isBullishChange = isBullish and wasBearish
+
+// Crossovers
+bool isBullishCross = ta.crossover(yhat2, yhat1)
+bool isBearishCross = ta.crossunder(yhat2, yhat1)
+bool isBullishSmooth = yhat2 > yhat1
+bool isBearishSmooth = yhat2 < yhat1
+
+// Colors
+color c_bullish = input.color(#3AFF17, 'Bullish Color', group='Colors')
+color c_bearish = input.color(#FD1707, 'Bearish Color', group='Colors')
+color colorByCross = isBullishSmooth ? c_bullish : c_bearish
+color colorByRate = isBullish ? c_bullish : c_bearish
+color plotColor = smoothColors ? colorByCross : colorByRate
+
+// Plot
+plot(yhat1, "Rational Quadratic Kernel Estimate", color=plotColor, linewidth=2)
+
+// Alert Variables
+bool alertBullish = smoothColors ? isBearishCross : isBearishChange
+bool alertBearish = smoothColors ? isBullishCross : isBullishChange
+
+// Alerts for Color Changes
+alertcondition(condition=alertBullish, title='Bearish Color Change', message='Nadaraya-Watson: {{ticker}} ({{interval}}) turned Bearish ▼')
+alertcondition(condition=alertBearish, title='Bullish Color Change', message='Nadaraya-Watson: {{ticker}} ({{interval}}) turned Bullish ▲')
+
+// Non-Displayed Plot Outputs (i.e., for use in other indicators)
+plot(alertBearish ? -1 : alertBullish ? 1 : 0, "Alert Stream", display=display.none)
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// HTF FAIR VALUE GAP FILTER
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// Fair value gaps are detected on up to 6 higher timeframes, aggregated locally from chart bars via timeframe.change() (no request.security(),
+// so no repainting and no [1] offset trap). A gap is active from the first chart bar after its third candle closes until it breaks.
+//
+// On every bar the script checks whether price is inside an active bullish / bearish HTF FVG. An entry is only placed when the required gap
+// type was hit on the entry bar (or within "Lookback Bars" before it). Retracement / continuation setups that are blocked stay armed, so the
+// entry can still fire on a later bar once price is inside a gap. Immediate crossover entries that are blocked are skipped.
+//
+// Every selected timeframe must be >= the chart timeframe; lower ones are skipped and listed in a small table.
+
+grpFlt = "HTF FVG Entry Filter"
+useFvgFilter = input.bool(true, "Enable HTF FVG Filter", group = grpFlt, tooltip = "Off = the original strategy, unfiltered. HTF FVGs are still detected and drawn.")
+fvgDirMode   = input.string("Matching", "Required FVG Type", options = ["Matching", "Opposite", "Any"], group = grpFlt, tooltip = "Matching: longs need a bullish HTF FVG (support), shorts a bearish one (resistance).\nOpposite: longs need a bearish HTF FVG, shorts a bullish one.\nAny: either type allows either direction.")
+fvgTestMode  = input.string("Close Inside", "Inside Test", options = ["Close Inside", "Bar Touches"], group = grpFlt, tooltip = "Close Inside: the bar's close is between the gap's top and bottom.\nBar Touches: any part of the bar's high-low range overlaps the gap.")
+fvgLookback  = input.int(0, "Lookback Bars", minval = 0, maxval = 500, group = grpFlt, tooltip = "0 = price must be inside the gap on the entry bar itself. N = the inside test passing on any of the last N bars (or the entry bar) is enough.")
+showBlocked  = input.bool(true, "Mark Blocked Entries", group = grpFlt, tooltip = "Grey crosses at the bottom (long) / top (short) of the pane where the unfiltered strategy would have entered.")
+
+grpHtf = "HTF Fair Value Gaps"
+showHtf       = input.bool(true, "Show HTF FVG Zones", group = grpHtf, tooltip = "Draw HTF fair value gaps on the price chart. Detection and filtering run regardless of this setting.")
+htfBullCol    = input.color(#089981, "Bull", inline = "hc", group = grpHtf)
+htfBearCol    = input.color(#f23645, "Bear", inline = "hc", group = grpHtf)
+htfBreakMode  = input.string("HTF Close", "Break Condition", options = ["HTF Close", "Chart Close", "Wick"], group = grpHtf, tooltip = "When an HTF FVG stops being valid for the filter.\nHTF Close: a candle of the FVG's own timeframe closes beyond the far edge.\nChart Close: any chart bar closes beyond the far edge.\nWick: any chart bar wicks beyond the far edge.")
+htfMinAtr     = input.float(0.0, "Min Gap Size (ATR multiple)", minval = 0, step = 0.05, group = grpHtf, tooltip = "Ignore HTF gaps smaller than chart ATR * this value. 0 disables the filter.")
+htfMaxPerTf   = input.int(20, "Max FVGs Per Timeframe", minval = 1, maxval = 60, group = grpHtf, tooltip = "Oldest HTF FVGs are dropped once this limit is exceeded.")
+htfKeepBroken = input.bool(false, "Keep Broken Zones", group = grpHtf, tooltip = "Keep broken HTF zones on the chart, cut off at the breaking bar. Off deletes them to reduce clutter.")
+htfFade       = input.bool(true, "Fade On Touch", group = grpHtf)
+htfShowLabel  = input.bool(false, "Show Timeframe Label On Zones", group = grpHtf)
+htfExtend     = input.int(10, "Extend Right (bars)", minval = 0, maxval = 200, group = grpHtf)
+fillTransp    = input.int(88, "Fill Transparency", minval = 0, maxval = 100, group = grpHtf)
+touchTransp   = input.int(94, "Touched Transparency", minval = 0, maxval = 100, group = grpHtf)
+brokenTransp  = input.int(97, "Broken Transparency", minval = 0, maxval = 100, group = grpHtf)
+borderTransp  = input.int(55, "Border Transparency", minval = 0, maxval = 100, group = grpHtf)
+atrLen        = input.int(200, "ATR Length", minval = 1, group = grpHtf, tooltip = "ATR (chart timeframe) used by the minimum gap size filter.")
+
+grpHtfTf = "HTF Timeframes"
+h1On = input.bool(true, "1", inline = "h1", group = grpHtfTf)
+h1Tf = input.timeframe("5",   "", inline = "h1", group = grpHtfTf)
+h2On = input.bool(true, "2", inline = "h2", group = grpHtfTf)
+h2Tf = input.timeframe("10",  "", inline = "h2", group = grpHtfTf)
+h3On = input.bool(true, "3", inline = "h3", group = grpHtfTf)
+h3Tf = input.timeframe("15",  "", inline = "h3", group = grpHtfTf)
+h4On = input.bool(true, "4", inline = "h4", group = grpHtfTf)
+h4Tf = input.timeframe("30",  "", inline = "h4", group = grpHtfTf)
+h5On = input.bool(true, "5", inline = "h5", group = grpHtfTf)
+h5Tf = input.timeframe("60",  "", inline = "h5", group = grpHtfTf)
+h6On = input.bool(true, "6", inline = "h6", group = grpHtfTf)
+h6Tf = input.timeframe("240", "", inline = "h6", group = grpHtfTf)
+
+// One HTF fair value gap. Owns a box (and optional label) on the price chart.
+type Fvg
+    bool  bull                    // true = bullish (gap below price)
+    float top
+    float bottom
+    int   leftBar                 // first chart bar of candle 3 (box left edge)
+    int   createdBar              // chart bar the gap was confirmed on
+    bool  touched = false
+    bool  broken  = false
+    box   bx      = na
+    label lbl     = na
+
+// Per-timeframe state: locally aggregated candle history + live FVGs.
+type TfState
+    string       name
+    int          sec              // timeframe length in seconds
+    bool         on
+    array<float> hHist            // index 0 = most recently completed candle
+    array<float> lHist
+    array<int>   sHist            // first chart bar of that candle
+    float        curHigh    = na  // developing candle
+    float        curLow     = na
+    int          curStart   = na
+    bool         curPartial = false   // developing candle did not start on a period boundary
+    array<Fvg>   fvgs
+
+HIST_LEN  = 3
+atrVal    = nz(ta.atr(atrLen))
+htfMinGap = htfMinAtr * atrVal
+chartSec  = timeframe.in_seconds(timeframe.period)
+
+// Resolved timeframe strings. Blank = chart timeframe. Kept as inline
+// expressions so they remain "simple string" for timeframe.change().
+h1Res = h1Tf == "" ? timeframe.period : h1Tf
+h2Res = h2Tf == "" ? timeframe.period : h2Tf
+h3Res = h3Tf == "" ? timeframe.period : h3Tf
+h4Res = h4Tf == "" ? timeframe.period : h4Tf
+h5Res = h5Tf == "" ? timeframe.period : h5Tf
+h6Res = h6Tf == "" ? timeframe.period : h6Tf
+
+h1Sec = timeframe.in_seconds(h1Res)
+h2Sec = timeframe.in_seconds(h2Res)
+h3Sec = timeframe.in_seconds(h3Res)
+h4Sec = timeframe.in_seconds(h4Res)
+h5Sec = timeframe.in_seconds(h5Res)
+h6Sec = timeframe.in_seconds(h6Res)
+
+// Timeframes below the chart timeframe cannot be aggregated from chart bars.
+h1Ok = h1On and h1Sec >= chartSec
+h2Ok = h2On and h2Sec >= chartSec
+h3Ok = h3On and h3Sec >= chartSec
+h4Ok = h4On and h4Sec >= chartSec
+h5Ok = h5On and h5Sec >= chartSec
+h6Ok = h6On and h6Sec >= chartSec
+
+// "5" -> "5m", "60" -> "1h", "240" -> "4h", "D" -> "D".
+tfName(string tf) =>
+    float n   = str.tonumber(tf)
+    string out = tf
+    if not na(n)
+        out := n >= 60 and n % 60 == 0 ? str.tostring(n / 60) + "h" : str.tostring(n) + "m"
+    out
+
+appendName(string list, string nm, string sep) =>
+    list == "" ? nm : list + sep + nm
+
+newTf(string tf, int sec, bool on) =>
+    TfState.new(
+      name  = tf,
+      sec   = sec,
+      on    = on,
+      hHist = array.new<float>(),
+      lHist = array.new<float>(),
+      sHist = array.new<int>(),
+      fvgs  = array.new<Fvg>())
+
+// ---- HTF zone drawing (forced onto the price chart; the strategy itself lives in a pane) ----
+
+drawHtfFvg(TfState st, Fvg f) =>
+    col = f.bull ? htfBullCol : htfBearCol
+    f.bx := box.new(f.leftBar, f.top, bar_index + htfExtend, f.bottom
+      , border_color = color.new(col, borderTransp), border_width = 1
+      , bgcolor = color.new(col, fillTransp), force_overlay = true)
+    if htfShowLabel
+        f.lbl := label.new(bar_index + htfExtend, math.avg(f.top, f.bottom), tfName(st.name)
+          , style = label.style_label_left, color = color.new(col, 100)
+          , textcolor = color.new(col, 0), size = size.tiny, force_overlay = true)
+
+deleteFvg(Fvg f) =>
+    if not na(f.bx)
+        box.delete(f.bx)
+    if not na(f.lbl)
+        label.delete(f.lbl)
+
+markTouched(Fvg f) =>
+    if not na(f.bx)
+        box.set_bgcolor(f.bx, color.new(f.bull ? htfBullCol : htfBearCol, touchTransp))
+
+markBroken(Fvg f) =>
+    if not na(f.lbl)
+        label.delete(f.lbl)
+        f.lbl := na
+    if not na(f.bx)
+        box.set_right(f.bx, bar_index)
+        box.set_bgcolor(f.bx, color.new(f.bull ? htfBullCol : htfBearCol, brokenTransp))
+        box.set_border_style(f.bx, line.style_dashed)
+
+// ---- Local candle aggregation ----------------------------------------------
+
+// Push the just-completed aggregated candle onto this timeframe's history.
+// Called on the first chart bar of a new period, so the completed candle ends
+// on the previous chart bar.
+pushPeriod(TfState st) =>
+    if not na(st.curStart) and not st.curPartial
+        array.unshift(st.hHist, st.curHigh)
+        array.unshift(st.lHist, st.curLow)
+        array.unshift(st.sHist, st.curStart)
+        if array.size(st.hHist) > HIST_LEN
+            array.pop(st.hHist)
+            array.pop(st.lHist)
+            array.pop(st.sHist)
+
+// Look for an FVG in the three most recently completed candles of this
+// timeframe. Index 2 = candle 1 of the pattern, index 0 = candle 3.
+detectFvg(TfState st) =>
+    if array.size(st.hHist) >= 3
+        h1 = array.get(st.hHist, 2)
+        lo1 = array.get(st.lHist, 2)
+        h3 = array.get(st.hHist, 0)
+        lo3 = array.get(st.lHist, 0)
+        bullGap = lo3 > h1
+        bearGap = h3 < lo1
+        if bullGap or bearGap
+            gapTop = bullGap ? lo3 : lo1
+            gapBot = bullGap ? h1 : h3
+            if gapTop - gapBot >= htfMinGap
+                Fvg f = Fvg.new(
+                  bull       = bullGap,
+                  top        = gapTop,
+                  bottom     = gapBot,
+                  leftBar    = array.get(st.sHist, 0),
+                  createdBar = bar_index)
+                if array.size(st.fvgs) >= htfMaxPerTf
+                    deleteFvg(array.shift(st.fvgs))
+                if showHtf
+                    drawHtfFvg(st, f)
+                array.push(st.fvgs, f)
+
+// Accumulate the current chart bar into the developing candle, starting a new
+// candle when the period changed.
+aggregate(TfState st, bool newPeriod) =>
+    if newPeriod
+        st.curHigh    := high
+        st.curLow     := low
+        st.curStart   := bar_index
+        st.curPartial := false
+    else
+        st.curHigh := na(st.curHigh) ? high : math.max(st.curHigh, high)
+        st.curLow  := na(st.curLow)  ? low  : math.min(st.curLow,  low)
+        if na(st.curStart)
+            st.curStart   := bar_index
+            st.curPartial := true
+
+// Touch / break tracking and right-edge extension for HTF zones.
+updateHtf(TfState st, bool newPeriod) =>
+    if array.size(st.fvgs) > 0
+        for i = array.size(st.fvgs) - 1 to 0
+            Fvg f = array.get(st.fvgs, i)
+            if not f.broken
+                bool brokeNow = false
+                if htfBreakMode == "Wick"
+                    brokeNow := f.bull ? low < f.bottom : high > f.top
+                else if htfBreakMode == "Chart Close"
+                    brokeNow := f.bull ? close < f.bottom : close > f.top
+                else if newPeriod
+                    brokeNow := f.bull ? close[1] < f.bottom : close[1] > f.top
+                if not f.touched
+                    if high >= f.bottom and low <= f.top
+                        f.touched := true
+                        if htfFade
+                            markTouched(f)
+                if brokeNow
+                    f.broken := true
+                    if htfKeepBroken
+                        markBroken(f)
+                    else
+                        array.remove(st.fvgs, i)
+                        deleteFvg(f)
+                else
+                    if not na(f.bx)
+                        box.set_right(f.bx, bar_index + htfExtend)
+                    if not na(f.lbl)
+                        label.set_x(f.lbl, bar_index + htfExtend)
+
+processHtf(TfState st, bool newPeriod) =>
+    if st.on
+        if newPeriod
+            pushPeriod(st)
+        aggregate(st, newPeriod)
+        if newPeriod
+            detectFvg(st)
+        updateHtf(st, newPeriod)
+
+// Is price on this bar inside an active (unbroken) HTF FVG of the given type?
+zoneHit(TfState st, bool wantBull) =>
+    bool hit = false
+    if st.on and array.size(st.fvgs) > 0
+        for z in st.fvgs
+            if z.bull == wantBull and not z.broken
+                bool inside = fvgTestMode == "Close Inside" ? close <= z.top and close >= z.bottom : high >= z.bottom and low <= z.top
+                if inside
+                    hit := true
+                    break
+    hit
+
+var TfState s1 = newTf(h1Res, h1Sec, h1Ok)
+var TfState s2 = newTf(h2Res, h2Sec, h2Ok)
+var TfState s3 = newTf(h3Res, h3Sec, h3Ok)
+var TfState s4 = newTf(h4Res, h4Sec, h4Ok)
+var TfState s5 = newTf(h5Res, h5Sec, h5Ok)
+var TfState s6 = newTf(h6Res, h6Sec, h6Ok)
+
+// timeframe.change() needs a simple string. On the chart timeframe it fires on
+// every bar.
+hn1 = timeframe.change(h1Res)
+hn2 = timeframe.change(h2Res)
+hn3 = timeframe.change(h3Res)
+hn4 = timeframe.change(h4Res)
+hn5 = timeframe.change(h5Res)
+hn6 = timeframe.change(h6Res)
+
+// HTF state is advanced before the entry logic, so new gaps are available and
+// broken gaps are already removed when this bar's entries are evaluated.
+processHtf(s1, hn1)
+processHtf(s2, hn2)
+processHtf(s3, hn3)
+processHtf(s4, hn4)
+processHtf(s5, hn5)
+processHtf(s6, hn6)
+
+bool inBullFvg = zoneHit(s1, true) or zoneHit(s2, true) or zoneHit(s3, true) or zoneHit(s4, true) or zoneHit(s5, true) or zoneHit(s6, true)
+bool inBearFvg = zoneHit(s1, false) or zoneHit(s2, false) or zoneHit(s3, false) or zoneHit(s4, false) or zoneHit(s5, false) or zoneHit(s6, false)
+
+var int lastBullFvgBar = na
+var int lastBearFvgBar = na
+if inBullFvg
+    lastBullFvgBar := bar_index
+if inBearFvg
+    lastBearFvgBar := bar_index
+bool recentBullFvg = not na(lastBullFvgBar) and bar_index - lastBullFvgBar <= fvgLookback
+bool recentBearFvg = not na(lastBearFvgBar) and bar_index - lastBearFvgBar <= fvgLookback
+
+bool longOk  = not useFvgFilter or (fvgDirMode == "Matching" ? recentBullFvg : fvgDirMode == "Opposite" ? recentBearFvg : recentBullFvg or recentBearFvg)
+bool shortOk = not useFvgFilter or (fvgDirMode == "Matching" ? recentBearFvg : fvgDirMode == "Opposite" ? recentBullFvg : recentBullFvg or recentBearFvg)
+
+// Skipped timeframe notice
+skipped = ""
+skipped := h1On and not h1Ok ? appendName(skipped, tfName(h1Res), ", ") : skipped
+skipped := h2On and not h2Ok ? appendName(skipped, tfName(h2Res), ", ") : skipped
+skipped := h3On and not h3Ok ? appendName(skipped, tfName(h3Res), ", ") : skipped
+skipped := h4On and not h4Ok ? appendName(skipped, tfName(h4Res), ", ") : skipped
+skipped := h5On and not h5Ok ? appendName(skipped, tfName(h5Res), ", ") : skipped
+skipped := h6On and not h6Ok ? appendName(skipped, tfName(h6Res), ", ") : skipped
+
+var table notice = na
+if barstate.islast and skipped != ""
+    if na(notice)
+        notice := table.new(position.top_right, 1, 1)
+    table.cell(notice, 0, 0, "Skipped HTF FVG TFs (below chart TF): " + skipped
+      , text_color = color.gray, text_size = size.small)
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+useStopLossAtr = input.bool(true, "Use ATR-Based SL")
+stopLossAtrLength = input.int(7, "SL ATR Length")
+stopLossAtrMult = input.float(2, "SL ATR Multiplier", step=0.025)
+useStopLossAtrEmaSmoothing = input.bool(true, "Use EMA Smoothing for ATR-Based SL")
+stopLossAtrEmaLength = input.int(4, "SL ATR EMA Length")
+slAtrRaw = ta.atr(stopLossAtrLength)
+slAtrEma = ta.ema(slAtrRaw, stopLossAtrEmaLength)
+atrUpperLimit = close[1] + (stopLossAtrMult * (useStopLossAtrEmaSmoothing ? slAtrEma : slAtrRaw))
+atrLowerLimit = close[1] - (stopLossAtrMult * (useStopLossAtrEmaSmoothing ? slAtrEma : slAtrRaw))
+
+useSlFixed = input.bool(false, "Use Fixed SL")
+slFixedPct = input.float(8, "Fixed SL %", minval=0.001, maxval=100, step=0.1)
+var float slFixed = na
+
+crossed_up = isBullishCross
+crossed_down = isBearishCross
+
+var waitingOnRetracement = false
+var waitingOnContinuation = false
+
+// Set where the unfiltered strategy would have entered but the FVG filter said no.
+bool blockedLong = false
+bool blockedShort = false
+
+if waitingOnRetracement
+    if isBullishSmooth and bb_bbr < 0.70
+        if longOk
+            slFixed := useSlFixed ? close[1] - (slFixedPct / 100 * close[1]) : na
+            strategy.order("L", strategy.long, stop=slFixed)
+            waitingOnContinuation := false
+            waitingOnRetracement := false
+        else
+            blockedLong := true
+    else if isBearishSmooth and bb_bbr > 0.30
+        if shortOk
+            slFixed := useSlFixed ? close[1] + (slFixedPct / 100 * close[1]) : na
+            strategy.order("S", strategy.short, stop=slFixed)
+            waitingOnContinuation := false
+            waitingOnRetracement := false
+        else
+            blockedShort := true
+    else if crossed_up or crossed_down
+        waitingOnContinuation := false
+        waitingOnRetracement := false
+
+if waitingOnContinuation
+    if isBullishSmooth and bb_bbr < -0.1
+        if longOk
+            slFixed := useSlFixed ? close[1] - (slFixedPct / 100 * close[1]) : na
+            strategy.order("L", strategy.long, stop=slFixed)
+            waitingOnContinuation := false
+            waitingOnRetracement := false
+        else
+            blockedLong := true
+    else if isBearishSmooth and bb_bbr > 1.1
+        if shortOk
+            slFixed := useSlFixed ? close[1] + (slFixedPct / 100 * close[1]) : na
+            strategy.order("S", strategy.short, stop=slFixed)
+            waitingOnContinuation := false
+            waitingOnRetracement := false
+        else
+            blockedShort := true
+    else if crossed_up or crossed_down
+        waitingOnContinuation := false
+        waitingOnRetracement := false
+
+if crossed_up
+    strategy.close("S")
+    if bb_bbr[1] > 0.35
+        waitingOnRetracement := true
+    else
+        if longOk
+            slFixed := useSlFixed ? close[1] - (slFixedPct / 100 * close[1]) : na
+            strategy.order("L", strategy.long, stop=slFixed)
+        else
+            blockedLong := true
+        waitingOnRetracement := false
+        waitingOnContinuation := false
+
+if crossed_down
+    strategy.close("L")
+    if bb_bbr[1] < 0.65
+        waitingOnRetracement := true
+    else
+        if shortOk
+            slFixed := useSlFixed ? close[1] + (slFixedPct / 100 * close[1]) : na
+            strategy.order("S", strategy.short, stop=slFixed)
+        else
+            blockedShort := true
+        waitingOnRetracement := false
+        waitingOnContinuation := false
+
+if bb_bbr >= 0.95
+    strategy.close("L")
+    waitingOnRetracement := false
+    waitingOnContinuation := true
+    slFixed := na
+
+if bb_bbr <= 0.05
+    strategy.close("S")
+    waitingOnRetracement := false
+    waitingOnContinuation := true
+    slFixed := na
+
+if useStopLossAtr
+    if isBullishSmooth and close < atrLowerLimit
+        strategy.close("L")
+        slFixed := na
+    if isBearishSmooth and close > atrUpperLimit
+        strategy.close("S")
+        slFixed := na
+
+if useSlFixed and slFixed
+    if isBullishSmooth and close < slFixed
+        strategy.close("L")
+        slFixed := na
+    if isBearishSmooth and close > slFixed
+        strategy.close("S")
+        slFixed := na
+
+plotshape(showBlocked and useFvgFilter and blockedLong, "Blocked Long", shape.xcross, location.bottom, color.new(color.gray, 20), size = size.tiny)
+plotshape(showBlocked and useFvgFilter and blockedShort, "Blocked Short", shape.xcross, location.top, color.new(color.gray, 20), size = size.tiny)

@@ -1,0 +1,184 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("Horizontal Box Grid [SB]", "HBG [SB]", overlay=true, max_boxes_count=500)
+
+// Draws a grid of horizontal boxes (N above + anchor box + N below) that
+// extend right from an anchor time. Settings are stored per ticker in up to
+// 10 slots; only the first enabled slot whose ticker matches the chart's
+// symbol is drawn.
+
+////////////////////////////////////////////////////////////////////////////////
+//// Inputs
+////////////////////////////////////////////////////////////////////////////////
+
+grpGlobal = "Global Settings"
+boxesPerSide = input.int(200, "Boxes Above / Below Anchor", minval=0, maxval=249, group=grpGlobal, tooltip="Number of boxes drawn on each side of the anchor box. Total boxes = 2 x this + 1 (max 499).")
+borderWidth  = input.int(1, "Border Width", minval=1, maxval=4, group=grpGlobal)
+matchMode    = input.string("Exchange + Ticker", "Ticker Matching", options=["Exchange + Ticker", "Ticker Only"], group=grpGlobal, tooltip="Exchange + Ticker: the slot's symbol must match the chart exactly (e.g. NASDAQ:AAPL).\nTicker Only: ignore the exchange, so NASDAQ:AAPL also matches BATS:AAPL.")
+
+tipSym    = "Ticker this slot applies to. Leave empty to disable the slot."
+tipAnchor = "Anchor Time = left edge of the grid. Anchor Price = top of the anchor box."
+tipSize   = "Height = top-to-bottom size of every box.\nInterval = distance between consecutive box tops. Set equal to Height for seamlessly stacked boxes, larger to add gaps."
+defTime   = timestamp("01 Jan 2024 00:00 +0000")
+
+grp1 = "Ticker 1"
+s1On     = input.bool(true, "", inline="s1a", group=grp1)
+s1Sym    = input.symbol("", "Ticker", inline="s1a", group=grp1, tooltip=tipSym)
+s1Time   = input.time(defTime, "Anchor Time", inline="s1b", group=grp1)
+s1Price  = input.price(0.0, "Anchor Price", inline="s1c", group=grp1, tooltip=tipAnchor)
+s1Height = input.float(10.0, "Height", minval=0.0001, step=0.01, inline="s1d", group=grp1)
+s1Step   = input.float(10.0, "Interval", minval=0.0001, step=0.01, inline="s1d", group=grp1, tooltip=tipSize)
+s1Fill   = input.color(color.new(color.blue, 85), "Fill", inline="s1e", group=grp1)
+s1Border = input.color(color.blue, "Border", inline="s1e", group=grp1)
+
+grp2 = "Ticker 2"
+s2On     = input.bool(true, "", inline="s2a", group=grp2)
+s2Sym    = input.symbol("", "Ticker", inline="s2a", group=grp2, tooltip=tipSym)
+s2Time   = input.time(defTime, "Anchor Time", inline="s2b", group=grp2)
+s2Price  = input.price(0.0, "Anchor Price", inline="s2c", group=grp2, tooltip=tipAnchor)
+s2Height = input.float(10.0, "Height", minval=0.0001, step=0.01, inline="s2d", group=grp2)
+s2Step   = input.float(10.0, "Interval", minval=0.0001, step=0.01, inline="s2d", group=grp2, tooltip=tipSize)
+s2Fill   = input.color(color.new(color.blue, 85), "Fill", inline="s2e", group=grp2)
+s2Border = input.color(color.blue, "Border", inline="s2e", group=grp2)
+
+grp3 = "Ticker 3"
+s3On     = input.bool(true, "", inline="s3a", group=grp3)
+s3Sym    = input.symbol("", "Ticker", inline="s3a", group=grp3, tooltip=tipSym)
+s3Time   = input.time(defTime, "Anchor Time", inline="s3b", group=grp3)
+s3Price  = input.price(0.0, "Anchor Price", inline="s3c", group=grp3, tooltip=tipAnchor)
+s3Height = input.float(10.0, "Height", minval=0.0001, step=0.01, inline="s3d", group=grp3)
+s3Step   = input.float(10.0, "Interval", minval=0.0001, step=0.01, inline="s3d", group=grp3, tooltip=tipSize)
+s3Fill   = input.color(color.new(color.blue, 85), "Fill", inline="s3e", group=grp3)
+s3Border = input.color(color.blue, "Border", inline="s3e", group=grp3)
+
+grp4 = "Ticker 4"
+s4On     = input.bool(true, "", inline="s4a", group=grp4)
+s4Sym    = input.symbol("", "Ticker", inline="s4a", group=grp4, tooltip=tipSym)
+s4Time   = input.time(defTime, "Anchor Time", inline="s4b", group=grp4)
+s4Price  = input.price(0.0, "Anchor Price", inline="s4c", group=grp4, tooltip=tipAnchor)
+s4Height = input.float(10.0, "Height", minval=0.0001, step=0.01, inline="s4d", group=grp4)
+s4Step   = input.float(10.0, "Interval", minval=0.0001, step=0.01, inline="s4d", group=grp4, tooltip=tipSize)
+s4Fill   = input.color(color.new(color.blue, 85), "Fill", inline="s4e", group=grp4)
+s4Border = input.color(color.blue, "Border", inline="s4e", group=grp4)
+
+grp5 = "Ticker 5"
+s5On     = input.bool(true, "", inline="s5a", group=grp5)
+s5Sym    = input.symbol("", "Ticker", inline="s5a", group=grp5, tooltip=tipSym)
+s5Time   = input.time(defTime, "Anchor Time", inline="s5b", group=grp5)
+s5Price  = input.price(0.0, "Anchor Price", inline="s5c", group=grp5, tooltip=tipAnchor)
+s5Height = input.float(10.0, "Height", minval=0.0001, step=0.01, inline="s5d", group=grp5)
+s5Step   = input.float(10.0, "Interval", minval=0.0001, step=0.01, inline="s5d", group=grp5, tooltip=tipSize)
+s5Fill   = input.color(color.new(color.blue, 85), "Fill", inline="s5e", group=grp5)
+s5Border = input.color(color.blue, "Border", inline="s5e", group=grp5)
+
+grp6 = "Ticker 6"
+s6On     = input.bool(true, "", inline="s6a", group=grp6)
+s6Sym    = input.symbol("", "Ticker", inline="s6a", group=grp6, tooltip=tipSym)
+s6Time   = input.time(defTime, "Anchor Time", inline="s6b", group=grp6)
+s6Price  = input.price(0.0, "Anchor Price", inline="s6c", group=grp6, tooltip=tipAnchor)
+s6Height = input.float(10.0, "Height", minval=0.0001, step=0.01, inline="s6d", group=grp6)
+s6Step   = input.float(10.0, "Interval", minval=0.0001, step=0.01, inline="s6d", group=grp6, tooltip=tipSize)
+s6Fill   = input.color(color.new(color.blue, 85), "Fill", inline="s6e", group=grp6)
+s6Border = input.color(color.blue, "Border", inline="s6e", group=grp6)
+
+grp7 = "Ticker 7"
+s7On     = input.bool(true, "", inline="s7a", group=grp7)
+s7Sym    = input.symbol("", "Ticker", inline="s7a", group=grp7, tooltip=tipSym)
+s7Time   = input.time(defTime, "Anchor Time", inline="s7b", group=grp7)
+s7Price  = input.price(0.0, "Anchor Price", inline="s7c", group=grp7, tooltip=tipAnchor)
+s7Height = input.float(10.0, "Height", minval=0.0001, step=0.01, inline="s7d", group=grp7)
+s7Step   = input.float(10.0, "Interval", minval=0.0001, step=0.01, inline="s7d", group=grp7, tooltip=tipSize)
+s7Fill   = input.color(color.new(color.blue, 85), "Fill", inline="s7e", group=grp7)
+s7Border = input.color(color.blue, "Border", inline="s7e", group=grp7)
+
+grp8 = "Ticker 8"
+s8On     = input.bool(true, "", inline="s8a", group=grp8)
+s8Sym    = input.symbol("", "Ticker", inline="s8a", group=grp8, tooltip=tipSym)
+s8Time   = input.time(defTime, "Anchor Time", inline="s8b", group=grp8)
+s8Price  = input.price(0.0, "Anchor Price", inline="s8c", group=grp8, tooltip=tipAnchor)
+s8Height = input.float(10.0, "Height", minval=0.0001, step=0.01, inline="s8d", group=grp8)
+s8Step   = input.float(10.0, "Interval", minval=0.0001, step=0.01, inline="s8d", group=grp8, tooltip=tipSize)
+s8Fill   = input.color(color.new(color.blue, 85), "Fill", inline="s8e", group=grp8)
+s8Border = input.color(color.blue, "Border", inline="s8e", group=grp8)
+
+grp9 = "Ticker 9"
+s9On     = input.bool(true, "", inline="s9a", group=grp9)
+s9Sym    = input.symbol("", "Ticker", inline="s9a", group=grp9, tooltip=tipSym)
+s9Time   = input.time(defTime, "Anchor Time", inline="s9b", group=grp9)
+s9Price  = input.price(0.0, "Anchor Price", inline="s9c", group=grp9, tooltip=tipAnchor)
+s9Height = input.float(10.0, "Height", minval=0.0001, step=0.01, inline="s9d", group=grp9)
+s9Step   = input.float(10.0, "Interval", minval=0.0001, step=0.01, inline="s9d", group=grp9, tooltip=tipSize)
+s9Fill   = input.color(color.new(color.blue, 85), "Fill", inline="s9e", group=grp9)
+s9Border = input.color(color.blue, "Border", inline="s9e", group=grp9)
+
+grp10 = "Ticker 10"
+s10On     = input.bool(true, "", inline="s10a", group=grp10)
+s10Sym    = input.symbol("", "Ticker", inline="s10a", group=grp10, tooltip=tipSym)
+s10Time   = input.time(defTime, "Anchor Time", inline="s10b", group=grp10)
+s10Price  = input.price(0.0, "Anchor Price", inline="s10c", group=grp10, tooltip=tipAnchor)
+s10Height = input.float(10.0, "Height", minval=0.0001, step=0.01, inline="s10d", group=grp10)
+s10Step   = input.float(10.0, "Interval", minval=0.0001, step=0.01, inline="s10d", group=grp10, tooltip=tipSize)
+s10Fill   = input.color(color.new(color.blue, 85), "Fill", inline="s10e", group=grp10)
+s10Border = input.color(color.blue, "Border", inline="s10e", group=grp10)
+
+////////////////////////////////////////////////////////////////////////////////
+//// Types & Helpers
+////////////////////////////////////////////////////////////////////////////////
+
+type GridSlot
+    bool   enabled
+    string sym
+    int    anchorTime
+    float  anchorPrice
+    float  height
+    float  step
+    color  fillCol
+    color  borderCol
+
+// Strip the "EXCHANGE:" prefix, if any
+tickerOf(string s) =>
+    parts = str.split(s, ":")
+    array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : s
+
+symMatches(string s) =>
+    bool result = false
+    if s != ""
+        if matchMode == "Ticker Only"
+            result := tickerOf(s) == syminfo.ticker
+        else
+            result := s == syminfo.prefix + ":" + syminfo.ticker or s == syminfo.tickerid
+    result
+
+////////////////////////////////////////////////////////////////////////////////
+//// Draw
+////////////////////////////////////////////////////////////////////////////////
+
+// Inputs and syminfo are fixed for the whole run, so the grid is drawn once on
+// the first bar. xloc.bar_time keeps the anchor time-stable; extend.right runs
+// each box to the right edge indefinitely.
+if barstate.isfirst
+    slots = array.from(GridSlot.new(s1On, s1Sym, s1Time, s1Price, s1Height, s1Step, s1Fill, s1Border),
+      GridSlot.new(s2On, s2Sym, s2Time, s2Price, s2Height, s2Step, s2Fill, s2Border),
+      GridSlot.new(s3On, s3Sym, s3Time, s3Price, s3Height, s3Step, s3Fill, s3Border),
+      GridSlot.new(s4On, s4Sym, s4Time, s4Price, s4Height, s4Step, s4Fill, s4Border),
+      GridSlot.new(s5On, s5Sym, s5Time, s5Price, s5Height, s5Step, s5Fill, s5Border),
+      GridSlot.new(s6On, s6Sym, s6Time, s6Price, s6Height, s6Step, s6Fill, s6Border),
+      GridSlot.new(s7On, s7Sym, s7Time, s7Price, s7Height, s7Step, s7Fill, s7Border),
+      GridSlot.new(s8On, s8Sym, s8Time, s8Price, s8Height, s8Step, s8Fill, s8Border),
+      GridSlot.new(s9On, s9Sym, s9Time, s9Price, s9Height, s9Step, s9Fill, s9Border),
+      GridSlot.new(s10On, s10Sym, s10Time, s10Price, s10Height, s10Step, s10Fill, s10Border))
+
+    // First enabled slot matching the chart's symbol wins
+    GridSlot active = na
+    for slot in slots
+        if na(active) and slot.enabled
+            if symMatches(slot.sym)
+                active := slot
+
+    if not na(active)
+        // i = 0 → anchor box, i > 0 → boxes above, i < 0 → boxes below
+        for i = -boxesPerSide to boxesPerSide
+            topPrice = active.anchorPrice + i * active.step
+            box.new(active.anchorTime, topPrice, active.anchorTime, topPrice - active.height, border_color=active.borderCol, border_width=borderWidth, bgcolor=active.fillCol, xloc=xloc.bar_time, extend=extend.right)
