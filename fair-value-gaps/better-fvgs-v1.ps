@@ -709,12 +709,11 @@ updateGaps(TfState st) =>
                 if g.status < 2 and maxAge > 0 and bar_index - g.createdBar >= maxAge
                     killGap(st, g, "Expired")
 
-                if g.status == 2
-                    if not keepBroken
-                        deleteGap(g)
-                        array.remove(st.gaps, i)
-                else if restyle
+                if g.status < 2 and restyle
                     styleGap(st, g)
+                if g.status == 2 and not keepBroken
+                    deleteGap(g)
+                    array.remove(st.gaps, i)
 
 // Advance one timeframe by one chart bar.
 //   newPeriod    = first chart bar of a new candle of this timeframe
