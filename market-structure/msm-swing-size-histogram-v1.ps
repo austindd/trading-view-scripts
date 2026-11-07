@@ -1,0 +1,335 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("MSM Swing Size Histogram [SB]", "MSM Swing Hist [SB]", overlay=true)
+
+// Distribution of MSM V9 swing sizes.
+//
+// Runs MSM V9's point-producing state machine unchanged (valid high/low, BOS,
+// bullish breakout / bearish breakdown, extremes scanned over chart bars). MSM
+// points strictly alternate high/low, so every new point after the first closes
+// a swing whose size is |new point - previous point| — i.e. the distance between
+// the most recent high and the most recent low at the moment the point forms.
+// The last N swing sizes are kept in a rolling array and drawn as a histogram
+// in a table pinned to the bottom-center of the chart. The in-progress leg
+// (from the latest point to current price) is never counted.
+
+// Ensure sufficient historical buffer for lookback functions
+max_bars_back(high, 5000)
+max_bars_back(low, 5000)
+max_bars_back(open, 5000)
+max_bars_back(close, 5000)
+
+// ============================================================================
+// STRUCTURE SETTINGS
+// ============================================================================
+structureTimeframe = input.timeframe("", "Structure Timeframe", tooltip="Timeframe used for structure detection. 'Chart' uses the chart's own timeframe.", group="Structure")
+
+// ============================================================================
+// SAMPLE SETTINGS
+// ============================================================================
+maxSamples = input.int(5000, "Swings To Sample", minval=10, maxval=100000, tooltip="How many of the most recent completed swings make up the distribution.", group="Samples")
+swingDirection = input.string("Both", "Swing Direction", options=["Both", "Up Swings Only", "Down Swings Only"], tooltip="Up swing = low → high (closed by a new high). Down swing = high → low.", group="Samples")
+distanceUnit = input.string("Price", "Distance Unit", options=["Price", "Ticks", "Percent"], tooltip="Percent is measured relative to the swing's starting point.", group="Samples")
+
+// ============================================================================
+// HISTOGRAM SETTINGS
+// ============================================================================
+numBuckets = input.int(100, "Buckets", minval=5, maxval=200, group="Histogram")
+startAtZero = input.bool(true, "Range Starts At Zero", tooltip="On: buckets span 0 → cap. Off: smallest swing → cap.", group="Histogram")
+capPercentile = input.float(99.0, "Range Cap Percentile", minval=50, maxval=100, step=0.5, tooltip="Upper edge of the bucket range. Swings above it are counted in the last bucket, so a few outliers don't squash the distribution. 100 = no cap.", group="Histogram")
+histRows = input.int(20, "Vertical Resolution (Rows)", minval=5, maxval=60, tooltip="Number of cells stacked per bucket; the tallest bucket fills all of them.", group="Histogram")
+histWidthPct = input.float(60, "Width (% of chart)", minval=5, maxval=100, group="Histogram")
+histHeightPct = input.float(25, "Height (% of chart)", minval=5, maxval=90, group="Histogram")
+showStats = input.bool(true, "Show Stats Header", group="Histogram")
+showAxis = input.bool(true, "Show Axis Labels", group="Histogram")
+highlightMedian = input.bool(true, "Highlight Median Bucket", group="Histogram")
+highlightLast = input.bool(true, "Highlight Latest Swing's Bucket", group="Histogram")
+
+barColor = input.color(color.new(color.blue, 20), "Bar Color", group="Colors")
+medianColor = input.color(color.new(color.orange, 0), "Median Bucket Color", group="Colors")
+lastColor = input.color(color.new(color.purple, 0), "Latest Swing Color", group="Colors")
+panelColor = input.color(color.new(color.gray, 90), "Panel Background", group="Colors")
+textColor = input.color(color.gray, "Text Color", group="Colors")
+
+// ============================================================================
+// MARKET STRUCTURE STATE VARIABLES (MSM V9)
+// ============================================================================
+
+var float currentValidHigh = na
+var float currentValidLow = na
+var int currentValidHighBar = na
+var int currentValidLowBar = na
+var bool initialized = false
+var bool lookingForLow = false
+var bool lookingForHigh = false
+
+// Price of the most recent MSM point (either side); the start of the next swing
+var float lastPointPrice = na
+
+// Rolling swing-size samples, oldest first
+var array<float> swingSizes = array.new<float>()
+
+// ============================================================================
+// STRUCTURE TIMEFRAME DATA
+// ============================================================================
+
+[tfHigh, tfLow, tfOpen, tfClose] = request.security(syminfo.tickerid, structureTimeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
+tfTime = request.security(syminfo.tickerid, structureTimeframe, time, lookahead=barmerge.lookahead_off)
+bool tfNewCandle = ta.change(tfTime) != 0
+
+// ============================================================================
+// HELPER FUNCTIONS (MSM V9)
+// ============================================================================
+
+// Check if current structure candle is bearish and closes below previous candle's low
+isBearishBreakdown() =>
+    tfClose < tfOpen and tfClose < tfLow[1]
+
+// Check if current structure candle is bullish and closes above previous candle's high
+isBullishBreakout() =>
+    tfClose > tfOpen and tfClose > tfHigh[1]
+
+// Find lowest low between two bar indices
+findLowestBetween(startBar, endBar) =>
+    float lowestPrice = na
+    int lowestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    // Pine Script supports up to 5000 bars of history
+    int maxLookback = 5000
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(low[i])
+                if na(lowestPrice) or low[i] < lowestPrice
+                    lowestPrice := low[i]
+                    lowestBarIndex := currentBar - i
+
+    [lowestPrice, lowestBarIndex]
+
+// Find highest high between two bar indices
+findHighestBetween(startBar, endBar) =>
+    float highestPrice = na
+    int highestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    // Pine Script supports up to 5000 bars of history
+    int maxLookback = 5000
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(high[i])
+                if na(highestPrice) or high[i] > highestPrice
+                    highestPrice := high[i]
+                    highestBarIndex := currentBar - i
+
+    [highestPrice, highestBarIndex]
+
+// ============================================================================
+// SWING RECORDING
+// ============================================================================
+
+// Record the swing closed by a new MSM point. `prevPrice` is the previous
+// (opposite-side) point; na for the very first point, which closes no swing.
+recordSwing(bool isHigh, float price, float prevPrice) =>
+    if not na(prevPrice)
+        bool wanted = swingDirection == "Both" or (swingDirection == "Up Swings Only" and isHigh) or (swingDirection == "Down Swings Only" and not isHigh)
+        if wanted
+            float d = math.abs(price - prevPrice)
+            float v = distanceUnit == "Ticks" ? d / syminfo.mintick : distanceUnit == "Percent" ? (prevPrice != 0 ? d / math.abs(prevPrice) * 100 : na) : d
+            if not na(v)
+                array.push(swingSizes, v)
+                if array.size(swingSizes) > maxSamples
+                    array.shift(swingSizes)
+    true
+
+// Format a swing size in the selected unit
+fmtSize(float v) =>
+    distanceUnit == "Percent" ? str.tostring(v, "#.##") + "%" : distanceUnit == "Ticks" ? str.tostring(v, "#.#") : str.tostring(v, format.mintick)
+
+// ============================================================================
+// INITIALIZATION (MSM V9)
+// ============================================================================
+
+if not initialized and bar_index > 0 and tfNewCandle
+    if isBearishBreakdown()
+        float localHigh = high
+        int localHighBar = bar_index
+
+        for i = 1 to math.min(bar_index, 5000)
+            if high[i] > localHigh
+                localHigh := high[i]
+                localHighBar := bar_index - i
+
+        currentValidHigh := localHigh
+        currentValidHighBar := localHighBar
+        initialized := true
+        lookingForLow := true
+
+        recordSwing(true, localHigh, lastPointPrice)
+        lastPointPrice := localHigh
+
+// ============================================================================
+// MAIN LOGIC (MSM V9 point-producing state machine)
+// ============================================================================
+
+if initialized and tfNewCandle
+    bool bosBullish = false
+    bool bosBearish = false
+
+    // Check for Break of Structure
+    if not na(currentValidHigh) and not na(currentValidLow) and tfClose > currentValidHigh and lookingForLow
+        bosBullish := true
+
+        // Find the new low that led to this BOS
+        [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
+
+        if not na(newLow) and not na(newLowBar)
+            currentValidLow := newLow
+            currentValidLowBar := newLowBar
+            lookingForHigh := true
+            lookingForLow := false
+
+            recordSwing(false, newLow, lastPointPrice)
+            lastPointPrice := newLow
+
+    if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and tfClose < currentValidLow and lookingForHigh
+        bosBearish := true
+
+        // Find the new high that led to this BOS
+        [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
+
+        if not na(newHigh) and not na(newHighBar)
+            currentValidHigh := newHigh
+            currentValidHighBar := newHighBar
+            lookingForLow := true
+            lookingForHigh := false
+
+            recordSwing(true, newHigh, lastPointPrice)
+            lastPointPrice := newHigh
+
+    // Look for new valid low via breakout
+    if not bosBullish and not bosBearish and lookingForLow
+        if isBullishBreakout()
+            [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
+
+            if not na(newLow) and not na(newLowBar)
+                currentValidLow := newLow
+                currentValidLowBar := newLowBar
+                lookingForHigh := true
+                lookingForLow := false
+
+                recordSwing(false, newLow, lastPointPrice)
+                lastPointPrice := newLow
+
+    // Look for new valid high via breakdown
+    if not bosBullish and not bosBearish and lookingForHigh
+        if isBearishBreakdown()
+            [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
+
+            if not na(newHigh) and not na(newHighBar)
+                currentValidHigh := newHigh
+                currentValidHighBar := newHighBar
+                lookingForLow := true
+                lookingForHigh := false
+
+                recordSwing(true, newHigh, lastPointPrice)
+                lastPointPrice := newHigh
+
+// ============================================================================
+// HISTOGRAM RENDERING - Only on last bar
+// ============================================================================
+// Table layout: row 0 = stats header, rows 1..histRows = bars (row 1 is the
+// top), row histRows + 1 = axis labels. One column per bucket.
+
+var table hist = table.new(position.bottom_center, numBuckets, histRows + 2, border_width=0, frame_width=0)
+
+if barstate.islast
+    table.clear(hist, 0, 0, numBuckets - 1, histRows + 1)
+
+    int n = array.size(swingSizes)
+    float colW = histWidthPct / numBuckets
+    float rowH = histHeightPct / histRows
+
+    if n == 0
+        table.cell(hist, 0, 0, "MSM Swing Sizes: no completed swings yet", text_color=textColor, text_size=size.small, bgcolor=panelColor)
+    else
+        float lower = startAtZero ? 0.0 : array.min(swingSizes)
+        float upper = capPercentile >= 100 ? array.max(swingSizes) : array.percentile_nearest_rank(swingSizes, capPercentile)
+        float span = upper - lower
+        bool capped = array.max(swingSizes) > upper
+
+        // Bucket index for a value; values above the cap land in the last bucket
+        int[] counts = array.new<int>(numBuckets, 0)
+        for v in swingSizes
+            int b = span > 0 ? int(math.floor((v - lower) / span * numBuckets)) : 0
+            b := math.max(0, math.min(numBuckets - 1, b))
+            array.set(counts, b, array.get(counts, b) + 1)
+
+        float med = array.median(swingSizes)
+        float lastVal = array.get(swingSizes, n - 1)
+        int medBucket = span > 0 ? math.max(0, math.min(numBuckets - 1, int(math.floor((med - lower) / span * numBuckets)))) : 0
+        int lastBucket = span > 0 ? math.max(0, math.min(numBuckets - 1, int(math.floor((lastVal - lower) / span * numBuckets)))) : 0
+        int maxCount = array.max(counts)
+
+        // Bars: a bucket fills the bottom `h` rows; any non-empty bucket shows at least one cell
+        for c = 0 to numBuckets - 1
+            int cnt = array.get(counts, c)
+            int h = cnt == 0 ? 0 : math.max(1, int(math.round(float(cnt) / maxCount * histRows)))
+            color fillColor = highlightLast and c == lastBucket ? lastColor : highlightMedian and c == medBucket ? medianColor : barColor
+            float lo = lower + span * c / numBuckets
+            float hi = lower + span * (c + 1) / numBuckets
+            string rangeText = fmtSize(lo) + " – " + (capped and c == numBuckets - 1 ? "∞" : fmtSize(hi))
+            string tip = rangeText + "\n" + str.tostring(cnt) + " swings (" + str.tostring(float(cnt) / n * 100, "#.#") + "%)"
+            for k = 1 to histRows
+                int row = histRows - k + 1
+                table.cell(hist, c, row, "", width=colW, height=rowH, bgcolor=h >= k ? fillColor : panelColor, tooltip=tip)
+
+        if showStats
+            string stats = "MSM Swing Sizes (" + swingDirection + ")  ·  n=" + str.tostring(n) +
+                           "  ·  median " + fmtSize(med) +
+                           "  ·  mean " + fmtSize(array.avg(swingSizes)) +
+                           "  ·  p90 " + fmtSize(array.percentile_nearest_rank(swingSizes, 90)) +
+                           "  ·  last " + fmtSize(lastVal) +
+                           "  ·  bucket " + fmtSize(span / numBuckets)
+            table.cell(hist, 0, 0, stats, width=colW, text_color=textColor, text_size=size.small, bgcolor=panelColor)
+            table.merge_cells(hist, 0, 0, numBuckets - 1, 0)
+
+        if showAxis
+            // Three merged label cells: lower edge, midpoint, upper edge
+            int third = int(numBuckets / 3)
+            int axisRow = histRows + 1
+            table.cell(hist, 0, axisRow, fmtSize(lower), width=colW, text_color=textColor, text_size=size.small, text_halign=text.align_left, bgcolor=panelColor)
+            table.merge_cells(hist, 0, axisRow, third - 1, axisRow)
+            table.cell(hist, third, axisRow, fmtSize(lower + span / 2), width=colW, text_color=textColor, text_size=size.small, text_halign=text.align_center, bgcolor=panelColor)
+            table.merge_cells(hist, third, axisRow, numBuckets - third - 1, axisRow)
+            table.cell(hist, numBuckets - third, axisRow, fmtSize(upper) + (capped ? "+" : ""), width=colW, text_color=textColor, text_size=size.small, text_halign=text.align_right, bgcolor=panelColor)
+            table.merge_cells(hist, numBuckets - third, axisRow, numBuckets - 1, axisRow)
