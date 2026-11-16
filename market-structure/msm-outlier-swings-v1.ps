@@ -1,0 +1,600 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("MSM Outlier Swings V1 [SB]", "MSM Outlier Swings [SB]", overlay = true
+  , max_bars_back    = 5000
+  , max_lines_count  = 500
+  , max_labels_count = 500)
+
+// ============================================================================
+// OVERVIEW
+// ============================================================================
+//
+// Flags MSM V9 swings that are unusually large for their timeframe and draws a
+// retracement level (default 50%) for each, labelled with the timeframe.
+//
+// Swing pool (same definitions as the swing-size histograms):
+//   Gap-Forming Swings — MSM Gap Swing Histogram: for consecutive points
+//     W, X, Y, Z the swing X -> Y counts when Z stays beyond W (a low Z above
+//     the high W, or a high Z below the low W), i.e. the swing left a Better
+//     FVGs structure gap. Known once Z is confirmed.
+//   All Swings — MSM Swing Size Histogram: every swing between consecutive
+//     points, known once its end point is confirmed.
+//
+// Outliers: each timeframe keeps a rolling distribution of its last N swing
+// sizes. A new swing is compared against the swings BEFORE it (it is added to
+// the distribution afterwards), so the decision is final when made and never
+// repaints. Methods: above a percentile, more than k standard deviations above
+// the mean, or more than k times the median. No decision is made until the
+// timeframe has a minimum number of samples.
+//
+// Level: price = swing end + (swing start - swing end) * Level %, so 0% is the
+// swing's extreme, 50% its midpoint and 100% its origin. The line starts at the
+// swing's origin, extends right while live, and is cut off when price touches
+// it / closes through it (relative to the side price was on at confirmation),
+// or never.
+//
+// Structure engine: the point-producing part of MSM V9's state machine, run
+// per timeframe on candles aggregated locally from chart bars (the Better FVGs
+// V1 engine): a candle closes on its confirmed last chart bar, falling back to
+// the first bar of the next period. No request.security(), so every point lands
+// on its exact chart bar. Timeframes below the chart timeframe are skipped.
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+grpSwing = "Swings"
+swingPool      = input.string("Gap-Forming Swings", "Swing Pool", options = ["Gap-Forming Swings", "All Swings"], group = grpSwing, tooltip = "Gap-Forming: only swings whose next opposing structure point does not get back to the point before the swing (the Better FVGs gap). All: every MSM swing.")
+swingDirection = input.string("Both", "Swing Direction", options = ["Both", "Up Swings Only", "Down Swings Only"], group = grpSwing, tooltip = "Applies to both the distribution and the levels drawn. Up = low → high.")
+measureUnit    = input.string("Percent", "Measure Size In", options = ["Percent", "Price"], group = grpSwing, tooltip = "Percent (of the swing's origin) keeps old and new swings comparable when price has moved a lot over the sampled history.")
+sampleLen      = input.int(5000, "Swings To Sample (per TF)", minval = 10, maxval = 100000, group = grpSwing)
+
+grpOut = "Outliers"
+outMethod  = input.string("Percentile", "Method", options = ["Percentile", "Std Devs Above Mean", "Multiple Of Median"], group = grpOut)
+outPct     = input.float(95.0, "Percentile", minval = 50, maxval = 99.9, step = 0.5, group = grpOut, tooltip = "Percentile method: the swing must be bigger than this percentile of prior swings. 95 = top 5%.")
+outZ       = input.float(2.0, "Std Devs", minval = 0, step = 0.25, group = grpOut, tooltip = "Std Devs method: the swing must be more than mean + k × standard deviation.")
+outMult    = input.float(2.5, "Median Multiple", minval = 1, step = 0.25, group = grpOut, tooltip = "Median method: the swing must be more than k × the median swing.")
+minSamples = input.int(30, "Min Samples Before Flagging", minval = 5, maxval = 1000, group = grpOut, tooltip = "A timeframe flags nothing until it has seen this many swings.")
+
+grpLvl = "Levels"
+levelPct     = input.float(50.0, "Level %", minval = 0, maxval = 100, step = 1, group = grpLvl, tooltip = "Measured from the swing's end (0%) back to its origin (100%). 50 = midpoint.")
+endMode      = input.string("Touched", "Stop Extending When", options = ["Touched", "Closed Through", "Never"], group = grpLvl, tooltip = "Checked from the bar after the swing is confirmed. Closed Through = a close on the other side of the level from where price was at confirmation.")
+keepEnded    = input.bool(true, "Keep Ended Levels", group = grpLvl, tooltip = "Keep levels that stopped extending, cut off at that bar. If off they are deleted.")
+maxPerTf     = input.int(10, "Max Levels Per Timeframe", minval = 1, maxval = 45, group = grpLvl, tooltip = "Oldest ended level is removed first, otherwise the oldest level.")
+showLeg      = input.bool(true, "Show Swing Leg", group = grpLvl, tooltip = "Faint line from the swing's origin to its end, so you can see which swing a level belongs to.")
+lineWidth    = input.int(2, "Line Width", minval = 1, maxval = 5, group = grpLvl)
+lineStyleIn  = input.string("Solid", "Line Style", options = ["Solid", "Dashed", "Dotted"], group = grpLvl)
+endedTransp  = input.int(70, "Ended Level Transparency", minval = 0, maxval = 100, group = grpLvl)
+labelSize    = input.string("small", "Label Size", options = ["tiny", "small", "normal"], group = grpLvl)
+labelOffset  = input.int(3, "Live Label Offset (bars)", minval = 0, maxval = 50, group = grpLvl)
+showTable    = input.bool(true, "Show Threshold Table", group = grpLvl, tooltip = "Per timeframe: sample count and the current outlier threshold.")
+
+grpTf1 = "Timeframe 1"
+tf1On  = input.bool(true,  "Enable", inline = "t1", group = grpTf1)
+tf1Tf  = input.timeframe("", "",     inline = "t1", group = grpTf1, tooltip = "Blank = chart timeframe.")
+tf1Col = input.color(#2962ff, "",    inline = "t1", group = grpTf1)
+
+grpTf2 = "Timeframe 2"
+tf2On  = input.bool(false, "Enable", inline = "t2", group = grpTf2)
+tf2Tf  = input.timeframe("15", "",   inline = "t2", group = grpTf2)
+tf2Col = input.color(#089981, "",    inline = "t2", group = grpTf2)
+
+grpTf3 = "Timeframe 3"
+tf3On  = input.bool(false, "Enable", inline = "t3", group = grpTf3)
+tf3Tf  = input.timeframe("60", "",   inline = "t3", group = grpTf3)
+tf3Col = input.color(#ff9800, "",    inline = "t3", group = grpTf3)
+
+grpTf4 = "Timeframe 4"
+tf4On  = input.bool(false, "Enable", inline = "t4", group = grpTf4)
+tf4Tf  = input.timeframe("240", "",  inline = "t4", group = grpTf4)
+tf4Col = input.color(#9c27b0, "",    inline = "t4", group = grpTf4)
+
+grpTf5 = "Timeframe 5"
+tf5On  = input.bool(false, "Enable", inline = "t5", group = grpTf5)
+tf5Tf  = input.timeframe("D", "",    inline = "t5", group = grpTf5)
+tf5Col = input.color(#f23645, "",    inline = "t5", group = grpTf5)
+
+grpAlert = "Alerts"
+dynAlerts = input.bool(true, "Send Dynamic Alerts", group = grpAlert, tooltip = "Fire alert() messages naming the timeframe and prices. Requires an alert created with 'Any alert() function call'. The static alert conditions work regardless.")
+alNew     = input.bool(true, "New Outlier Level", inline = "al", group = grpAlert)
+alTouch   = input.bool(true, "Level Touched",     inline = "al", group = grpAlert)
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+// A retracement level drawn for one outlier swing.
+type Level
+    bool   up                  // swing direction: true = low -> high
+    float  price
+    int    createdBar          // chart bar the swing was confirmed on; tracking starts after it
+    int    side                // +1 = price above the level at confirmation, -1 = below
+    bool   touched = false
+    bool   live    = true
+    line   ln      = na
+    line   leg     = na
+    label  lbl     = na
+
+// Per-timeframe state: candle aggregation, structure engine, distribution, levels.
+type TfState
+    string        name
+    bool          on
+    color         col
+    // developing candle
+    float         cO       = na
+    float         cH       = na
+    float         cL       = na
+    float         cC       = na
+    int           cStart   = na
+    bool          cOpen    = false
+    // previous completed candle
+    float         pH       = na
+    float         pL       = na
+    // MSM state machine
+    bool          ready    = false
+    bool          lookLow  = false
+    bool          lookHigh = false
+    float         vHigh    = na
+    float         vLow     = na
+    int           vHighBar = na
+    int           vLowBar  = na
+    // last 3 structure points, oldest first
+    array<float>  pts
+    array<int>    ptBars
+    // swing-size distribution: samples in arrival order + a sorted copy
+    array<float>  samples
+    array<float>  sorted
+    float         sum      = 0.0
+    float         sumSq    = 0.0
+    array<Level>  levels
+    // per-bar events
+    bool          evNew    = false
+    bool          evTouch  = false
+    string        msg      = ""
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+lblSize   = labelSize == "normal" ? size.normal : labelSize == "small" ? size.small : size.tiny
+lnStyle   = lineStyleIn == "Dashed" ? line.style_dashed : lineStyleIn == "Dotted" ? line.style_dotted : line.style_solid
+MAX_BACK  = 4999                  // deepest history offset any scan uses
+
+// Resolved timeframe strings. Kept as inline expressions so they stay "simple
+// string", which timeframe.change() and time_close() require.
+tf1Res = tf1Tf == "" ? timeframe.period : tf1Tf
+tf2Res = tf2Tf == "" ? timeframe.period : tf2Tf
+tf3Res = tf3Tf == "" ? timeframe.period : tf3Tf
+tf4Res = tf4Tf == "" ? timeframe.period : tf4Tf
+tf5Res = tf5Tf == "" ? timeframe.period : tf5Tf
+
+chartSec = timeframe.in_seconds(timeframe.period)
+tf1Ok = tf1On and timeframe.in_seconds(tf1Res) >= chartSec
+tf2Ok = tf2On and timeframe.in_seconds(tf2Res) >= chartSec
+tf3Ok = tf3On and timeframe.in_seconds(tf3Res) >= chartSec
+tf4Ok = tf4On and timeframe.in_seconds(tf4Res) >= chartSec
+tf5Ok = tf5On and timeframe.in_seconds(tf5Res) >= chartSec
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+// "5" -> "5m", "60" -> "1h", "240" -> "4h", "D" -> "D".
+tfName(string tf) =>
+    float n    = str.tonumber(tf)
+    string out = tf
+    if not na(n)
+        out := n >= 60 and n % 60 == 0 ? str.tostring(n / 60) + "h" : str.tostring(n) + "m"
+    out
+
+appendName(string list, string nm, string sep) =>
+    list == "" ? nm : list + sep + nm
+
+fmtPx(float p) =>
+    str.tostring(p, format.mintick)
+
+fmtSize(float v) =>
+    measureUnit == "Percent" ? str.tostring(v, "#.##") + "%" : str.tostring(v, format.mintick)
+
+fmtTime(int t) =>
+    na(t) ? "n/a" : str.format_time(t, "yyyy-MM-dd HH:mm", syminfo.timezone)
+
+// Open time of a chart bar, na when it is beyond the history buffer.
+barTime(int b) =>
+    int t   = na
+    int off = bar_index - b
+    if off >= 0 and off <= MAX_BACK
+        t := time[off]
+    t
+
+newTf(string tf, bool on, color col) =>
+    TfState.new(
+      name    = tfName(tf),
+      on      = on,
+      col     = col,
+      pts     = array.new<float>(),
+      ptBars  = array.new<int>(),
+      samples = array.new<float>(),
+      sorted  = array.new<float>(),
+      levels  = array.new<Level>())
+
+addMsg(TfState st, string s) =>
+    st.msg := appendName(st.msg, st.name + " " + s, "; ")
+
+// Highest high over chart bars [fromBar, toBar]; ties go to the most recent bar
+// (same as MSM's findHighestBetween).
+highestIn(int fromBar, int toBar) =>
+    float best    = na
+    int   bestBar = na
+    int   lo      = math.max(fromBar, bar_index - MAX_BACK)
+    if toBar >= lo
+        for b = toBar to lo
+            float h = high[bar_index - b]
+            if na(best) or h > best
+                best    := h
+                bestBar := b
+    [best, bestBar]
+
+lowestIn(int fromBar, int toBar) =>
+    float best    = na
+    int   bestBar = na
+    int   lo      = math.max(fromBar, bar_index - MAX_BACK)
+    if toBar >= lo
+        for b = toBar to lo
+            float l = low[bar_index - b]
+            if na(best) or l < best
+                best    := l
+                bestBar := b
+    [best, bestBar]
+
+// ============================================================================
+// DISTRIBUTION
+// ============================================================================
+
+// Index of the first element >= v in an ascending array (= count of elements < v).
+lowerBound(array<float> a, float v) =>
+    int lo = 0
+    int hi = array.size(a)
+    while lo < hi
+        int mid = math.floor((lo + hi) / 2)
+        if array.get(a, mid) < v
+            lo := mid + 1
+        else
+            hi := mid
+    lo
+
+addSample(TfState st, float v) =>
+    array.push(st.samples, v)
+    array.insert(st.sorted, lowerBound(st.sorted, v), v)
+    st.sum   := st.sum + v
+    st.sumSq := st.sumSq + v * v
+    if array.size(st.samples) > sampleLen
+        float old = array.shift(st.samples)
+        array.remove(st.sorted, lowerBound(st.sorted, old))
+        st.sum   := st.sum - old
+        st.sumSq := st.sumSq - old * old
+
+median(TfState st) =>
+    int n = array.size(st.sorted)
+    float m = na
+    if n > 0
+        int k = int(math.floor(n / 2))
+        m := n % 2 == 1 ? array.get(st.sorted, k) : (array.get(st.sorted, k - 1) + array.get(st.sorted, k)) / 2
+    m
+
+// Current outlier threshold, na until the timeframe has enough samples.
+threshold(TfState st) =>
+    int n = array.size(st.sorted)
+    float thr = na
+    if n >= minSamples and n > 0
+        if outMethod == "Percentile"
+            int k = math.min(n - 1, math.max(0, int(math.ceil(outPct / 100 * n)) - 1))
+            thr := array.get(st.sorted, k)
+        else if outMethod == "Std Devs Above Mean"
+            float m = st.sum / n
+            thr := m + outZ * math.sqrt(math.max(0, st.sumSq / n - m * m))
+        else
+            thr := outMult * median(st)
+    thr
+
+methodText() =>
+    outMethod == "Percentile" ? "p" + str.tostring(outPct) : outMethod == "Std Devs Above Mean" ? "mean + " + str.tostring(outZ) + "σ" : str.tostring(outMult) + "× median"
+
+// ============================================================================
+// LEVELS
+// ============================================================================
+
+deleteLevel(Level lv) =>
+    line.delete(lv.ln)
+    line.delete(lv.leg)
+    label.delete(lv.lbl)
+
+// Swing start/end prices and bars; endBar = chart bar the swing was confirmed on.
+createLevel(TfState st, float v, float thr, float sStart, int sBar, float sEnd, int eBar, int endBar) =>
+    bool  up   = sEnd > sStart
+    float lvl  = sEnd + (sStart - sEnd) * levelPct / 100
+    int   n    = array.size(st.sorted)
+    float rank = n > 0 ? float(lowerBound(st.sorted, v)) / n * 100 : na
+    string tip = st.name + " outlier " + (up ? "up" : "down") + " swing" +
+         "\n" + fmtPx(sStart) + " → " + fmtPx(sEnd) + "  (" + fmtSize(v) + ")" +
+         "\nBigger than " + str.tostring(rank, "#.#") + "% of " + str.tostring(n) + " prior swings" +
+         "\nThreshold (" + methodText() + "): " + fmtSize(thr) + "  ·  median " + fmtSize(median(st)) +
+         "\n" + str.tostring(levelPct) + "% level: " + fmtPx(lvl) +
+         "\nSwing " + fmtTime(barTime(sBar)) + " → " + fmtTime(barTime(eBar)) +
+         "\nConfirmed @ " + fmtTime(barTime(endBar))
+
+    Level lv = Level.new(up = up, price = lvl, createdBar = endBar, side = close >= lvl ? 1 : -1)
+    lv.ln  := line.new(sBar, lvl, bar_index, lvl, color = st.col, width = lineWidth, style = lnStyle, extend = extend.right)
+    if showLeg
+        lv.leg := line.new(sBar, sStart, eBar, sEnd, color = color.new(st.col, 60), width = 1, style = line.style_dotted)
+    lv.lbl := label.new(bar_index + labelOffset, lvl, st.name + " " + str.tostring(levelPct) + "%"
+      , style     = label.style_label_left
+      , color     = color.new(st.col, 100)
+      , textcolor = st.col
+      , size      = lblSize
+      , tooltip   = tip)
+    array.push(st.levels, lv)
+
+    // Over the cap: drop the oldest ended level, else the oldest level.
+    if array.size(st.levels) > maxPerTf
+        int idx = 0
+        for i = 0 to array.size(st.levels) - 1
+            if not array.get(st.levels, i).live
+                idx := i
+                break
+        deleteLevel(array.remove(st.levels, idx))
+
+    st.evNew := true
+    if dynAlerts and alNew
+        addMsg(st, "outlier " + (up ? "up" : "down") + " swing " + fmtPx(sStart) + " → " + fmtPx(sEnd) + " (" + fmtSize(v) + "), " + str.tostring(levelPct) + "% level " + fmtPx(lvl))
+
+endLevel(TfState st, Level lv) =>
+    lv.live := false
+    line.set_extend(lv.ln, extend.none)
+    line.set_x2(lv.ln, bar_index)
+    if keepEnded
+        line.set_color(lv.ln, color.new(st.col, endedTransp))
+        label.set_x(lv.lbl, bar_index)
+        label.set_textcolor(lv.lbl, color.new(st.col, endedTransp))
+        if not na(lv.leg)
+            line.set_color(lv.leg, color.new(st.col, math.min(100, endedTransp + 20)))
+    else
+        deleteLevel(lv)
+
+updateLevels(TfState st) =>
+    int n = array.size(st.levels)
+    if n > 0
+        for i = n - 1 to 0
+            Level lv = array.get(st.levels, i)
+            if lv.live and bar_index > lv.createdBar
+                bool hit     = low <= lv.price and high >= lv.price
+                bool through = lv.side == 1 ? close < lv.price : close > lv.price
+                if hit and not lv.touched
+                    lv.touched := true
+                    st.evTouch := true
+                    if dynAlerts and alTouch
+                        addMsg(st, (lv.up ? "up" : "down") + " swing " + str.tostring(levelPct) + "% level " + fmtPx(lv.price) + " touched")
+                bool ends = endMode == "Touched" ? hit : endMode == "Closed Through" ? through : false
+                if ends
+                    endLevel(st, lv)
+                    if not keepEnded
+                        array.remove(st.levels, i)
+
+// ============================================================================
+// STRUCTURE ENGINE
+// ============================================================================
+
+// A swing is complete: measure it, test it against the prior distribution,
+// then add it to the distribution.
+onSwing(TfState st, float sStart, int sBar, float sEnd, int eBar, int endBar) =>
+    bool up = sEnd > sStart
+    bool wanted = swingDirection == "Both" or (swingDirection == "Up Swings Only" and up) or (swingDirection == "Down Swings Only" and not up)
+    if wanted
+        float d = math.abs(sEnd - sStart)
+        float v = measureUnit == "Percent" ? (sStart != 0 ? d / math.abs(sStart) * 100 : na) : d
+        if not na(v)
+            float thr = threshold(st)
+            if not na(thr) and v > thr
+                createLevel(st, v, thr, sStart, sBar, sEnd, eBar, endBar)
+            addSample(st, v)
+
+// Record a structure point (Z) and evaluate the swing it completes.
+addPoint(TfState st, bool isHigh, float price, int bar, int endBar) =>
+    int n = array.size(st.pts)
+    if swingPool == "All Swings"
+        if n >= 1
+            onSwing(st, array.get(st.pts, n - 1), array.get(st.ptBars, n - 1), price, bar, endBar)
+    else if n >= 3
+        // W, X, Y = last three points. Swing X -> Y qualifies when Z stays beyond W.
+        float w = array.get(st.pts, n - 3)
+        if isHigh ? price < w : price > w
+            onSwing(st, array.get(st.pts, n - 2), array.get(st.ptBars, n - 2), array.get(st.pts, n - 1), array.get(st.ptBars, n - 1), endBar)
+
+    array.push(st.pts, price)
+    array.push(st.ptBars, bar)
+    if array.size(st.pts) > 3
+        array.shift(st.pts)
+        array.shift(st.ptBars)
+
+// Run MSM V9's point-producing state machine on one completed candle whose last
+// chart bar is endBar. Extremes are scanned over chart bars, exactly like MSM's
+// findLowestBetween / findHighestBetween (which exclude the valid level's own bar).
+closeCandle(TfState st, int endBar) =>
+    float o = st.cO
+    float h = st.cH
+    float l = st.cL
+    float c = st.cC
+
+    bool bearBreakdown = c < o and c < st.pL      // false while pL is na
+    bool bullBreakout  = c > o and c > st.pH
+
+    if not st.ready
+        // Initialisation: first bearish breakdown -> highest high in history.
+        if bearBreakdown
+            [hp, hb] = highestIn(0, endBar)
+            if not na(hp)
+                st.vHigh    := hp
+                st.vHighBar := hb
+                st.ready    := true
+                st.lookLow  := true
+                addPoint(st, true, hp, hb, endBar)
+    else if st.lookLow
+        // Bullish BOS (close above the valid high) or a bullish breakout candle
+        // confirms the low of the pullback.
+        if (not na(st.vHigh) and not na(st.vLow) and c > st.vHigh) or bullBreakout
+            [lp, lb] = lowestIn(st.vHighBar + 1, endBar)
+            if not na(lp)
+                st.vLow     := lp
+                st.vLowBar  := lb
+                st.lookLow  := false
+                st.lookHigh := true
+                addPoint(st, false, lp, lb, endBar)
+    else if st.lookHigh
+        if (not na(st.vLow) and not na(st.vHigh) and c < st.vLow) or bearBreakdown
+            [hp, hb] = highestIn(st.vLowBar + 1, endBar)
+            if not na(hp)
+                st.vHigh    := hp
+                st.vHighBar := hb
+                st.lookHigh := false
+                st.lookLow  := true
+                addPoint(st, true, hp, hb, endBar)
+
+    st.pH := h
+    st.pL := l
+
+// Advance one timeframe by one chart bar.
+//   newPeriod    = first chart bar of a new candle of this timeframe
+//   lastOfPeriod = confirmed last chart bar of the current candle
+processTf(TfState st, bool newPeriod, bool lastOfPeriod) =>
+    st.evNew   := false
+    st.evTouch := false
+    st.msg     := ""
+    if st.on
+        if newPeriod or na(st.cStart)
+            // Fallback close for a candle whose last bar was not recognised.
+            if st.cOpen
+                closeCandle(st, bar_index - 1)
+            st.cO     := open
+            st.cH     := high
+            st.cL     := low
+            st.cC     := close
+            st.cStart := bar_index
+            st.cOpen  := true
+        else if st.cOpen
+            st.cH := math.max(st.cH, high)
+            st.cL := math.min(st.cL, low)
+            st.cC := close
+        if st.cOpen and lastOfPeriod
+            closeCandle(st, bar_index)
+            st.cOpen := false
+        updateLevels(st)
+
+// Last bar: keep live labels just right of the current bar.
+refreshTf(TfState st) =>
+    int n = array.size(st.levels)
+    if n > 0
+        for i = 0 to n - 1
+            Level lv = array.get(st.levels, i)
+            if lv.live
+                label.set_x(lv.lbl, bar_index + labelOffset)
+
+// ============================================================================
+// STATE & MAIN
+// ============================================================================
+
+var TfState s1 = newTf(tf1Res, tf1Ok, tf1Col)
+var TfState s2 = newTf(tf2Res, tf2Ok, tf2Col)
+var TfState s3 = newTf(tf3Res, tf3Ok, tf3Col)
+var TfState s4 = newTf(tf4Res, tf4Ok, tf4Col)
+var TfState s5 = newTf(tf5Res, tf5Ok, tf5Col)
+
+// Series calls at global scope so they run on every bar.
+new1 = timeframe.change(tf1Res)
+new2 = timeframe.change(tf2Res)
+new3 = timeframe.change(tf3Res)
+new4 = timeframe.change(tf4Res)
+new5 = timeframe.change(tf5Res)
+
+tc1 = time_close(tf1Res)
+tc2 = time_close(tf2Res)
+tc3 = time_close(tf3Res)
+tc4 = time_close(tf4Res)
+tc5 = time_close(tf5Res)
+
+last1 = barstate.isconfirmed and not na(tc1) and time_close >= tc1
+last2 = barstate.isconfirmed and not na(tc2) and time_close >= tc2
+last3 = barstate.isconfirmed and not na(tc3) and time_close >= tc3
+last4 = barstate.isconfirmed and not na(tc4) and time_close >= tc4
+last5 = barstate.isconfirmed and not na(tc5) and time_close >= tc5
+
+processTf(s1, new1, last1)
+processTf(s2, new2, last2)
+processTf(s3, new3, last3)
+processTf(s4, new4, last4)
+processTf(s5, new5, last5)
+
+if barstate.islast
+    refreshTf(s1)
+    refreshTf(s2)
+    refreshTf(s3)
+    refreshTf(s4)
+    refreshTf(s5)
+
+// ============================================================================
+// THRESHOLD TABLE / SKIPPED TIMEFRAME NOTICE
+// ============================================================================
+
+tableRow(table t, int row, TfState st) =>
+    int    n   = array.size(st.samples)
+    float  thr = threshold(st)
+    string txt = st.name + "  ·  n=" + str.tostring(n) + "  ·  " +
+         (na(thr) ? "needs " + str.tostring(minSamples) + " samples" : methodText() + " = " + fmtSize(thr))
+    table.cell(t, 0, row, txt, text_color = st.col, text_size = size.small, text_halign = text.align_right)
+    row + 1
+
+skipped = ""
+skipped := tf1On and not tf1Ok ? appendName(skipped, tfName(tf1Res), ", ") : skipped
+skipped := tf2On and not tf2Ok ? appendName(skipped, tfName(tf2Res), ", ") : skipped
+skipped := tf3On and not tf3Ok ? appendName(skipped, tfName(tf3Res), ", ") : skipped
+skipped := tf4On and not tf4Ok ? appendName(skipped, tfName(tf4Res), ", ") : skipped
+skipped := tf5On and not tf5Ok ? appendName(skipped, tfName(tf5Res), ", ") : skipped
+
+var table info = table.new(position.top_right, 1, 6)
+if barstate.islast
+    table.clear(info, 0, 0, 0, 5)
+    int row = 0
+    if showTable
+        if s1.on
+            row := tableRow(info, row, s1)
+        if s2.on
+            row := tableRow(info, row, s2)
+        if s3.on
+            row := tableRow(info, row, s3)
+        if s4.on
+            row := tableRow(info, row, s4)
+        if s5.on
+            row := tableRow(info, row, s5)
+    if skipped != ""
+        table.cell(info, 0, row, "Skipped (below chart TF): " + skipped, text_color = color.gray, text_size = size.small, text_halign = text.align_right)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+anyNew   = s1.evNew   or s2.evNew   or s3.evNew   or s4.evNew   or s5.evNew
+anyTouch = s1.evTouch or s2.evTouch or s3.evTouch or s4.evTouch or s5.evTouch
+
+alertcondition(anyNew,   "New Outlier Swing Level", "Outlier MSM swing detected on {{ticker}}")
+alertcondition(anyTouch, "Outlier Level Touched",   "Price touched an outlier swing level on {{ticker}}")
+
+if dynAlerts
+    string allMsg = ""
+    allMsg := s1.msg != "" ? appendName(allMsg, s1.msg, "; ") : allMsg
+    allMsg := s2.msg != "" ? appendName(allMsg, s2.msg, "; ") : allMsg
+    allMsg := s3.msg != "" ? appendName(allMsg, s3.msg, "; ") : allMsg
+    allMsg := s4.msg != "" ? appendName(allMsg, s4.msg, "; ") : allMsg
+    allMsg := s5.msg != "" ? appendName(allMsg, s5.msg, "; ") : allMsg
+    if allMsg != ""
+        alert(syminfo.ticker + ": " + allMsg, alert.freq_once_per_bar_close)
