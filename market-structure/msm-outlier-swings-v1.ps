@@ -46,7 +46,7 @@ indicator("MSM Outlier Swings V1 [SB]", "MSM Outlier Swings [SB]", overlay = tru
 // ============================================================================
 
 grpSwing = "Swings"
-swingPool      = input.string("Gap-Forming Swings", "Swing Pool", options = ["Gap-Forming Swings", "All Swings"], group = grpSwing, tooltip = "Gap-Forming: only swings whose next opposing structure point does not get back to the point before the swing (the Better FVGs gap). All: every MSM swing.")
+swingPool      = input.string("All Swings", "Swing Pool", options = ["Gap-Forming Swings", "All Swings"], group = grpSwing, tooltip = "Gap-Forming: only swings whose next opposing structure point does not get back to the point before the swing (the Better FVGs gap). All: every MSM swing.")
 swingDirection = input.string("Both", "Swing Direction", options = ["Both", "Up Swings Only", "Down Swings Only"], group = grpSwing, tooltip = "Applies to both the distribution and the levels drawn. Up = low → high.")
 measureUnit    = input.string("Percent", "Measure Size In", options = ["Percent", "Price"], group = grpSwing, tooltip = "Percent (of the swing's origin) keeps old and new swings comparable when price has moved a lot over the sampled history.")
 sampleLen      = input.int(5000, "Swings To Sample (per TF)", minval = 10, maxval = 100000, group = grpSwing)
@@ -62,7 +62,8 @@ grpLvl = "Levels"
 levelPct     = input.float(50.0, "Level %", minval = 0, maxval = 100, step = 1, group = grpLvl, tooltip = "Measured from the swing's end (0%) back to its origin (100%). 50 = midpoint.")
 endMode      = input.string("Touched", "Stop Extending When", options = ["Touched", "Closed Through", "Never"], group = grpLvl, tooltip = "Checked from the bar after the swing is confirmed. Closed Through = a close on the other side of the level from where price was at confirmation.")
 keepEnded    = input.bool(true, "Keep Ended Levels", group = grpLvl, tooltip = "Keep levels that stopped extending, cut off at that bar. If off they are deleted.")
-maxPerTf     = input.int(10, "Max Levels Per Timeframe", minval = 1, maxval = 45, group = grpLvl, tooltip = "Oldest ended level is removed first, otherwise the oldest level.")
+keepAll      = input.bool(false, "Keep All History", group = grpLvl, tooltip = "Never delete a level. A level pushed out by the per-timeframe cap is cut off at that bar instead of deleted, and ended levels are always kept (overrides Keep Ended Levels). Only TradingView's own limit of 500 lines / labels per script removes the oldest drawings.")
+maxPerTf     = input.int(10, "Max Levels Per Timeframe", minval = 1, maxval = 45, group = grpLvl, tooltip = "Oldest ended level is removed first, otherwise the oldest level. With Keep All History on, this caps the tracked levels and older ones are cut off and left on the chart.")
 showLeg      = input.bool(true, "Show Swing Leg", group = grpLvl, tooltip = "Faint line from the swing's origin to its end, so you can see which swing a level belongs to.")
 lineWidth    = input.int(2, "Line Width", minval = 1, maxval = 5, group = grpLvl)
 lineStyleIn  = input.string("Solid", "Line Style", options = ["Solid", "Dashed", "Dotted"], group = grpLvl)
@@ -158,6 +159,7 @@ type TfState
 // CONSTANTS
 // ============================================================================
 
+keepOld   = keepEnded or keepAll
 lblSize   = labelSize == "normal" ? size.normal : labelSize == "small" ? size.small : size.tiny
 lnStyle   = lineStyleIn == "Dashed" ? line.style_dashed : lineStyleIn == "Dotted" ? line.style_dotted : line.style_solid
 MAX_BACK  = 4999                  // deepest history offset any scan uses
@@ -311,6 +313,21 @@ deleteLevel(Level lv) =>
     line.delete(lv.leg)
     label.delete(lv.lbl)
 
+// Stop a level extending at the current bar: fade it, or delete it when old
+// levels are not kept.
+endLevel(TfState st, Level lv) =>
+    lv.live := false
+    line.set_extend(lv.ln, extend.none)
+    line.set_x2(lv.ln, bar_index)
+    if keepOld
+        line.set_color(lv.ln, color.new(st.col, endedTransp))
+        label.set_x(lv.lbl, bar_index)
+        label.set_textcolor(lv.lbl, color.new(st.col, endedTransp))
+        if not na(lv.leg)
+            line.set_color(lv.leg, color.new(st.col, math.min(100, endedTransp + 20)))
+    else
+        deleteLevel(lv)
+
 // Swing start/end prices and bars; endBar = chart bar the swing was confirmed on.
 createLevel(TfState st, float v, float thr, float sStart, int sBar, float sEnd, int eBar, int endBar) =>
     bool  up   = sEnd > sStart
@@ -337,31 +354,24 @@ createLevel(TfState st, float v, float thr, float sStart, int sBar, float sEnd, 
       , tooltip   = tip)
     array.push(st.levels, lv)
 
-    // Over the cap: drop the oldest ended level, else the oldest level.
+    // Over the cap: drop the oldest ended level, else the oldest level. With
+    // Keep All History the dropped level's drawings stay, cut off at this bar.
     if array.size(st.levels) > maxPerTf
         int idx = 0
         for i = 0 to array.size(st.levels) - 1
             if not array.get(st.levels, i).live
                 idx := i
                 break
-        deleteLevel(array.remove(st.levels, idx))
+        Level old = array.remove(st.levels, idx)
+        if keepAll
+            if old.live
+                endLevel(st, old)
+        else
+            deleteLevel(old)
 
     st.evNew := true
     if dynAlerts and alNew
         addMsg(st, "outlier " + (up ? "up" : "down") + " swing " + fmtPx(sStart) + " → " + fmtPx(sEnd) + " (" + fmtSize(v) + "), " + str.tostring(levelPct) + "% level " + fmtPx(lvl))
-
-endLevel(TfState st, Level lv) =>
-    lv.live := false
-    line.set_extend(lv.ln, extend.none)
-    line.set_x2(lv.ln, bar_index)
-    if keepEnded
-        line.set_color(lv.ln, color.new(st.col, endedTransp))
-        label.set_x(lv.lbl, bar_index)
-        label.set_textcolor(lv.lbl, color.new(st.col, endedTransp))
-        if not na(lv.leg)
-            line.set_color(lv.leg, color.new(st.col, math.min(100, endedTransp + 20)))
-    else
-        deleteLevel(lv)
 
 updateLevels(TfState st) =>
     int n = array.size(st.levels)
@@ -373,13 +383,14 @@ updateLevels(TfState st) =>
                 bool through = lv.side == 1 ? close < lv.price : close > lv.price
                 if hit and not lv.touched
                     lv.touched := true
+                    line.set_style(lv.ln, line.style_dotted)
                     st.evTouch := true
                     if dynAlerts and alTouch
                         addMsg(st, (lv.up ? "up" : "down") + " swing " + str.tostring(levelPct) + "% level " + fmtPx(lv.price) + " touched")
                 bool ends = endMode == "Touched" ? hit : endMode == "Closed Through" ? through : false
                 if ends
                     endLevel(st, lv)
-                    if not keepEnded
+                    if not keepOld
                         array.remove(st.levels, i)
 
 // ============================================================================
