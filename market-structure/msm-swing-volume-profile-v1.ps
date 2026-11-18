@@ -1,0 +1,418 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("MSM Swing Volume Profile [SB]", "MSM Swing VP [SB]", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// Volume profile of every MSM V9 swing, drawn on top of the swing itself.
+//
+// Runs MSM V9's point-producing state machine unchanged (valid high/low, BOS,
+// bullish breakout / bearish breakdown, extremes scanned over chart bars). MSM
+// points strictly alternate high/low, so every new point closes a swing from the
+// previous point to the new one. When the point is confirmed, the chart bars
+// from the previous point's bar to the new point's bar (both inclusive — the
+// endpoint bars are shared by adjacent swings) are binned into price rows
+// spanning the swing's low → high. Each bar's volume is spread uniformly over
+// its own high-low range; the part of a bar outside the swing's range is
+// dropped. The profile is drawn as one box per row, anchored at the swing's
+// start (or end) bar, with the POC row and value area highlighted. The swing is
+// decided from existing points only, so finished profiles never repaint; the
+// optional developing profile (latest point → current bar) is redrawn on the
+// last bar.
+
+// Ensure sufficient historical buffer for lookback functions
+max_bars_back(high, 5000)
+max_bars_back(low, 5000)
+max_bars_back(open, 5000)
+max_bars_back(close, 5000)
+max_bars_back(volume, 5000)
+// Drawings at a past bar_index read `time` that many bars back
+max_bars_back(time, 5000)
+
+// ============================================================================
+// STRUCTURE SETTINGS
+// ============================================================================
+structureTimeframe = input.timeframe("", "Structure Timeframe", tooltip="Timeframe used for structure detection. 'Chart' uses the chart's own timeframe. Profiles are always built from chart-bar volume.", group="Structure")
+
+// ============================================================================
+// PROFILE SETTINGS
+// ============================================================================
+vpRows = input.int(24, "Rows Per Profile", minval=2, maxval=100, tooltip="Number of price rows each swing is split into.", group="Profile")
+maxSwingsInput = input.int(20, "Max Swings Displayed", minval=1, maxval=250, tooltip="Most recent swings kept on the chart. Capped automatically so that (swings × rows) fits TradingView's 500-box limit.", group="Profile")
+swingDirection = input.string("Both", "Swing Direction", options=["Both", "Up Swings Only", "Down Swings Only"], tooltip="Up swing = low → high (closed by a new high). Down swing = high → low.", group="Profile")
+vpPlacement = input.string("Swing Start", "Anchor Profile At", options=["Swing Start", "Swing End"], tooltip="Swing Start: rows grow rightward from the swing's first bar. Swing End: rows grow leftward from the swing's last bar.", group="Profile")
+vpWidthPct = input.float(70, "Max Width (% of swing length)", minval=5, maxval=100, tooltip="Width of the highest-volume row, as a percentage of the swing's length in bars.", group="Profile")
+vaPct = input.float(70, "Value Area %", minval=0, maxval=100, tooltip="Share of the swing's volume in the value area, expanded outward from the POC. 0 = no value area highlight.", group="Profile")
+showPOC = input.bool(true, "Show POC Line", tooltip="Line across the full swing at the middle of the highest-volume row.", group="Profile")
+showLegs = input.bool(true, "Show Swing Legs", tooltip="Line from each swing's start point to its end point.", group="Profile")
+showInfo = input.bool(false, "Show Volume Labels", tooltip="Total swing volume at the swing's end point; hover for POC, value area and bar count.", group="Profile")
+showDeveloping = input.bool(true, "Show Developing Swing", tooltip="Profile of the in-progress leg from the latest MSM point to the current bar. Redrawn every bar; replaced by a finished profile once the next point is confirmed.", group="Profile")
+
+upVAColor = input.color(color.new(color.teal, 40), "Up Swing — Value Area", group="Colors")
+upColor = input.color(color.new(color.teal, 75), "Up Swing — Outside VA", group="Colors")
+downVAColor = input.color(color.new(color.red, 40), "Down Swing — Value Area", group="Colors")
+downColor = input.color(color.new(color.red, 75), "Down Swing — Outside VA", group="Colors")
+devVAColor = input.color(color.new(color.gray, 40), "Developing — Value Area", group="Colors")
+devColor = input.color(color.new(color.gray, 75), "Developing — Outside VA", group="Colors")
+pocColor = input.color(color.new(color.yellow, 0), "POC Line", group="Colors")
+pocWidth = input.int(2, "POC Line Width", minval=1, maxval=5, group="Colors")
+legColor = input.color(color.new(color.gray, 30), "Swing Leg", group="Colors")
+textColor = input.color(color.gray, "Label Text", group="Colors")
+
+// Swings that fit the box budget (one row per box, one profile reserved for the developing swing)
+int maxSwings = math.max(1, math.min(maxSwingsInput, int(500 / vpRows) - (showDeveloping ? 1 : 0)))
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+// Drawings of one swing's profile
+type SwingVP
+    array<box> boxes
+    line pocLine
+    line legLine
+    label info
+
+// ============================================================================
+// MARKET STRUCTURE STATE VARIABLES (MSM V9)
+// ============================================================================
+
+var float currentValidHigh = na
+var float currentValidLow = na
+var int currentValidHighBar = na
+var int currentValidLowBar = na
+var bool initialized = false
+var bool lookingForLow = false
+var bool lookingForHigh = false
+
+// Most recent MSM point (either side); the start of the next swing
+var float lastPointPrice = na
+var int lastPointBar = na
+var bool lastPointIsHigh = false
+
+// Finished profiles, oldest first, and the developing one
+var array<SwingVP> profiles = array.new<SwingVP>()
+var SwingVP devVP = na
+
+// ============================================================================
+// STRUCTURE TIMEFRAME DATA
+// ============================================================================
+
+[tfHigh, tfLow, tfOpen, tfClose] = request.security(syminfo.tickerid, structureTimeframe, [high, low, open, close], lookahead=barmerge.lookahead_off)
+tfTime = request.security(syminfo.tickerid, structureTimeframe, time, lookahead=barmerge.lookahead_off)
+bool tfNewCandle = ta.change(tfTime) != 0
+
+float cumVolume = ta.cum(nz(volume))
+if barstate.islast and cumVolume == 0
+    runtime.error("No volume is provided by the data vendor for this symbol.")
+
+// ============================================================================
+// HELPER FUNCTIONS (MSM V9)
+// ============================================================================
+
+// Check if current structure candle is bearish and closes below previous candle's low
+isBearishBreakdown() =>
+    tfClose < tfOpen and tfClose < tfLow[1]
+
+// Check if current structure candle is bullish and closes above previous candle's high
+isBullishBreakout() =>
+    tfClose > tfOpen and tfClose > tfHigh[1]
+
+// Find lowest low between two bar indices
+findLowestBetween(startBar, endBar) =>
+    float lowestPrice = na
+    int lowestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    // Pine Script supports up to 5000 bars of history
+    int maxLookback = 5000
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(low[i])
+                if na(lowestPrice) or low[i] < lowestPrice
+                    lowestPrice := low[i]
+                    lowestBarIndex := currentBar - i
+
+    [lowestPrice, lowestBarIndex]
+
+// Find highest high between two bar indices
+findHighestBetween(startBar, endBar) =>
+    float highestPrice = na
+    int highestBarIndex = na
+
+    int start = startBar
+    int end = endBar
+
+    if start > end
+        int temp = start
+        start := end
+        end := temp
+
+    int currentBar = bar_index
+    int lookbackStart = currentBar - end
+    int lookbackEnd = currentBar - start - 1
+
+    // Pine Script supports up to 5000 bars of history
+    int maxLookback = 5000
+    lookbackStart := math.max(lookbackStart, 0)
+    lookbackEnd := math.min(lookbackEnd, maxLookback)
+
+    if lookbackStart <= lookbackEnd and lookbackEnd >= 0 and lookbackStart <= maxLookback
+        for i = lookbackStart to lookbackEnd
+            if i >= 0 and not na(high[i])
+                if na(highestPrice) or high[i] > highestPrice
+                    highestPrice := high[i]
+                    highestBarIndex := currentBar - i
+
+    [highestPrice, highestBarIndex]
+
+// ============================================================================
+// VOLUME PROFILE
+// ============================================================================
+
+// Volume per price row for chart bars b0..b1 (inclusive) over [lo, hi]. Row 0 is
+// the bottom. A bar's volume is spread uniformly over its high-low range and
+// only the part overlapping each row is counted.
+profileVolumes(int b0, int b1, float lo, float hi) =>
+    float[] vols = array.new<float>(vpRows, 0.0)
+    float step = (hi - lo) / vpRows
+    int first = math.max(b0, bar_index - 4999)
+    if step > 0 and first <= b1
+        for b = first to b1
+            int i = bar_index - b
+            float bh = high[i]
+            float bl = low[i]
+            float v = volume[i]
+            if not na(v) and v > 0 and not na(bh) and not na(bl)
+                if bh == bl
+                    if bh >= lo and bh <= hi
+                        int r = math.min(vpRows - 1, int(math.floor((bh - lo) / step)))
+                        array.set(vols, r, array.get(vols, r) + v)
+                else
+                    float top = math.min(bh, hi)
+                    float bot = math.max(bl, lo)
+                    if top > bot
+                        int r0 = math.max(0, int(math.floor((bot - lo) / step)))
+                        int r1 = math.min(vpRows - 1, int(math.floor((top - lo) / step)))
+                        for r = r0 to r1
+                            float rowBot = lo + step * r
+                            float overlap = math.min(top, rowBot + step) - math.max(bot, rowBot)
+                            if overlap > 0
+                                array.set(vols, r, array.get(vols, r) + v * overlap / (bh - bl))
+    vols
+
+// POC row, value area row bounds (inclusive) and total volume. The value area
+// grows from the POC toward whichever neighbouring row has more volume.
+valueArea(float[] vols) =>
+    int n = array.size(vols)
+    int poc = 0
+    float total = 0.0
+    for r = 0 to n - 1
+        float v = array.get(vols, r)
+        total += v
+        if v > array.get(vols, poc)
+            poc := r
+    int vaLo = poc
+    int vaHi = poc
+    float acc = array.get(vols, poc)
+    float target = total * vaPct / 100
+    while acc < target and (vaLo > 0 or vaHi < n - 1)
+        float upV = vaHi < n - 1 ? array.get(vols, vaHi + 1) : -1.0
+        float dnV = vaLo > 0 ? array.get(vols, vaLo - 1) : -1.0
+        if upV >= dnV
+            vaHi += 1
+            acc += upV
+        else
+            vaLo -= 1
+            acc += dnV
+    [poc, vaLo, vaHi, total]
+
+deleteVP(SwingVP vp) =>
+    if not na(vp)
+        for b in vp.boxes
+            box.delete(b)
+        line.delete(vp.pocLine)
+        line.delete(vp.legLine)
+        label.delete(vp.info)
+    true
+
+// Draw the profile of the swing from (swingStart, p0) to (b1, p1)
+drawVP(int swingStart, float p0, int b1, float p1, bool developing) =>
+    // Drawings can't reach further back than the 5000-bar history buffer
+    int b0 = math.max(swingStart, bar_index - 4999)
+    SwingVP vp = SwingVP.new(array.new<box>(), na, na, na)
+    float lo = math.min(p0, p1)
+    float hi = math.max(p0, p1)
+    bool up = p1 > p0
+    float[] vols = profileVolumes(b0, b1, lo, hi)
+    [poc, vaLo, vaHi, total] = valueArea(vols)
+    float maxV = array.max(vols)
+    if total > 0 and maxV > 0
+        float step = (hi - lo) / vpRows
+        float maxW = math.max(1, b1 - b0) * vpWidthPct / 100
+        bool atStart = vpPlacement == "Swing Start"
+        for r = 0 to vpRows - 1
+            float v = array.get(vols, r)
+            if v > 0
+                int w = math.max(1, int(math.round(v / maxV * maxW)))
+                bool inVA = vaPct > 0 and r >= vaLo and r <= vaHi
+                color c = developing ? (inVA ? devVAColor : devColor) : up ? (inVA ? upVAColor : upColor) : (inVA ? downVAColor : downColor)
+                int left = atStart ? b0 : b1 - w
+                int right = atStart ? b0 + w : b1
+                array.push(vp.boxes, box.new(left, lo + step * (r + 1), right, lo + step * r, border_color=color.new(c, 100), border_width=0, bgcolor=c))
+        float pocY = lo + step * (poc + 0.5)
+        if showPOC
+            vp.pocLine := line.new(b0, pocY, b1, pocY, color=pocColor, width=pocWidth, style=developing ? line.style_dashed : line.style_solid)
+        if showInfo
+            string tip = (developing ? "Developing " : "") + (up ? "Up" : "Down") + " swing · " + str.tostring(b1 - swingStart + 1) + " bars" +
+                         "\nVolume: " + str.tostring(total, format.volume) +
+                         "\nPOC: " + str.tostring(pocY, format.mintick) +
+                         (vaPct > 0 ? "\nVAH: " + str.tostring(lo + step * (vaHi + 1), format.mintick) + "\nVAL: " + str.tostring(lo + step * vaLo, format.mintick) : "")
+            vp.info := label.new(b1, p1, str.tostring(total, format.volume), style=up ? label.style_label_down : label.style_label_up, color=color.new(color.black, 100), textcolor=textColor, size=size.small, tooltip=tip)
+    if showLegs
+        vp.legLine := line.new(b0, p0, b1, p1, color=legColor, width=1, style=developing ? line.style_dashed : line.style_solid)
+    vp
+
+// A new MSM point closes the swing from the previous point (na for the very
+// first point, which closes no swing).
+onPoint(bool isHigh, float price, int pointBar) =>
+    if not na(lastPointPrice) and not na(lastPointBar)
+        bool wanted = swingDirection == "Both" or (swingDirection == "Up Swings Only" and isHigh) or (swingDirection == "Down Swings Only" and not isHigh)
+        if wanted and price != lastPointPrice
+            array.push(profiles, drawVP(lastPointBar, lastPointPrice, pointBar, price, false))
+            while array.size(profiles) > maxSwings
+                deleteVP(array.shift(profiles))
+    true
+
+// Evaluated on every bar so the functions' [1] history stays consistent
+bool bearBreakdown = isBearishBreakdown()
+bool bullBreakout = isBullishBreakout()
+
+// ============================================================================
+// INITIALIZATION (MSM V9)
+// ============================================================================
+
+if not initialized and bar_index > 0 and tfNewCandle
+    if bearBreakdown
+        float localHigh = high
+        int localHighBar = bar_index
+
+        for i = 1 to math.min(bar_index, 5000)
+            if high[i] > localHigh
+                localHigh := high[i]
+                localHighBar := bar_index - i
+
+        currentValidHigh := localHigh
+        currentValidHighBar := localHighBar
+        initialized := true
+        lookingForLow := true
+
+        onPoint(true, localHigh, localHighBar)
+        lastPointPrice := localHigh
+        lastPointBar := localHighBar
+        lastPointIsHigh := true
+
+// ============================================================================
+// MAIN LOGIC (MSM V9 point-producing state machine)
+// ============================================================================
+
+if initialized and tfNewCandle
+    bool bosBullish = false
+    bool bosBearish = false
+
+    // Check for Break of Structure
+    if not na(currentValidHigh) and not na(currentValidLow) and tfClose > currentValidHigh and lookingForLow
+        bosBullish := true
+
+        // Find the new low that led to this BOS
+        [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
+
+        if not na(newLow) and not na(newLowBar)
+            currentValidLow := newLow
+            currentValidLowBar := newLowBar
+            lookingForHigh := true
+            lookingForLow := false
+
+            onPoint(false, newLow, newLowBar)
+            lastPointPrice := newLow
+            lastPointBar := newLowBar
+            lastPointIsHigh := false
+
+    if not bosBullish and not na(currentValidLow) and not na(currentValidHigh) and tfClose < currentValidLow and lookingForHigh
+        bosBearish := true
+
+        // Find the new high that led to this BOS
+        [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
+
+        if not na(newHigh) and not na(newHighBar)
+            currentValidHigh := newHigh
+            currentValidHighBar := newHighBar
+            lookingForLow := true
+            lookingForHigh := false
+
+            onPoint(true, newHigh, newHighBar)
+            lastPointPrice := newHigh
+            lastPointBar := newHighBar
+            lastPointIsHigh := true
+
+    // Look for new valid low via breakout
+    if not bosBullish and not bosBearish and lookingForLow
+        if bullBreakout
+            [newLow, newLowBar] = findLowestBetween(currentValidHighBar, bar_index)
+
+            if not na(newLow) and not na(newLowBar)
+                currentValidLow := newLow
+                currentValidLowBar := newLowBar
+                lookingForHigh := true
+                lookingForLow := false
+
+                onPoint(false, newLow, newLowBar)
+                lastPointPrice := newLow
+                lastPointBar := newLowBar
+                lastPointIsHigh := false
+
+    // Look for new valid high via breakdown
+    if not bosBullish and not bosBearish and lookingForHigh
+        if bearBreakdown
+            [newHigh, newHighBar] = findHighestBetween(currentValidLowBar, bar_index)
+
+            if not na(newHigh) and not na(newHighBar)
+                currentValidHigh := newHigh
+                currentValidHighBar := newHighBar
+                lookingForLow := true
+                lookingForHigh := false
+
+                onPoint(true, newHigh, newHighBar)
+                lastPointPrice := newHigh
+                lastPointBar := newHighBar
+                lastPointIsHigh := true
+
+// ============================================================================
+// DEVELOPING SWING - Only on last bar
+// ============================================================================
+
+if barstate.islast
+    deleteVP(devVP)
+    devVP := na
+    if showDeveloping and not na(lastPointBar) and lastPointBar < bar_index
+        // The in-progress leg runs from the latest point to the furthest extreme since
+        float ext = lastPointIsHigh ? low : high
+        for i = 1 to math.min(bar_index - lastPointBar, 4999)
+            if lastPointIsHigh ? low[i] < ext : high[i] > ext
+                ext := lastPointIsHigh ? low[i] : high[i]
+        if ext != lastPointPrice
+            devVP := drawVP(lastPointBar, lastPointPrice, bar_index, ext, true)
