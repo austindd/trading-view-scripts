@@ -5,14 +5,16 @@
 indicator("MSM Outlier Swings V1 [SB]", "MSM Outlier Swings [SB]", overlay = true
   , max_bars_back    = 5000
   , max_lines_count  = 500
-  , max_labels_count = 500)
+  , max_labels_count = 500
+  , max_boxes_count  = 500)
 
 // ============================================================================
 // OVERVIEW
 // ============================================================================
 //
 // Flags MSM V9 swings that are unusually large for their timeframe and draws a
-// retracement level (default 50%) for each, labelled with the timeframe.
+// retracement level (default 50%) for each, labelled with the timeframe, and/or
+// a box around the swing (origin -> end bar, swing low -> high).
 //
 // Swing pool (same definitions as the swing-size histograms):
 //   Gap-Forming Swings — MSM Gap Swing Histogram: for consecutive points
@@ -33,7 +35,8 @@ indicator("MSM Outlier Swings V1 [SB]", "MSM Outlier Swings [SB]", overlay = tru
 // swing's extreme, 50% its midpoint and 100% its origin. The line starts at the
 // swing's origin, extends right while live, and is cut off when price touches
 // it / closes through it (relative to the side price was on at confirmation),
-// or never.
+// or never. The level is tracked (touch / end / alerts) even when its line is
+// hidden; a box fades and gets a dotted border along with its level.
 //
 // Structure engine: the point-producing part of MSM V9's state machine, run
 // per timeframe on candles aggregated locally from chart bars (the Better FVGs
@@ -59,6 +62,7 @@ outMult    = input.float(2.5, "Median Multiple", minval = 1, step = 0.25, group 
 minSamples = input.int(30, "Min Samples Before Flagging", minval = 5, maxval = 1000, group = grpOut, tooltip = "A timeframe flags nothing until it has seen this many swings.")
 
 grpLvl = "Levels"
+showLine     = input.bool(true, "Show Level Line", group = grpLvl, tooltip = "Draw the retracement line and its label. When off the level is still tracked for touches, ending and alerts, and a small TF label (hover for details) marks the level at the swing's end bar.")
 levelPct     = input.float(50.0, "Level %", minval = 0, maxval = 100, step = 1, group = grpLvl, tooltip = "Measured from the swing's end (0%) back to its origin (100%). 50 = midpoint.")
 endMode      = input.string("Touched", "Stop Extending When", options = ["Touched", "Closed Through", "Never"], group = grpLvl, tooltip = "Checked from the bar after the swing is confirmed. Closed Through = a close on the other side of the level from where price was at confirmation.")
 keepEnded    = input.bool(true, "Keep Ended Levels", group = grpLvl, tooltip = "Keep levels that stopped extending, cut off at that bar. If off they are deleted.")
@@ -71,6 +75,12 @@ endedTransp  = input.int(70, "Ended Level Transparency", minval = 0, maxval = 10
 labelSize    = input.string("small", "Label Size", options = ["tiny", "small", "normal"], group = grpLvl)
 labelOffset  = input.int(3, "Live Label Offset (bars)", minval = 0, maxval = 50, group = grpLvl)
 showTable    = input.bool(true, "Show Threshold Table", group = grpLvl, tooltip = "Per timeframe: sample count and the current outlier threshold.")
+
+grpBox = "Swing Box"
+showBox      = input.bool(false, "Show Swing Box", group = grpBox, tooltip = "Box from the swing's origin bar to its end bar, spanning the swing's low to high. Fades with its level once the level stops extending (deleted with it when ended levels are not kept); border turns dotted when the level is touched.")
+boxFillTr    = input.int(85, "Fill Transparency", minval = 0, maxval = 100, group = grpBox)
+boxBorderTr  = input.int(40, "Border Transparency", minval = 0, maxval = 100, group = grpBox)
+boxBorderW   = input.int(1, "Border Width", minval = 0, maxval = 5, group = grpBox)
 
 grpTf1 = "Timeframe 1"
 tf1On  = input.bool(true,  "Enable", inline = "t1", group = grpTf1)
@@ -116,6 +126,7 @@ type Level
     bool   live    = true
     line   ln      = na
     line   leg     = na
+    box    bx      = na
     label  lbl     = na
 
 // Per-timeframe state: candle aggregation, structure engine, distribution, levels.
@@ -311,20 +322,26 @@ methodText() =>
 deleteLevel(Level lv) =>
     line.delete(lv.ln)
     line.delete(lv.leg)
+    box.delete(lv.bx)
     label.delete(lv.lbl)
 
 // Stop a level extending at the current bar: fade it, or delete it when old
 // levels are not kept.
 endLevel(TfState st, Level lv) =>
     lv.live := false
-    line.set_extend(lv.ln, extend.none)
-    line.set_x2(lv.ln, bar_index)
+    if not na(lv.ln)
+        line.set_extend(lv.ln, extend.none)
+        line.set_x2(lv.ln, bar_index)
     if keepOld
-        line.set_color(lv.ln, color.new(st.col, endedTransp))
-        label.set_x(lv.lbl, bar_index)
+        if not na(lv.ln)
+            line.set_color(lv.ln, color.new(st.col, endedTransp))
+            label.set_x(lv.lbl, bar_index)
         label.set_textcolor(lv.lbl, color.new(st.col, endedTransp))
         if not na(lv.leg)
             line.set_color(lv.leg, color.new(st.col, math.min(100, endedTransp + 20)))
+        if not na(lv.bx)
+            box.set_bgcolor(lv.bx, color.new(st.col, boxFillTr + (100 - boxFillTr) * endedTransp / 100))
+            box.set_border_color(lv.bx, color.new(st.col, math.max(boxBorderTr, endedTransp)))
     else
         deleteLevel(lv)
 
@@ -343,10 +360,17 @@ createLevel(TfState st, float v, float thr, float sStart, int sBar, float sEnd, 
          "\nConfirmed @ " + fmtTime(barTime(endBar))
 
     Level lv = Level.new(up = up, price = lvl, createdBar = endBar, side = close >= lvl ? 1 : -1)
-    lv.ln  := line.new(sBar, lvl, bar_index, lvl, color = st.col, width = lineWidth, style = lnStyle, extend = extend.right)
+    if showLine
+        lv.ln := line.new(sBar, lvl, bar_index, lvl, color = st.col, width = lineWidth, style = lnStyle, extend = extend.right)
     if showLeg
         lv.leg := line.new(sBar, sStart, eBar, sEnd, color = color.new(st.col, 60), width = 1, style = line.style_dotted)
-    lv.lbl := label.new(bar_index + labelOffset, lvl, st.name + " " + str.tostring(levelPct) + "%"
+    if showBox
+        lv.bx := box.new(sBar, math.max(sStart, sEnd), eBar, math.min(sStart, sEnd)
+          , border_color = color.new(st.col, boxBorderTr)
+          , border_width = boxBorderW
+          , bgcolor      = color.new(st.col, boxFillTr))
+    // Without a line the label marks the level at the swing's end bar and stays put.
+    lv.lbl := label.new(showLine ? bar_index + labelOffset : eBar, lvl, showLine ? st.name + " " + str.tostring(levelPct) + "%" : st.name
       , style     = label.style_label_left
       , color     = color.new(st.col, 100)
       , textcolor = st.col
@@ -383,7 +407,10 @@ updateLevels(TfState st) =>
                 bool through = lv.side == 1 ? close < lv.price : close > lv.price
                 if hit and not lv.touched
                     lv.touched := true
-                    line.set_style(lv.ln, line.style_dotted)
+                    if not na(lv.ln)
+                        line.set_style(lv.ln, line.style_dotted)
+                    if not na(lv.bx)
+                        box.set_border_style(lv.bx, line.style_dotted)
                     st.evTouch := true
                     if dynAlerts and alTouch
                         addMsg(st, (lv.up ? "up" : "down") + " swing " + str.tostring(levelPct) + "% level " + fmtPx(lv.price) + " touched")
@@ -508,7 +535,7 @@ refreshTf(TfState st) =>
     if n > 0
         for i = 0 to n - 1
             Level lv = array.get(st.levels, i)
-            if lv.live
+            if lv.live and not na(lv.ln)
                 label.set_x(lv.lbl, bar_index + labelOffset)
 
 // ============================================================================

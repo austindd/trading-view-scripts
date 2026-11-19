@@ -1,0 +1,553 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("MSM Swing Size Histogram V2 [SB]", "MSM Swing Hist V2 [SB]", overlay = true, max_bars_back = 5000)
+
+// ============================================================================
+// OVERVIEW
+// ============================================================================
+//
+// Multi-timeframe version of the MSM swing-size histograms: one histogram per
+// enabled timeframe (up to 6), laid out as a grid in a single table.
+//
+// Swing pool (per timeframe):
+//   All Swings — every swing between consecutive MSM points (V1 histogram).
+//     Recorded when its end point is confirmed.
+//   Gap-Forming Swings — for consecutive points W, X, Y, Z the swing X -> Y
+//     counts when Z stays beyond W (a low Z above the high W, or a high Z below
+//     the low W), i.e. the swing left a Better FVGs structure gap (MSM Gap
+//     Swing Histogram). Recorded when Z is confirmed.
+// The in-progress leg is never counted, and nothing repaints.
+//
+// Outlier buckets: each histogram shades the buckets above its timeframe's
+// current outlier threshold, computed exactly as MSM Outlier Swings /
+// MSM Outlier Consolidation do (percentile / mean + kσ / k × median of the
+// sampled swings, after a minimum sample count). Use the same settings here to
+// see where those indicators draw the line.
+//
+// Structure engine: the point-producing part of MSM V9's state machine, run
+// per timeframe on candles aggregated locally from chart bars (the Better FVGs
+// V1 engine): a candle closes on its confirmed last chart bar, falling back to
+// the first bar of the next period. No request.security(), so every point lands
+// on its exact chart bar. Timeframes below the chart timeframe are skipped.
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+grpSamp = "Samples"
+swingPool      = input.string("All Swings", "Swing Pool", options = ["Gap-Forming Swings", "All Swings"], group = grpSamp, tooltip = "Gap-Forming: only swings whose next opposing structure point does not get back to the point before the swing (the Better FVGs gap). All: every MSM swing.")
+maxSamples     = input.int(5000, "Swings To Sample (per TF)", minval = 10, maxval = 100000, group = grpSamp)
+swingDirection = input.string("Both", "Swing Direction", options = ["Both", "Up Swings Only", "Down Swings Only"], group = grpSamp, tooltip = "Up = low → high, Down = high → low.")
+distanceUnit   = input.string("Percent", "Distance Unit", options = ["Price", "Ticks", "Percent"], group = grpSamp, tooltip = "Percent is measured relative to the swing's origin. Percent makes histograms of different timeframes and eras comparable.")
+
+grpOut = "Outliers"
+showOutliers = input.bool(true, "Shade Outlier Buckets", group = grpOut)
+outMethod    = input.string("Percentile", "Method", options = ["Percentile", "Std Devs Above Mean", "Multiple Of Median"], group = grpOut)
+outPct       = input.float(95.0, "Percentile", minval = 50, maxval = 99.9, step = 0.5, group = grpOut, tooltip = "Percentile method: swings bigger than this percentile are outliers. 95 = top 5%.")
+outZ         = input.float(2.0, "Std Devs", minval = 0, step = 0.25, group = grpOut, tooltip = "Std Devs method: swings bigger than mean + k × standard deviation.")
+outMult      = input.float(2.5, "Median Multiple", minval = 1, step = 0.25, group = grpOut, tooltip = "Median method: swings bigger than k × the median swing.")
+minSamples   = input.int(30, "Min Samples Before Flagging", minval = 5, maxval = 1000, group = grpOut)
+
+grpHist = "Histograms"
+numBuckets    = input.int(100, "Buckets", minval = 5, maxval = 200, group = grpHist)
+startAtZero   = input.bool(true, "Range Starts At Zero", tooltip = "On: buckets span 0 → cap. Off: smallest swing → cap.", group = grpHist)
+capPercentile = input.float(99.0, "Range Cap Percentile", minval = 50, maxval = 100, step = 0.5, tooltip = "Upper edge of the bucket range. Swings above it are counted in the last bucket. 100 = no cap.", group = grpHist)
+sharedScale   = input.bool(false, "Shared Range Across Timeframes", tooltip = "All histograms use the same bucket range (widest of them), so their shapes can be compared directly. Most useful with Percent.", group = grpHist)
+histRows      = input.int(15, "Vertical Resolution (Rows)", minval = 5, maxval = 60, group = grpHist, tooltip = "Cells stacked per bucket. Each histogram draws Buckets × Rows cells, so lower this if the chart feels slow with many timeframes.")
+histWidthPct  = input.float(30, "Width Each (% of chart)", minval = 5, maxval = 100, group = grpHist)
+histHeightPct = input.float(12, "Height Each (% of chart)", minval = 3, maxval = 90, group = grpHist)
+layoutCols    = input.int(2, "Histograms Per Row", minval = 1, maxval = 6, group = grpHist)
+gapPct        = input.float(1, "Gap Between Histograms (%)", minval = 0, maxval = 10, step = 0.5, group = grpHist)
+tablePos      = input.string("Bottom Center", "Position", options = ["Bottom Center", "Bottom Left", "Bottom Right", "Middle Center", "Top Center", "Top Left", "Top Right"], group = grpHist)
+showStats     = input.bool(true, "Show Stats Header", group = grpHist)
+showAxis      = input.bool(true, "Show Axis Labels", group = grpHist)
+highlightMed  = input.bool(true, "Highlight Median Bucket", group = grpHist)
+highlightLast = input.bool(true, "Highlight Latest Swing's Bucket", group = grpHist)
+
+grpCol = "Colors"
+barTransp   = input.int(55, "Bar Transparency", minval = 0, maxval = 100, group = grpCol, tooltip = "Bars use their timeframe's color at this transparency. Outlier buckets use it fully opaque.")
+medianColor = input.color(color.new(color.orange, 0), "Median Bucket", group = grpCol)
+lastColor   = input.color(color.new(color.purple, 0), "Latest Swing", group = grpCol)
+panelColor  = input.color(color.new(color.gray, 90), "Panel Background", group = grpCol)
+textColor   = input.color(color.gray, "Text", group = grpCol)
+
+grpTf1 = "Timeframe 1"
+tf1On  = input.bool(true,  "Enable", inline = "t1", group = grpTf1)
+tf1Tf  = input.timeframe("", "",     inline = "t1", group = grpTf1, tooltip = "Blank = chart timeframe.")
+tf1Col = input.color(#2962ff, "",    inline = "t1", group = grpTf1)
+
+grpTf2 = "Timeframe 2"
+tf2On  = input.bool(true,  "Enable", inline = "t2", group = grpTf2)
+tf2Tf  = input.timeframe("15", "",   inline = "t2", group = grpTf2)
+tf2Col = input.color(#089981, "",    inline = "t2", group = grpTf2)
+
+grpTf3 = "Timeframe 3"
+tf3On  = input.bool(true,  "Enable", inline = "t3", group = grpTf3)
+tf3Tf  = input.timeframe("60", "",   inline = "t3", group = grpTf3)
+tf3Col = input.color(#ff9800, "",    inline = "t3", group = grpTf3)
+
+grpTf4 = "Timeframe 4"
+tf4On  = input.bool(false, "Enable", inline = "t4", group = grpTf4)
+tf4Tf  = input.timeframe("240", "",  inline = "t4", group = grpTf4)
+tf4Col = input.color(#9c27b0, "",    inline = "t4", group = grpTf4)
+
+grpTf5 = "Timeframe 5"
+tf5On  = input.bool(false, "Enable", inline = "t5", group = grpTf5)
+tf5Tf  = input.timeframe("D", "",    inline = "t5", group = grpTf5)
+tf5Col = input.color(#f23645, "",    inline = "t5", group = grpTf5)
+
+grpTf6 = "Timeframe 6"
+tf6On  = input.bool(false, "Enable", inline = "t6", group = grpTf6)
+tf6Tf  = input.timeframe("W", "",    inline = "t6", group = grpTf6)
+tf6Col = input.color(#00bcd4, "",    inline = "t6", group = grpTf6)
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+// Per-timeframe state: candle aggregation, structure engine, swing samples.
+type TfState
+    string        name
+    bool          on
+    color         col
+    // developing candle
+    float         cO       = na
+    float         cH       = na
+    float         cL       = na
+    float         cC       = na
+    int           cStart   = na
+    bool          cOpen    = false
+    // previous completed candle
+    float         pH       = na
+    float         pL       = na
+    // MSM state machine
+    bool          ready    = false
+    bool          lookLow  = false
+    bool          lookHigh = false
+    float         vHigh    = na
+    float         vLow     = na
+    int           vHighBar = na
+    int           vLowBar  = na
+    // last 3 structure point prices, oldest first
+    array<float>  pts
+    // swing sizes, oldest first
+    array<float>  samples
+    // set when a sample is added; the histograms are redrawn only then
+    bool          dirty    = true
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+MAX_BACK = 4999                   // deepest history offset any scan uses
+
+// Resolved timeframe strings. Kept as inline expressions so they stay "simple
+// string", which timeframe.change() and time_close() require.
+tf1Res = tf1Tf == "" ? timeframe.period : tf1Tf
+tf2Res = tf2Tf == "" ? timeframe.period : tf2Tf
+tf3Res = tf3Tf == "" ? timeframe.period : tf3Tf
+tf4Res = tf4Tf == "" ? timeframe.period : tf4Tf
+tf5Res = tf5Tf == "" ? timeframe.period : tf5Tf
+tf6Res = tf6Tf == "" ? timeframe.period : tf6Tf
+
+chartSec = timeframe.in_seconds(timeframe.period)
+tf1Ok = tf1On and timeframe.in_seconds(tf1Res) >= chartSec
+tf2Ok = tf2On and timeframe.in_seconds(tf2Res) >= chartSec
+tf3Ok = tf3On and timeframe.in_seconds(tf3Res) >= chartSec
+tf4Ok = tf4On and timeframe.in_seconds(tf4Res) >= chartSec
+tf5Ok = tf5On and timeframe.in_seconds(tf5Res) >= chartSec
+tf6Ok = tf6On and timeframe.in_seconds(tf6Res) >= chartSec
+
+// Grid layout: each histogram block is a header row, histRows bar rows and an
+// axis row, numBuckets columns wide; blocks are separated by one spacer
+// column / row.
+nOn      = (tf1Ok ? 1 : 0) + (tf2Ok ? 1 : 0) + (tf3Ok ? 1 : 0) + (tf4Ok ? 1 : 0) + (tf5Ok ? 1 : 0) + (tf6Ok ? 1 : 0)
+gridCols = math.max(1, math.min(layoutCols, nOn))
+gridRows = math.max(1, int(math.ceil(nOn / gridCols)))
+blockH   = histRows + 2
+tblCols  = gridCols * numBuckets + gridCols - 1
+tblRows  = gridRows * blockH + gridRows - 1
+
+tblPosition = switch tablePos
+    "Bottom Left"   => position.bottom_left
+    "Bottom Right"  => position.bottom_right
+    "Middle Center" => position.middle_center
+    "Top Center"    => position.top_center
+    "Top Left"      => position.top_left
+    "Top Right"     => position.top_right
+    => position.bottom_center
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+// "5" -> "5m", "60" -> "1h", "240" -> "4h", "D" -> "D".
+tfName(string tf) =>
+    float n    = str.tonumber(tf)
+    string out = tf
+    if not na(n)
+        out := n >= 60 and n % 60 == 0 ? str.tostring(n / 60) + "h" : str.tostring(n) + "m"
+    out
+
+appendName(string list, string nm, string sep) =>
+    list == "" ? nm : list + sep + nm
+
+// Format a swing size in the selected unit
+fmtSize(float v) =>
+    distanceUnit == "Percent" ? str.tostring(v, "#.##") + "%" : distanceUnit == "Ticks" ? str.tostring(v, "#.#") : str.tostring(v, format.mintick)
+
+newTf(string tf, bool on, color col) =>
+    TfState.new(
+      name    = tfName(tf),
+      on      = on,
+      col     = col,
+      pts     = array.new<float>(),
+      samples = array.new<float>())
+
+// Highest high over chart bars [fromBar, toBar]; ties go to the most recent bar
+// (same as MSM's findHighestBetween).
+highestIn(int fromBar, int toBar) =>
+    float best    = na
+    int   bestBar = na
+    int   lo      = math.max(fromBar, bar_index - MAX_BACK)
+    if toBar >= lo
+        for b = toBar to lo
+            float h = high[bar_index - b]
+            if na(best) or h > best
+                best    := h
+                bestBar := b
+    [best, bestBar]
+
+lowestIn(int fromBar, int toBar) =>
+    float best    = na
+    int   bestBar = na
+    int   lo      = math.max(fromBar, bar_index - MAX_BACK)
+    if toBar >= lo
+        for b = toBar to lo
+            float l = low[bar_index - b]
+            if na(best) or l < best
+                best    := l
+                bestBar := b
+    [best, bestBar]
+
+// ============================================================================
+// STRUCTURE ENGINE
+// ============================================================================
+
+// A swing from sStart to sEnd is complete: add its size to the samples.
+addSwing(TfState st, float sStart, float sEnd) =>
+    bool up = sEnd > sStart
+    bool wanted = swingDirection == "Both" or (swingDirection == "Up Swings Only" and up) or (swingDirection == "Down Swings Only" and not up)
+    if wanted
+        float d = math.abs(sEnd - sStart)
+        float v = distanceUnit == "Ticks" ? d / syminfo.mintick : distanceUnit == "Percent" ? (sStart != 0 ? d / math.abs(sStart) * 100 : na) : d
+        if not na(v)
+            array.push(st.samples, v)
+            if array.size(st.samples) > maxSamples
+                array.shift(st.samples)
+            st.dirty := true
+
+// Record a structure point (Z) and evaluate the swing it completes.
+addPoint(TfState st, bool isHigh, float price) =>
+    int n = array.size(st.pts)
+    if swingPool == "All Swings"
+        if n >= 1
+            addSwing(st, array.get(st.pts, n - 1), price)
+    else if n >= 3
+        // W, X, Y = last three points. Swing X -> Y qualifies when Z stays beyond W.
+        float w = array.get(st.pts, n - 3)
+        if isHigh ? price < w : price > w
+            addSwing(st, array.get(st.pts, n - 2), array.get(st.pts, n - 1))
+
+    array.push(st.pts, price)
+    if array.size(st.pts) > 3
+        array.shift(st.pts)
+
+// Run MSM V9's point-producing state machine on one completed candle whose last
+// chart bar is endBar. Extremes are scanned over chart bars, exactly like MSM's
+// findLowestBetween / findHighestBetween (which exclude the valid level's own bar).
+closeCandle(TfState st, int endBar) =>
+    float o = st.cO
+    float h = st.cH
+    float l = st.cL
+    float c = st.cC
+
+    bool bearBreakdown = c < o and c < st.pL      // false while pL is na
+    bool bullBreakout  = c > o and c > st.pH
+
+    if not st.ready
+        // Initialisation: first bearish breakdown -> highest high in history.
+        if bearBreakdown
+            [hp, hb] = highestIn(0, endBar)
+            if not na(hp)
+                st.vHigh    := hp
+                st.vHighBar := hb
+                st.ready    := true
+                st.lookLow  := true
+                addPoint(st, true, hp)
+    else if st.lookLow
+        // Bullish BOS (close above the valid high) or a bullish breakout candle
+        // confirms the low of the pullback.
+        if (not na(st.vHigh) and not na(st.vLow) and c > st.vHigh) or bullBreakout
+            [lp, lb] = lowestIn(st.vHighBar + 1, endBar)
+            if not na(lp)
+                st.vLow     := lp
+                st.vLowBar  := lb
+                st.lookLow  := false
+                st.lookHigh := true
+                addPoint(st, false, lp)
+    else if st.lookHigh
+        if (not na(st.vLow) and not na(st.vHigh) and c < st.vLow) or bearBreakdown
+            [hp, hb] = highestIn(st.vLowBar + 1, endBar)
+            if not na(hp)
+                st.vHigh    := hp
+                st.vHighBar := hb
+                st.lookHigh := false
+                st.lookLow  := true
+                addPoint(st, true, hp)
+
+    st.pH := h
+    st.pL := l
+
+// Advance one timeframe by one chart bar.
+//   newPeriod    = first chart bar of a new candle of this timeframe
+//   lastOfPeriod = confirmed last chart bar of the current candle
+processTf(TfState st, bool newPeriod, bool lastOfPeriod) =>
+    if st.on
+        if newPeriod or na(st.cStart)
+            // Fallback close for a candle whose last bar was not recognised.
+            if st.cOpen
+                closeCandle(st, bar_index - 1)
+            st.cO     := open
+            st.cH     := high
+            st.cL     := low
+            st.cC     := close
+            st.cStart := bar_index
+            st.cOpen  := true
+        else if st.cOpen
+            st.cH := math.max(st.cH, high)
+            st.cL := math.min(st.cL, low)
+            st.cC := close
+        if st.cOpen and lastOfPeriod
+            closeCandle(st, bar_index)
+            st.cOpen := false
+
+// ============================================================================
+// STATISTICS
+// ============================================================================
+
+// Outlier threshold of the current samples, na until there are enough.
+threshold(TfState st) =>
+    int n = array.size(st.samples)
+    float thr = na
+    if n >= minSamples and n > 0
+        if outMethod == "Percentile"
+            thr := array.percentile_nearest_rank(st.samples, outPct)
+        else if outMethod == "Std Devs Above Mean"
+            thr := array.avg(st.samples) + outZ * array.stdev(st.samples)
+        else
+            thr := outMult * array.median(st.samples)
+    thr
+
+methodText() =>
+    outMethod == "Percentile" ? "p" + str.tostring(outPct) : outMethod == "Std Devs Above Mean" ? "mean + " + str.tostring(outZ) + "σ" : str.tostring(outMult) + "× median"
+
+// Bucket range of one timeframe's samples: [lower, upper], na when empty.
+rangeOf(TfState st) =>
+    float lower = na
+    float upper = na
+    if array.size(st.samples) > 0
+        lower := startAtZero ? 0.0 : array.min(st.samples)
+        upper := capPercentile >= 100 ? array.max(st.samples) : array.percentile_nearest_rank(st.samples, capPercentile)
+    [lower, upper]
+
+bucketOf(float v, float lower, float span) =>
+    span > 0 ? math.max(0, math.min(numBuckets - 1, int(math.floor((v - lower) / span * numBuckets)))) : 0
+
+// ============================================================================
+// DRAWING
+// ============================================================================
+
+// Draw one histogram block with its top-left cell at (c0, r0).
+drawHist(table t, TfState st, int c0, int r0, float sharedLo, float sharedHi) =>
+    int   n    = array.size(st.samples)
+    float colW = histWidthPct / numBuckets
+    float rowH = histHeightPct / histRows
+    int   cEnd = c0 + numBuckets - 1
+
+    [lo0, hi0] = rangeOf(st)
+    float lower  = sharedScale and not na(sharedLo) ? sharedLo : lo0
+    float upper  = sharedScale and not na(sharedHi) ? sharedHi : hi0
+    float span   = 0.0
+    bool  capped = false
+    float med     = na
+    float lastVal = na
+    float p90     = na
+    int   medB    = -1
+    int   lastB   = -1
+
+    // Array statistics guarded by n > 0: Pine's and/or do not short-circuit,
+    // and the array functions error on an empty array.
+    int[] counts = array.new<int>(numBuckets, 0)
+    if n > 0
+        span    := upper - lower
+        capped  := array.max(st.samples) > upper
+        med     := array.median(st.samples)
+        lastVal := array.get(st.samples, n - 1)
+        p90     := array.percentile_nearest_rank(st.samples, 90)
+        medB    := bucketOf(med, lower, span)
+        lastB   := bucketOf(lastVal, lower, span)
+        for v in st.samples
+            int b = bucketOf(v, lower, span)
+            array.set(counts, b, array.get(counts, b) + 1)
+
+    float thr      = showOutliers ? threshold(st) : na
+    int   maxCount = math.max(1, array.max(counts))
+    color barCol   = color.new(st.col, barTransp)
+    color outCol   = color.new(st.col, 0)
+
+    // Bars: a bucket fills the bottom `h` rows; any non-empty bucket shows at least one cell
+    for c = 0 to numBuckets - 1
+        int   cnt = array.get(counts, c)
+        int   h   = cnt == 0 ? 0 : math.max(1, int(math.round(float(cnt) / maxCount * histRows)))
+        float lo  = lower + span * c / numBuckets
+        float hi  = lower + span * (c + 1) / numBuckets
+        bool  isOut = not na(thr) and (lo + hi) / 2 > thr
+        color fillCol = highlightLast and c == lastB ? lastColor : highlightMed and c == medB ? medianColor : isOut ? outCol : barCol
+        string tip = n == 0 ? st.name + ": no swings yet" : st.name + "  " + fmtSize(lo) + " – " + (capped and c == numBuckets - 1 ? "∞" : fmtSize(hi)) +
+             "\n" + str.tostring(cnt) + " swings (" + str.tostring(float(cnt) / math.max(n, 1) * 100, "#.#") + "%)" + (isOut ? "\noutlier range" : "")
+        for k = 1 to histRows
+            table.cell(t, c0 + c, r0 + histRows - k + 1, "", width = colW, height = rowH, bgcolor = h >= k ? fillCol : panelColor, tooltip = tip)
+
+    if showStats
+        string stats = n == 0 ? st.name + "  ·  no swings yet" :
+             st.name + "  ·  n=" + str.tostring(n) +
+             "  ·  median " + fmtSize(med) +
+             "  ·  p90 " + fmtSize(p90) +
+             "  ·  last " + fmtSize(lastVal) +
+             (showOutliers ? "  ·  outlier > " + (na(thr) ? "needs " + str.tostring(minSamples) : fmtSize(thr) + " (" + methodText() + ")") : "")
+        table.cell(t, c0, r0, stats, width = colW, text_color = st.col, text_size = size.small, bgcolor = panelColor)
+        table.merge_cells(t, c0, r0, cEnd, r0)
+
+    if showAxis and n > 0
+        // Three merged label cells: lower edge, midpoint, upper edge
+        int third   = int(numBuckets / 3)
+        int axisRow = r0 + histRows + 1
+        table.cell(t, c0, axisRow, fmtSize(lower), width = colW, text_color = textColor, text_size = size.tiny, text_halign = text.align_left, bgcolor = panelColor)
+        table.merge_cells(t, c0, axisRow, c0 + third - 1, axisRow)
+        table.cell(t, c0 + third, axisRow, fmtSize(lower + span / 2), width = colW, text_color = textColor, text_size = size.tiny, text_halign = text.align_center, bgcolor = panelColor)
+        table.merge_cells(t, c0 + third, axisRow, cEnd - third, axisRow)
+        table.cell(t, cEnd - third + 1, axisRow, fmtSize(upper) + (capped ? "+" : ""), width = colW, text_color = textColor, text_size = size.tiny, text_halign = text.align_right, bgcolor = panelColor)
+        table.merge_cells(t, cEnd - third + 1, axisRow, cEnd, axisRow)
+
+// ============================================================================
+// STATE & MAIN
+// ============================================================================
+
+var TfState s1 = newTf(tf1Res, tf1Ok, tf1Col)
+var TfState s2 = newTf(tf2Res, tf2Ok, tf2Col)
+var TfState s3 = newTf(tf3Res, tf3Ok, tf3Col)
+var TfState s4 = newTf(tf4Res, tf4Ok, tf4Col)
+var TfState s5 = newTf(tf5Res, tf5Ok, tf5Col)
+var TfState s6 = newTf(tf6Res, tf6Ok, tf6Col)
+
+// Enabled timeframes in display order
+var array<TfState> active = array.new<TfState>()
+if barstate.isfirst
+    if s1.on
+        array.push(active, s1)
+    if s2.on
+        array.push(active, s2)
+    if s3.on
+        array.push(active, s3)
+    if s4.on
+        array.push(active, s4)
+    if s5.on
+        array.push(active, s5)
+    if s6.on
+        array.push(active, s6)
+
+// Series calls at global scope so they run on every bar.
+new1 = timeframe.change(tf1Res)
+new2 = timeframe.change(tf2Res)
+new3 = timeframe.change(tf3Res)
+new4 = timeframe.change(tf4Res)
+new5 = timeframe.change(tf5Res)
+new6 = timeframe.change(tf6Res)
+
+tc1 = time_close(tf1Res)
+tc2 = time_close(tf2Res)
+tc3 = time_close(tf3Res)
+tc4 = time_close(tf4Res)
+tc5 = time_close(tf5Res)
+tc6 = time_close(tf6Res)
+
+last1 = barstate.isconfirmed and not na(tc1) and time_close >= tc1
+last2 = barstate.isconfirmed and not na(tc2) and time_close >= tc2
+last3 = barstate.isconfirmed and not na(tc3) and time_close >= tc3
+last4 = barstate.isconfirmed and not na(tc4) and time_close >= tc4
+last5 = barstate.isconfirmed and not na(tc5) and time_close >= tc5
+last6 = barstate.isconfirmed and not na(tc6) and time_close >= tc6
+
+processTf(s1, new1, last1)
+processTf(s2, new2, last2)
+processTf(s3, new3, last3)
+processTf(s4, new4, last4)
+processTf(s5, new5, last5)
+processTf(s6, new6, last6)
+
+// ============================================================================
+// RENDERING - Only on the last bar, and only when a sample was added
+// ============================================================================
+
+var table hist = table.new(tblPosition, tblCols, tblRows, border_width = 0, frame_width = 0)
+
+if barstate.islast and nOn > 0
+    bool anyDirty = false
+    for st in active
+        anyDirty := anyDirty or st.dirty
+
+    if anyDirty
+        // Shared range = widest range of any timeframe
+        float sharedLo = na
+        float sharedHi = na
+        if sharedScale
+            for st in active
+                [lo, hi] = rangeOf(st)
+                if not na(lo)
+                    sharedLo := na(sharedLo) ? lo : math.min(sharedLo, lo)
+                    sharedHi := na(sharedHi) ? hi : math.max(sharedHi, hi)
+
+        table.clear(hist, 0, 0, tblCols - 1, tblRows - 1)
+        for [i, st] in active
+            int gc = i % gridCols
+            int gr = int(math.floor(i / gridCols))
+            int c0 = gc * (numBuckets + 1)
+            int r0 = gr * (blockH + 1)
+            // Spacer cells give the gaps between blocks their size
+            if gc > 0
+                table.cell(hist, c0 - 1, r0, "", width = gapPct, height = 0)
+            if gr > 0
+                table.cell(hist, c0, r0 - 1, "", width = 0, height = gapPct)
+            drawHist(hist, st, c0, r0, sharedLo, sharedHi)
+            st.dirty := false
+
+// ============================================================================
+// SKIPPED TIMEFRAME NOTICE
+// ============================================================================
+
+skipped = ""
+skipped := tf1On and not tf1Ok ? appendName(skipped, tfName(tf1Res), ", ") : skipped
+skipped := tf2On and not tf2Ok ? appendName(skipped, tfName(tf2Res), ", ") : skipped
+skipped := tf3On and not tf3Ok ? appendName(skipped, tfName(tf3Res), ", ") : skipped
+skipped := tf4On and not tf4Ok ? appendName(skipped, tfName(tf4Res), ", ") : skipped
+skipped := tf5On and not tf5Ok ? appendName(skipped, tfName(tf5Res), ", ") : skipped
+skipped := tf6On and not tf6Ok ? appendName(skipped, tfName(tf6Res), ", ") : skipped
+
+var table notice = na
+if barstate.islast and skipped != ""
+    if na(notice)
+        notice := table.new(position.top_right, 1, 1)
+    table.cell(notice, 0, 0, "Skipped (below chart TF): " + skipped, text_color = color.gray, text_size = size.small)
