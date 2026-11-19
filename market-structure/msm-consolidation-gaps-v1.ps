@@ -1,0 +1,714 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © scientificbest
+
+//@version=5
+indicator("MSM Consolidation Gaps V1 [SB]", "MSM Consolidation Gaps [SB]", overlay = true
+  , max_bars_back    = 5000
+  , max_lines_count  = 500
+  , max_boxes_count  = 500)
+
+// ============================================================================
+// OVERVIEW
+// ============================================================================
+//
+// Marks the vertical gaps between recent consolidation zones: price levels
+// that no consolidation zone in the rolling window covers, i.e. price ranges
+// where consolidation has not happened within the last N zones.
+//
+// Consolidation zones are found exactly as in MSM Outlier Consolidation V1
+// (summarised below). Each timeframe keeps a rolling window of its last N
+// completed zones (optionally plus the developing zone). The union of their
+// price ranges is taken; every uncovered stretch between the lowest zone bottom
+// and the highest zone top is a gap:
+//
+//      ┌────────┐  zone A
+//      └────────┘
+//                  ░░ gap ░░          (no zone in the window covers this)
+//      ┌──────┐
+//      │      │┌─────┐ zones B + C overlap → one covered block
+//      └──────┘└─────┘
+//                  ░░ gap ░░
+//      ┌─────────┐  zone D
+//      └─────────┘
+//
+// Gaps are recomputed on the last bar and drawn from the start of the oldest
+// zone in the window, optionally extending right. Gaps below a minimum height
+// are skipped.
+//
+// ---- Consolidation zones (MSM Outlier Consolidation V1) ----
+//
+// Outlier swings are found exactly as in MSM Outlier Swings V1: each timeframe
+// keeps a rolling distribution of its last N swing sizes (all swings, or only
+// gap-forming swings), and a new swing is an outlier when it is bigger than the
+// threshold of the swings BEFORE it (percentile / mean + kσ / k × median).
+//
+// Zones: the end of an outlier swing starts a consolidation zone, and the start
+// of the next outlier swing on the same timeframe ends it.
+//
+//     outlier swing n          zone n                outlier swing n+1
+//    origin ------> end [=====================] origin ------> end [== ...
+//                    ^ zone start                ^ zone end
+//
+// The box spans those two structure points (both bars included) and the
+// highest / lowest price traded between them (wicks or bodies). Zones shorter
+// than a minimum number of chart bars are skipped (e.g. two back-to-back
+// outlier swings leave no consolidation between them).
+//
+// Timing: an outlier swing is only known once it is confirmed (its end point,
+// or for gap-forming swings the next opposing point). Until the next outlier
+// swing is confirmed, the current zone is drawn as a developing box that keeps
+// growing with price. When the next outlier swing is confirmed, the developing
+// box is replaced by the final box, cut back to where that swing started. Final
+// boxes never change afterwards.
+//
+// Structure engine: the point-producing part of MSM V9's state machine, run
+// per timeframe on candles aggregated locally from chart bars (the Better FVGs
+// V1 engine): a candle closes on its confirmed last chart bar, falling back to
+// the first bar of the next period. No request.security(), so every point lands
+// on its exact chart bar. Timeframes below the chart timeframe are skipped.
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+grpSwing = "Swings"
+swingPool      = input.string("All Swings", "Swing Pool", options = ["Gap-Forming Swings", "All Swings"], group = grpSwing, tooltip = "Gap-Forming: only swings whose next opposing structure point does not get back to the point before the swing (the Better FVGs gap). All: every MSM swing.")
+swingDirection = input.string("Both", "Swing Direction", options = ["Both", "Up Swings Only", "Down Swings Only"], group = grpSwing, tooltip = "Which swings make up the distribution and can be outliers. Up = low → high.")
+measureUnit    = input.string("Percent", "Measure Size In", options = ["Percent", "Price"], group = grpSwing, tooltip = "Percent (of the swing's origin) keeps old and new swings comparable when price has moved a lot over the sampled history. Also used for the zone height shown in the box.")
+sampleLen      = input.int(5000, "Swings To Sample (per TF)", minval = 10, maxval = 100000, group = grpSwing)
+
+grpOut = "Outliers"
+outMethod  = input.string("Percentile", "Method", options = ["Percentile", "Std Devs Above Mean", "Multiple Of Median"], group = grpOut)
+outPct     = input.float(95.0, "Percentile", minval = 50, maxval = 99.9, step = 0.5, group = grpOut, tooltip = "Percentile method: the swing must be bigger than this percentile of prior swings. 95 = top 5%.")
+outZ       = input.float(2.0, "Std Devs", minval = 0, step = 0.25, group = grpOut, tooltip = "Std Devs method: the swing must be more than mean + k × standard deviation.")
+outMult    = input.float(2.5, "Median Multiple", minval = 1, step = 0.25, group = grpOut, tooltip = "Median method: the swing must be more than k × the median swing.")
+minSamples = input.int(30, "Min Samples Before Flagging", minval = 5, maxval = 1000, group = grpOut, tooltip = "A timeframe flags nothing until it has seen this many swings.")
+
+grpGap = "Gaps"
+zoneWindow  = input.int(10, "Zones In Window (per TF)", minval = 1, maxval = 100, group = grpGap, tooltip = "Gaps are the price ranges not covered by any of this timeframe's last N completed consolidation zones.")
+includeDev  = input.bool(true, "Include Developing Zone", group = grpGap, tooltip = "Count the zone that is still forming (latest outlier swing's end → current bar) as covered. Off: only completed zones count, so the area price is consolidating in right now can show as a gap.")
+minGapSize  = input.float(0.0, "Min Gap Height", minval = 0, step = 0.05, group = grpGap, tooltip = "In the 'Measure Size In' unit (Percent of the gap's bottom, or Price). Smaller gaps are not drawn.")
+extendGaps  = input.bool(true, "Extend Gaps Right", group = grpGap)
+showGapText = input.bool(true, "Show Gap Text", group = grpGap, tooltip = "Timeframe and gap height inside each gap box.")
+gapFillTr   = input.int(80, "Gap Fill Transparency", minval = 0, maxval = 100, group = grpGap)
+gapBordTr   = input.int(40, "Gap Border Transparency", minval = 0, maxval = 100, group = grpGap)
+
+grpZone = "Zones"
+rangeSource   = input.string("Wicks", "Zone Range From", options = ["Wicks", "Bodies"], group = grpZone, tooltip = "Top / bottom of each box: highest high and lowest low between the two outlier swings, or the highest / lowest candle body.")
+minZoneBars   = input.int(3, "Min Zone Length (bars)", minval = 1, maxval = 500, group = grpZone, tooltip = "Chart bars from the end of one outlier swing to the start of the next, both included. Shorter zones are not drawn.")
+showZones     = input.bool(false, "Show Consolidation Zones", group = grpZone, tooltip = "Also draw the zones in the window (completed zones solid, developing zone dashed).")
+showDev       = input.bool(true, "Show Developing Zone", group = grpZone, tooltip = "Only when zones are shown: dashed box from the latest outlier swing's end to the current bar.")
+showLegs      = input.bool(false, "Show Outlier Swing Legs", group = grpZone, tooltip = "Line from each outlier swing's origin to its end.")
+showText      = input.bool(true, "Show Zone Text", group = grpZone, tooltip = "Timeframe, length in chart bars and height inside each zone box.")
+textSizeIn    = input.string("tiny", "Text Size", options = ["tiny", "small", "normal"], group = grpZone)
+fillTransp    = input.int(88, "Fill Transparency", minval = 0, maxval = 100, group = grpZone)
+borderTransp  = input.int(30, "Border Transparency", minval = 0, maxval = 100, group = grpZone)
+showTable     = input.bool(true, "Show Threshold Table", group = grpZone, tooltip = "Per timeframe: sample count, the current outlier threshold, zones in the window and gaps.")
+
+grpTf1 = "Timeframe 1"
+tf1On  = input.bool(true,  "Enable", inline = "t1", group = grpTf1)
+tf1Tf  = input.timeframe("", "",     inline = "t1", group = grpTf1, tooltip = "Blank = chart timeframe.")
+tf1Col = input.color(#2962ff, "",    inline = "t1", group = grpTf1)
+
+grpTf2 = "Timeframe 2"
+tf2On  = input.bool(false, "Enable", inline = "t2", group = grpTf2)
+tf2Tf  = input.timeframe("15", "",   inline = "t2", group = grpTf2)
+tf2Col = input.color(#089981, "",    inline = "t2", group = grpTf2)
+
+grpTf3 = "Timeframe 3"
+tf3On  = input.bool(false, "Enable", inline = "t3", group = grpTf3)
+tf3Tf  = input.timeframe("60", "",   inline = "t3", group = grpTf3)
+tf3Col = input.color(#ff9800, "",    inline = "t3", group = grpTf3)
+
+grpTf4 = "Timeframe 4"
+tf4On  = input.bool(false, "Enable", inline = "t4", group = grpTf4)
+tf4Tf  = input.timeframe("240", "",  inline = "t4", group = grpTf4)
+tf4Col = input.color(#9c27b0, "",    inline = "t4", group = grpTf4)
+
+grpTf5 = "Timeframe 5"
+tf5On  = input.bool(false, "Enable", inline = "t5", group = grpTf5)
+tf5Tf  = input.timeframe("D", "",    inline = "t5", group = grpTf5)
+tf5Col = input.color(#f23645, "",    inline = "t5", group = grpTf5)
+
+grpAlert = "Alerts"
+dynAlerts = input.bool(true, "Send Dynamic Alerts", group = grpAlert, tooltip = "Fire alert() messages naming the timeframe and prices. Requires an alert created with 'Any alert() function call'. The static alert conditions work regardless.")
+alOutlier = input.bool(true, "Outlier Swing (zone starts)", inline = "al", group = grpAlert)
+alZone    = input.bool(true, "Zone Completed (gaps update)", inline = "al", group = grpAlert)
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+// Per-timeframe state: candle aggregation, structure engine, distribution, zones.
+type TfState
+    string        name
+    bool          on
+    color         col
+    // developing candle
+    float         cO       = na
+    float         cH       = na
+    float         cL       = na
+    float         cC       = na
+    int           cStart   = na
+    bool          cOpen    = false
+    // previous completed candle
+    float         pH       = na
+    float         pL       = na
+    // MSM state machine
+    bool          ready    = false
+    bool          lookLow  = false
+    bool          lookHigh = false
+    float         vHigh    = na
+    float         vLow     = na
+    int           vHighBar = na
+    int           vLowBar  = na
+    // last 3 structure points, oldest first
+    array<float>  pts
+    array<int>    ptBars
+    // swing-size distribution: samples in arrival order + a sorted copy
+    array<float>  samples
+    array<float>  sorted
+    float         sum      = 0.0
+    float         sumSq    = 0.0
+    // developing zone (from the latest outlier swing's end to now)
+    bool          zActive  = false
+    int           zStart   = na
+    float         zTop     = na
+    float         zBot     = na
+    box           devBox   = na
+    // rolling window of completed zones, oldest first
+    array<float>  wTop
+    array<float>  wBot
+    array<int>    wStart
+    array<int>    wEnd
+    // drawings
+    array<box>    zones
+    array<line>   legs
+    array<box>    gaps
+    // per-bar events
+    bool          evOutlier = false
+    bool          evZone    = false
+    string        msg       = ""
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+useBodies = rangeSource == "Bodies"
+txtSize   = textSizeIn == "normal" ? size.normal : textSizeIn == "small" ? size.small : size.tiny
+MAX_BACK  = 4999                  // deepest history offset any scan uses
+
+// Resolved timeframe strings. Kept as inline expressions so they stay "simple
+// string", which timeframe.change() and time_close() require.
+tf1Res = tf1Tf == "" ? timeframe.period : tf1Tf
+tf2Res = tf2Tf == "" ? timeframe.period : tf2Tf
+tf3Res = tf3Tf == "" ? timeframe.period : tf3Tf
+tf4Res = tf4Tf == "" ? timeframe.period : tf4Tf
+tf5Res = tf5Tf == "" ? timeframe.period : tf5Tf
+
+chartSec = timeframe.in_seconds(timeframe.period)
+tf1Ok = tf1On and timeframe.in_seconds(tf1Res) >= chartSec
+tf2Ok = tf2On and timeframe.in_seconds(tf2Res) >= chartSec
+tf3Ok = tf3On and timeframe.in_seconds(tf3Res) >= chartSec
+tf4Ok = tf4On and timeframe.in_seconds(tf4Res) >= chartSec
+tf5Ok = tf5On and timeframe.in_seconds(tf5Res) >= chartSec
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+// "5" -> "5m", "60" -> "1h", "240" -> "4h", "D" -> "D".
+tfName(string tf) =>
+    float n    = str.tonumber(tf)
+    string out = tf
+    if not na(n)
+        out := n >= 60 and n % 60 == 0 ? str.tostring(n / 60) + "h" : str.tostring(n) + "m"
+    out
+
+appendName(string list, string nm, string sep) =>
+    list == "" ? nm : list + sep + nm
+
+fmtPx(float p) =>
+    str.tostring(p, format.mintick)
+
+fmtSize(float v) =>
+    measureUnit == "Percent" ? str.tostring(v, "#.##") + "%" : str.tostring(v, format.mintick)
+
+newTf(string tf, bool on, color col) =>
+    TfState.new(
+      name    = tfName(tf),
+      on      = on,
+      col     = col,
+      pts     = array.new<float>(),
+      ptBars  = array.new<int>(),
+      samples = array.new<float>(),
+      sorted  = array.new<float>(),
+      wTop    = array.new<float>(),
+      wBot    = array.new<float>(),
+      wStart  = array.new<int>(),
+      wEnd    = array.new<int>(),
+      zones   = array.new<box>(),
+      legs    = array.new<line>(),
+      gaps    = array.new<box>())
+
+addMsg(TfState st, string s) =>
+    st.msg := appendName(st.msg, st.name + " " + s, "; ")
+
+// Highest high over chart bars [fromBar, toBar]; ties go to the most recent bar
+// (same as MSM's findHighestBetween).
+highestIn(int fromBar, int toBar) =>
+    float best    = na
+    int   bestBar = na
+    int   lo      = math.max(fromBar, bar_index - MAX_BACK)
+    if toBar >= lo
+        for b = toBar to lo
+            float h = high[bar_index - b]
+            if na(best) or h > best
+                best    := h
+                bestBar := b
+    [best, bestBar]
+
+lowestIn(int fromBar, int toBar) =>
+    float best    = na
+    int   bestBar = na
+    int   lo      = math.max(fromBar, bar_index - MAX_BACK)
+    if toBar >= lo
+        for b = toBar to lo
+            float l = low[bar_index - b]
+            if na(best) or l < best
+                best    := l
+                bestBar := b
+    [best, bestBar]
+
+// Zone range of one chart bar `off` bars back (wicks or bodies).
+barTop(int off) =>
+    useBodies ? math.max(open[off], close[off]) : high[off]
+
+barBot(int off) =>
+    useBodies ? math.min(open[off], close[off]) : low[off]
+
+// Zone range over chart bars [fromBar, toBar], clipped to the history buffer.
+rangeIn(int fromBar, int toBar) =>
+    float top = na
+    float bot = na
+    int   lo  = math.max(fromBar, bar_index - MAX_BACK)
+    if toBar >= lo
+        for b = toBar to lo
+            int off = bar_index - b
+            top := na(top) ? barTop(off) : math.max(top, barTop(off))
+            bot := na(bot) ? barBot(off) : math.min(bot, barBot(off))
+    [top, bot]
+
+// ============================================================================
+// DISTRIBUTION
+// ============================================================================
+
+// Index of the first element >= v in an ascending array (= count of elements < v).
+lowerBound(array<float> a, float v) =>
+    int lo = 0
+    int hi = array.size(a)
+    while lo < hi
+        int mid = math.floor((lo + hi) / 2)
+        if array.get(a, mid) < v
+            lo := mid + 1
+        else
+            hi := mid
+    lo
+
+addSample(TfState st, float v) =>
+    array.push(st.samples, v)
+    array.insert(st.sorted, lowerBound(st.sorted, v), v)
+    st.sum   := st.sum + v
+    st.sumSq := st.sumSq + v * v
+    if array.size(st.samples) > sampleLen
+        float old = array.shift(st.samples)
+        array.remove(st.sorted, lowerBound(st.sorted, old))
+        st.sum   := st.sum - old
+        st.sumSq := st.sumSq - old * old
+
+median(TfState st) =>
+    int n = array.size(st.sorted)
+    float m = na
+    if n > 0
+        int k = int(math.floor(n / 2))
+        m := n % 2 == 1 ? array.get(st.sorted, k) : (array.get(st.sorted, k - 1) + array.get(st.sorted, k)) / 2
+    m
+
+// Current outlier threshold, na until the timeframe has enough samples.
+threshold(TfState st) =>
+    int n = array.size(st.sorted)
+    float thr = na
+    if n >= minSamples and n > 0
+        if outMethod == "Percentile"
+            int k = math.min(n - 1, math.max(0, int(math.ceil(outPct / 100 * n)) - 1))
+            thr := array.get(st.sorted, k)
+        else if outMethod == "Std Devs Above Mean"
+            float m = st.sum / n
+            thr := m + outZ * math.sqrt(math.max(0, st.sumSq / n - m * m))
+        else
+            thr := outMult * median(st)
+    thr
+
+methodText() =>
+    outMethod == "Percentile" ? "p" + str.tostring(outPct) : outMethod == "Std Devs Above Mean" ? "mean + " + str.tostring(outZ) + "σ" : str.tostring(outMult) + "× median"
+
+// ============================================================================
+// ZONES
+// ============================================================================
+
+zoneText(TfState st, float top, float bot, int fromBar, int toBar) =>
+    float h = top - bot
+    float v = measureUnit == "Percent" ? (bot != 0 ? h / math.abs(bot) * 100 : na) : h
+    showText ? st.name + " · " + str.tostring(toBar - fromBar + 1) + " bars · " + fmtSize(v) : ""
+
+// Close the developing zone at chart bar endBar (the next outlier swing's
+// origin): replace the developing box with the final one.
+finishZone(TfState st, int endBar) =>
+    if not na(st.devBox)
+        box.delete(st.devBox)
+        st.devBox := na
+    if endBar - st.zStart + 1 >= minZoneBars
+        [top, bot] = rangeIn(st.zStart, endBar)
+        if not na(top)
+            array.push(st.wTop, top)
+            array.push(st.wBot, bot)
+            array.push(st.wStart, st.zStart)
+            array.push(st.wEnd, endBar)
+            if array.size(st.wTop) > zoneWindow
+                array.shift(st.wTop)
+                array.shift(st.wBot)
+                array.shift(st.wStart)
+                array.shift(st.wEnd)
+            if showZones
+                box bx = box.new(st.zStart, top, endBar, bot
+                  , border_color = color.new(st.col, borderTransp)
+                  , border_width = 1
+                  , bgcolor      = color.new(st.col, fillTransp)
+                  , text         = zoneText(st, top, bot, st.zStart, endBar)
+                  , text_size    = txtSize
+                  , text_color   = st.col
+                  , text_halign  = text.align_left
+                  , text_valign  = text.align_top)
+                array.push(st.zones, bx)
+                if array.size(st.zones) > zoneWindow
+                    box.delete(array.shift(st.zones))
+            st.evZone := true
+            if dynAlerts and alZone
+                addMsg(st, "consolidation zone " + fmtPx(bot) + " – " + fmtPx(top) + " completed (" + str.tostring(endBar - st.zStart + 1) + " bars), gaps updated")
+    st.zActive := false
+
+// Open a developing zone at chart bar startBar (an outlier swing's end).
+startZone(TfState st, int startBar) =>
+    [top, bot] = rangeIn(startBar, bar_index)
+    st.zActive := true
+    st.zStart  := startBar
+    st.zTop    := top
+    st.zBot    := bot
+    if showZones and showDev and not na(top)
+        st.devBox := box.new(startBar, top, bar_index, bot
+          , border_color = color.new(st.col, borderTransp)
+          , border_width = 1
+          , border_style = line.style_dashed
+          , bgcolor      = color.new(st.col, math.min(100, fillTransp + 6))
+          , text         = zoneText(st, top, bot, startBar, bar_index)
+          , text_size    = txtSize
+          , text_color   = st.col
+          , text_halign  = text.align_left
+          , text_valign  = text.align_top)
+
+// Grow the developing zone with the current chart bar.
+updateDevZone(TfState st) =>
+    if st.zActive and bar_index > st.zStart
+        st.zTop := na(st.zTop) ? barTop(0) : math.max(st.zTop, barTop(0))
+        st.zBot := na(st.zBot) ? barBot(0) : math.min(st.zBot, barBot(0))
+        if not na(st.devBox)
+            box.set_top(st.devBox, st.zTop)
+            box.set_bottom(st.devBox, st.zBot)
+            box.set_right(st.devBox, bar_index)
+            box.set_text(st.devBox, zoneText(st, st.zTop, st.zBot, st.zStart, bar_index))
+
+// An outlier swing from (sStart, sBar) to (sEnd, eBar) was confirmed.
+onOutlier(TfState st, float v, float thr, float sStart, int sBar, float sEnd, int eBar) =>
+    if st.zActive
+        finishZone(st, sBar)
+    startZone(st, eBar)
+
+    if showLegs
+        array.push(st.legs, line.new(sBar, sStart, eBar, sEnd, color = st.col, width = 2))
+        if array.size(st.legs) > zoneWindow
+            line.delete(array.shift(st.legs))
+
+    st.evOutlier := true
+    if dynAlerts and alOutlier
+        addMsg(st, "outlier " + (sEnd > sStart ? "up" : "down") + " swing " + fmtPx(sStart) + " → " + fmtPx(sEnd) + " (" + fmtSize(v) + ", threshold " + fmtSize(thr) + "), new zone started")
+
+// ============================================================================
+// STRUCTURE ENGINE
+// ============================================================================
+
+// A swing is complete: measure it, test it against the prior distribution,
+// then add it to the distribution.
+onSwing(TfState st, float sStart, int sBar, float sEnd, int eBar) =>
+    bool up = sEnd > sStart
+    bool wanted = swingDirection == "Both" or (swingDirection == "Up Swings Only" and up) or (swingDirection == "Down Swings Only" and not up)
+    if wanted
+        float d = math.abs(sEnd - sStart)
+        float v = measureUnit == "Percent" ? (sStart != 0 ? d / math.abs(sStart) * 100 : na) : d
+        if not na(v)
+            float thr = threshold(st)
+            if not na(thr) and v > thr
+                onOutlier(st, v, thr, sStart, sBar, sEnd, eBar)
+            addSample(st, v)
+
+// Record a structure point (Z) and evaluate the swing it completes.
+addPoint(TfState st, bool isHigh, float price, int bar) =>
+    int n = array.size(st.pts)
+    if swingPool == "All Swings"
+        if n >= 1
+            onSwing(st, array.get(st.pts, n - 1), array.get(st.ptBars, n - 1), price, bar)
+    else if n >= 3
+        // W, X, Y = last three points. Swing X -> Y qualifies when Z stays beyond W.
+        float w = array.get(st.pts, n - 3)
+        if isHigh ? price < w : price > w
+            onSwing(st, array.get(st.pts, n - 2), array.get(st.ptBars, n - 2), array.get(st.pts, n - 1), array.get(st.ptBars, n - 1))
+
+    array.push(st.pts, price)
+    array.push(st.ptBars, bar)
+    if array.size(st.pts) > 3
+        array.shift(st.pts)
+        array.shift(st.ptBars)
+
+// Run MSM V9's point-producing state machine on one completed candle whose last
+// chart bar is endBar. Extremes are scanned over chart bars, exactly like MSM's
+// findLowestBetween / findHighestBetween (which exclude the valid level's own bar).
+closeCandle(TfState st, int endBar) =>
+    float o = st.cO
+    float h = st.cH
+    float l = st.cL
+    float c = st.cC
+
+    bool bearBreakdown = c < o and c < st.pL      // false while pL is na
+    bool bullBreakout  = c > o and c > st.pH
+
+    if not st.ready
+        // Initialisation: first bearish breakdown -> highest high in history.
+        if bearBreakdown
+            [hp, hb] = highestIn(0, endBar)
+            if not na(hp)
+                st.vHigh    := hp
+                st.vHighBar := hb
+                st.ready    := true
+                st.lookLow  := true
+                addPoint(st, true, hp, hb)
+    else if st.lookLow
+        // Bullish BOS (close above the valid high) or a bullish breakout candle
+        // confirms the low of the pullback.
+        if (not na(st.vHigh) and not na(st.vLow) and c > st.vHigh) or bullBreakout
+            [lp, lb] = lowestIn(st.vHighBar + 1, endBar)
+            if not na(lp)
+                st.vLow     := lp
+                st.vLowBar  := lb
+                st.lookLow  := false
+                st.lookHigh := true
+                addPoint(st, false, lp, lb)
+    else if st.lookHigh
+        if (not na(st.vLow) and not na(st.vHigh) and c < st.vLow) or bearBreakdown
+            [hp, hb] = highestIn(st.vLowBar + 1, endBar)
+            if not na(hp)
+                st.vHigh    := hp
+                st.vHighBar := hb
+                st.lookHigh := false
+                st.lookLow  := true
+                addPoint(st, true, hp, hb)
+
+    st.pH := h
+    st.pL := l
+
+// Advance one timeframe by one chart bar.
+//   newPeriod    = first chart bar of a new candle of this timeframe
+//   lastOfPeriod = confirmed last chart bar of the current candle
+processTf(TfState st, bool newPeriod, bool lastOfPeriod) =>
+    st.evOutlier := false
+    st.evZone    := false
+    st.msg       := ""
+    if st.on
+        // Grow the developing zone first; a zone started below already scans
+        // through the current bar.
+        updateDevZone(st)
+        if newPeriod or na(st.cStart)
+            // Fallback close for a candle whose last bar was not recognised.
+            if st.cOpen
+                closeCandle(st, bar_index - 1)
+            st.cO     := open
+            st.cH     := high
+            st.cL     := low
+            st.cC     := close
+            st.cStart := bar_index
+            st.cOpen  := true
+        else if st.cOpen
+            st.cH := math.max(st.cH, high)
+            st.cL := math.min(st.cL, low)
+            st.cC := close
+        if st.cOpen and lastOfPeriod
+            closeCandle(st, bar_index)
+            st.cOpen := false
+
+// ============================================================================
+// GAPS
+// ============================================================================
+
+// Uncovered price ranges between the zones in the window (plus the developing
+// zone when enabled), bottom to top. Returns [bottoms, tops, leftmost zone start].
+computeGaps(TfState st) =>
+    float[] tops   = array.copy(st.wTop)
+    float[] bots   = array.copy(st.wBot)
+    int     left   = array.size(st.wStart) > 0 ? array.min(st.wStart) : na
+    if includeDev and st.zActive and not na(st.zTop)
+        array.push(tops, st.zTop)
+        array.push(bots, st.zBot)
+        left := na(left) ? st.zStart : math.min(left, st.zStart)
+    float[] gapBot = array.new<float>()
+    float[] gapTop = array.new<float>()
+    if array.size(bots) > 1
+        // Sweep zones by bottom; anything above the covered block's top is a gap
+        int[] idx      = array.sort_indices(bots, order.ascending)
+        float coverTop = array.get(tops, array.get(idx, 0))
+        for k = 1 to array.size(idx) - 1
+            int   i = array.get(idx, k)
+            float b = array.get(bots, i)
+            float t = array.get(tops, i)
+            if b > coverTop
+                array.push(gapBot, coverTop)
+                array.push(gapTop, b)
+            coverTop := math.max(coverTop, t)
+    [gapBot, gapTop, left]
+
+// Gap height in the selected unit (Percent is relative to the gap's bottom).
+gapSize(float bot, float top) =>
+    float h = top - bot
+    measureUnit == "Percent" ? (bot != 0 ? h / math.abs(bot) * 100 : na) : h
+
+// Redraw this timeframe's gap boxes.
+drawGaps(TfState st) =>
+    for bx in st.gaps
+        box.delete(bx)
+    array.clear(st.gaps)
+    if st.on
+        [gapBot, gapTop, left] = computeGaps(st)
+        if array.size(gapBot) > 0 and not na(left)
+            int x0 = math.max(left, bar_index - MAX_BACK)
+            for k = 0 to array.size(gapBot) - 1
+                float b = array.get(gapBot, k)
+                float t = array.get(gapTop, k)
+                float v = gapSize(b, t)
+                if not na(v) and v >= minGapSize
+                    array.push(st.gaps, box.new(x0, t, bar_index, b
+                      , border_color = color.new(st.col, gapBordTr)
+                      , border_width = 1
+                      , bgcolor      = color.new(st.col, gapFillTr)
+                      , extend       = extendGaps ? extend.right : extend.none
+                      , text         = showGapText ? st.name + " gap · " + fmtSize(v) : ""
+                      , text_size    = txtSize
+                      , text_color   = st.col
+                      , text_halign  = text.align_right
+                      , text_valign  = text.align_center))
+
+// ============================================================================
+// STATE & MAIN
+// ============================================================================
+
+var TfState s1 = newTf(tf1Res, tf1Ok, tf1Col)
+var TfState s2 = newTf(tf2Res, tf2Ok, tf2Col)
+var TfState s3 = newTf(tf3Res, tf3Ok, tf3Col)
+var TfState s4 = newTf(tf4Res, tf4Ok, tf4Col)
+var TfState s5 = newTf(tf5Res, tf5Ok, tf5Col)
+
+// Series calls at global scope so they run on every bar.
+new1 = timeframe.change(tf1Res)
+new2 = timeframe.change(tf2Res)
+new3 = timeframe.change(tf3Res)
+new4 = timeframe.change(tf4Res)
+new5 = timeframe.change(tf5Res)
+
+tc1 = time_close(tf1Res)
+tc2 = time_close(tf2Res)
+tc3 = time_close(tf3Res)
+tc4 = time_close(tf4Res)
+tc5 = time_close(tf5Res)
+
+last1 = barstate.isconfirmed and not na(tc1) and time_close >= tc1
+last2 = barstate.isconfirmed and not na(tc2) and time_close >= tc2
+last3 = barstate.isconfirmed and not na(tc3) and time_close >= tc3
+last4 = barstate.isconfirmed and not na(tc4) and time_close >= tc4
+last5 = barstate.isconfirmed and not na(tc5) and time_close >= tc5
+
+processTf(s1, new1, last1)
+processTf(s2, new2, last2)
+processTf(s3, new3, last3)
+processTf(s4, new4, last4)
+processTf(s5, new5, last5)
+
+if barstate.islast
+    drawGaps(s1)
+    drawGaps(s2)
+    drawGaps(s3)
+    drawGaps(s4)
+    drawGaps(s5)
+
+// ============================================================================
+// THRESHOLD TABLE / SKIPPED TIMEFRAME NOTICE
+// ============================================================================
+
+tableRow(table t, int row, TfState st) =>
+    int    n   = array.size(st.samples)
+    float  thr = threshold(st)
+    string txt = st.name + "  ·  n=" + str.tostring(n) + "  ·  " +
+         (na(thr) ? "needs " + str.tostring(minSamples) + " samples" : methodText() + " = " + fmtSize(thr)) +
+         "  ·  " + str.tostring(array.size(st.wTop)) + " zones in window  ·  " + str.tostring(array.size(st.gaps)) + " gaps"
+    table.cell(t, 0, row, txt, text_color = st.col, text_size = size.small, text_halign = text.align_right)
+    row + 1
+
+skipped = ""
+skipped := tf1On and not tf1Ok ? appendName(skipped, tfName(tf1Res), ", ") : skipped
+skipped := tf2On and not tf2Ok ? appendName(skipped, tfName(tf2Res), ", ") : skipped
+skipped := tf3On and not tf3Ok ? appendName(skipped, tfName(tf3Res), ", ") : skipped
+skipped := tf4On and not tf4Ok ? appendName(skipped, tfName(tf4Res), ", ") : skipped
+skipped := tf5On and not tf5Ok ? appendName(skipped, tfName(tf5Res), ", ") : skipped
+
+var table info = table.new(position.top_right, 1, 6)
+if barstate.islast
+    table.clear(info, 0, 0, 0, 5)
+    int row = 0
+    if showTable
+        if s1.on
+            row := tableRow(info, row, s1)
+        if s2.on
+            row := tableRow(info, row, s2)
+        if s3.on
+            row := tableRow(info, row, s3)
+        if s4.on
+            row := tableRow(info, row, s4)
+        if s5.on
+            row := tableRow(info, row, s5)
+    if skipped != ""
+        table.cell(info, 0, row, "Skipped (below chart TF): " + skipped, text_color = color.gray, text_size = size.small, text_halign = text.align_right)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+anyOutlier = s1.evOutlier or s2.evOutlier or s3.evOutlier or s4.evOutlier or s5.evOutlier
+anyZone    = s1.evZone    or s2.evZone    or s3.evZone    or s4.evZone    or s5.evZone
+
+alertcondition(anyOutlier, "Outlier Swing (Zone Starts)", "Outlier MSM swing confirmed, new consolidation zone started on {{ticker}}")
+alertcondition(anyZone,    "Consolidation Zone Completed", "A consolidation zone between outlier swings completed (consolidation gaps updated) on {{ticker}}")
+
+if dynAlerts
+    string allMsg = ""
+    allMsg := s1.msg != "" ? appendName(allMsg, s1.msg, "; ") : allMsg
+    allMsg := s2.msg != "" ? appendName(allMsg, s2.msg, "; ") : allMsg
+    allMsg := s3.msg != "" ? appendName(allMsg, s3.msg, "; ") : allMsg
+    allMsg := s4.msg != "" ? appendName(allMsg, s4.msg, "; ") : allMsg
+    allMsg := s5.msg != "" ? appendName(allMsg, s5.msg, "; ") : allMsg
+    if allMsg != ""
+        alert(syminfo.ticker + ": " + allMsg, alert.freq_once_per_bar_close)
